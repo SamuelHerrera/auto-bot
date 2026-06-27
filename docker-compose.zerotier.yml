@@ -1,0 +1,10 @@
+services:
+  auto-bot:
+    cap_add:
+      - NET_ADMIN
+      - SYS_ADMIN
+    devices:
+      - /dev/net/tun:/dev/net/tun
+    environment:
+      ZEROTIER_AUTOSTART: ${ZEROTIER_AUTOSTART:-1}
+      ZEROTIER_NETWORK_ID: ${ZEROTIER_NETWORK_ID:-}

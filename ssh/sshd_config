@@ -1,0 +1,16 @@
+Port 2222
+Protocol 2
+HostKey /etc/ssh/ssh_host_rsa_key
+HostKey /etc/ssh/ssh_host_ecdsa_key
+HostKey /etc/ssh/ssh_host_ed25519_key
+UsePAM no
+PasswordAuthentication no
+KbdInteractiveAuthentication no
+ChallengeResponseAuthentication no
+PubkeyAuthentication yes
+PermitRootLogin no
+AllowUsers hermes
+AuthorizedKeysFile .ssh/authorized_keys
+PidFile /run/sshd.pid
+PrintMotd no
+Subsystem sftp /usr/lib/openssh/sftp-server
