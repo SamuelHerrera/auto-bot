@@ -38,6 +38,10 @@ if [ -n "${SSH_AUTHORIZED_KEY_VALUE}" ]; then
 fi
 
 mkdir -p /opt/data/zerotier-one
+if id zerotier-one >/dev/null 2>&1; then
+  chown -R zerotier-one:zerotier-one /opt/data/zerotier-one
+  chmod 0700 /opt/data/zerotier-one
+fi
 if [ "${ZEROTIER_AUTOSTART_VALUE}" = "1" ]; then
   if ! command -v zerotier-one >/dev/null 2>&1; then
     echo "ZeroTier autostart requested but zerotier-one is not installed." >&2
@@ -58,7 +62,21 @@ if [ "${ZEROTIER_AUTOSTART_VALUE}" = "1" ]; then
 fi
 
 mkdir -p /run/sshd
-ssh-keygen -A >/dev/null 2>&1 || true
+install -d -m 0700 -o root -g root /opt/data/ssh-host-keys
+
+if [ ! -f /opt/data/ssh-host-keys/ssh_host_rsa_key ]; then
+  ssh-keygen -q -N "" -t rsa -b 4096 -f /opt/data/ssh-host-keys/ssh_host_rsa_key
+fi
+if [ ! -f /opt/data/ssh-host-keys/ssh_host_ecdsa_key ]; then
+  ssh-keygen -q -N "" -t ecdsa -b 521 -f /opt/data/ssh-host-keys/ssh_host_ecdsa_key
+fi
+if [ ! -f /opt/data/ssh-host-keys/ssh_host_ed25519_key ]; then
+  ssh-keygen -q -N "" -t ed25519 -f /opt/data/ssh-host-keys/ssh_host_ed25519_key
+fi
+
+chown root:root /opt/data/ssh-host-keys/ssh_host_* /opt/data/ssh-host-keys/ssh_host_*.pub
+chmod 0600 /opt/data/ssh-host-keys/ssh_host_*
+chmod 0644 /opt/data/ssh-host-keys/ssh_host_*.pub
 if ! grep -q "^Port ${SSH_PORT_VALUE}$" /etc/ssh/sshd_config; then
   sed -i.bak "s/^Port .*/Port ${SSH_PORT_VALUE}/" /etc/ssh/sshd_config
 fi

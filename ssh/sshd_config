@@ -1,8 +1,8 @@
 Port 2222
 Protocol 2
-HostKey /etc/ssh/ssh_host_rsa_key
-HostKey /etc/ssh/ssh_host_ecdsa_key
-HostKey /etc/ssh/ssh_host_ed25519_key
+HostKey /opt/data/ssh-host-keys/ssh_host_rsa_key
+HostKey /opt/data/ssh-host-keys/ssh_host_ecdsa_key
+HostKey /opt/data/ssh-host-keys/ssh_host_ed25519_key
 UsePAM no
 PasswordAuthentication no
 KbdInteractiveAuthentication no
@@ -11,6 +11,7 @@ PubkeyAuthentication yes
 PermitRootLogin no
 AllowUsers hermes
 AuthorizedKeysFile .ssh/authorized_keys
+StrictModes no
 PidFile /run/sshd.pid
 PrintMotd no
 Subsystem sftp /usr/lib/openssh/sftp-server
