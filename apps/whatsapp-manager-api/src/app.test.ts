@@ -73,4 +73,50 @@ describe("whatsapp-manager-api", () => {
 
     expect(response.statusCode).toBe(401);
   });
+
+  it("tracks multiple WhatsApp accounts for the UI", async () => {
+    await app.inject({
+      method: "POST",
+      url: "/whatsapp/connect",
+      headers: {
+        authorization: "Bearer test-token",
+      },
+      payload: {
+        accountId: "ops-main",
+      },
+    });
+
+    await app.inject({
+      method: "POST",
+      url: "/whatsapp/connect",
+      headers: {
+        authorization: "Bearer test-token",
+      },
+      payload: {
+        accountId: "ops-backup",
+      },
+    });
+
+    const response = await app.inject({
+      method: "GET",
+      url: "/whatsapp/accounts",
+      headers: {
+        authorization: "Bearer test-token",
+      },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toEqual({
+      items: [
+        expect.objectContaining({
+          accountId: "ops-main",
+          status: "connected",
+        }),
+        expect.objectContaining({
+          accountId: "ops-backup",
+          status: "connected",
+        }),
+      ],
+    });
+  });
 });

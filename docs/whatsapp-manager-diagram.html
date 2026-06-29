@@ -1,0 +1,250 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>WhatsApp Manager Architecture</title>
+    <style>
+      :root {
+        --bg: #f4efe6;
+        --ink: #1f2a2e;
+        --muted: #5f6b6f;
+        --line: #284b63;
+        --accent: #d95d39;
+        --accent-soft: #f7c59f;
+        --card: #fffaf4;
+        --success: #5b8e7d;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        background:
+          radial-gradient(circle at top left, #fff7ea 0, transparent 28%),
+          linear-gradient(180deg, #f8f3eb 0%, var(--bg) 100%);
+        color: var(--ink);
+        font-family: "IBM Plex Sans", "Segoe UI", sans-serif;
+      }
+
+      main {
+        max-width: 1400px;
+        margin: 0 auto;
+        padding: 32px 24px 48px;
+      }
+
+      h1 {
+        margin: 0 0 8px;
+        font-size: 40px;
+        line-height: 1.05;
+      }
+
+      p.lede {
+        margin: 0 0 28px;
+        max-width: 920px;
+        color: var(--muted);
+        font-size: 18px;
+      }
+
+      .legend {
+        display: flex;
+        gap: 12px;
+        flex-wrap: wrap;
+        margin-bottom: 24px;
+      }
+
+      .legend span {
+        border: 1px solid #d7cbbd;
+        background: rgba(255, 255, 255, 0.7);
+        border-radius: 999px;
+        padding: 8px 12px;
+        font-size: 14px;
+      }
+
+      svg {
+        width: 100%;
+        height: auto;
+        display: block;
+        border-radius: 24px;
+        box-shadow: 0 24px 60px rgba(31, 42, 46, 0.12);
+        background: rgba(255, 250, 244, 0.9);
+      }
+
+      .note {
+        margin-top: 20px;
+        color: var(--muted);
+        font-size: 15px;
+      }
+
+      @media (max-width: 900px) {
+        h1 {
+          font-size: 30px;
+        }
+
+        p.lede {
+          font-size: 16px;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>WhatsApp Manager API</h1>
+      <p class="lede">
+        This diagram reflects the current monorepo definition: the new backend owns
+        WhatsApp transport, exposes a private API, maps each WhatsApp chat to one
+        Hermes session, and keeps Hermes behind an adapter boundary.
+      </p>
+
+      <div class="legend">
+        <span>Solid arrows: active request or event flow</span>
+        <span>Dashed arrows: persistence or future implementation boundary</span>
+        <span>Default policy: 1 WhatsApp chat -> 1 Hermes session</span>
+      </div>
+
+      <svg viewBox="0 0 1360 980" role="img" aria-label="WhatsApp manager architecture diagram">
+        <defs>
+          <marker
+            id="arrow"
+            markerWidth="12"
+            markerHeight="12"
+            refX="10"
+            refY="6"
+            orient="auto-start-reverse"
+          >
+            <path d="M 0 0 L 12 6 L 0 12 z" fill="#284b63"></path>
+          </marker>
+          <marker
+            id="arrowAccent"
+            markerWidth="12"
+            markerHeight="12"
+            refX="10"
+            refY="6"
+            orient="auto-start-reverse"
+          >
+            <path d="M 0 0 L 12 6 L 0 12 z" fill="#d95d39"></path>
+          </marker>
+          <style>
+            .frame { fill: #fffdf9; stroke: #d8cab8; stroke-width: 2; rx: 28; }
+            .panel { fill: #fffaf4; stroke: #284b63; stroke-width: 2.5; rx: 22; }
+            .panel-soft { fill: #fff3e7; stroke: #d95d39; stroke-width: 2.5; rx: 22; }
+            .store { fill: #eef5f2; stroke: #5b8e7d; stroke-width: 2.5; rx: 22; }
+            .title { font: 700 28px 'IBM Plex Sans', sans-serif; fill: #1f2a2e; }
+            .subtitle { font: 700 18px 'IBM Plex Sans', sans-serif; fill: #1f2a2e; }
+            .body { font: 15px 'IBM Plex Sans', sans-serif; fill: #314247; }
+            .small { font: 14px 'IBM Plex Sans', sans-serif; fill: #5f6b6f; }
+            .line { stroke: #284b63; stroke-width: 4; fill: none; marker-end: url(#arrow); }
+            .line-accent { stroke: #d95d39; stroke-width: 4; fill: none; marker-end: url(#arrowAccent); }
+            .line-dashed { stroke: #5b8e7d; stroke-width: 4; fill: none; stroke-dasharray: 12 10; marker-end: url(#arrow); }
+            .chip { fill: #f7c59f; stroke: #d95d39; stroke-width: 1.5; rx: 999; }
+          </style>
+        </defs>
+
+        <rect class="frame" x="16" y="16" width="1328" height="948"></rect>
+
+        <text class="title" x="48" y="70">Architecture overview</text>
+        <text class="small" x="48" y="96">
+          Current scaffold: private internal API, mock WhatsApp gateway, mock Hermes adapter, Postgres planned as durable store.
+        </text>
+
+        <rect class="panel-soft" x="60" y="150" width="250" height="170"></rect>
+        <text class="subtitle" x="84" y="190">WhatsApp World</text>
+        <text class="body" x="84" y="225">Baileys session owner</text>
+        <text class="body" x="84" y="252">Inbound chat events</text>
+        <text class="body" x="84" y="279">Outbound message delivery</text>
+        <rect class="chip" x="82" y="292" width="145" height="28"></rect>
+        <text class="small" x="98" y="311">chatId = routing key</text>
+
+        <rect class="panel" x="370" y="120" width="620" height="720"></rect>
+        <text class="subtitle" x="396" y="164">apps/whatsapp-manager-api</text>
+        <text class="small" x="396" y="188">Fastify + TypeScript service with routing and adapter boundaries</text>
+
+        <rect class="panel" x="402" y="220" width="250" height="120"></rect>
+        <text class="subtitle" x="426" y="258">Private API Layer</text>
+        <text class="body" x="426" y="288">/messages/inbound</text>
+        <text class="body" x="426" y="312">/messages/outbound</text>
+        <text class="body" x="426" y="336">/chats/* /sessions /health/*</text>
+
+        <rect class="panel" x="710" y="220" width="248" height="120"></rect>
+        <text class="subtitle" x="734" y="258">Auth + Validation</text>
+        <text class="body" x="734" y="288">Bearer internal token</text>
+        <text class="body" x="734" y="312">Config via env + Zod</text>
+        <text class="body" x="734" y="336">Normalized event shape</text>
+
+        <rect class="panel-soft" x="402" y="392" width="556" height="176"></rect>
+        <text class="subtitle" x="426" y="430">Chat Session Router</text>
+        <text class="body" x="426" y="462">Policy: get-or-create one Hermes session per WhatsApp chat</text>
+        <text class="body" x="426" y="490">Creates mapping on first inbound message</text>
+        <text class="body" x="426" y="518">Reuses mapping on later messages</text>
+        <text class="body" x="426" y="546">Supports reset and remap operations</text>
+        <rect class="chip" x="424" y="525" width="250" height="30"></rect>
+        <text class="small" x="440" y="545">chatId -> hermesSessionId</text>
+
+        <rect class="panel" x="402" y="620" width="250" height="150"></rect>
+        <text class="subtitle" x="426" y="658">WhatsApp Gateway</text>
+        <text class="body" x="426" y="690">Owns transport abstraction</text>
+        <text class="body" x="426" y="716">Today: mock implementation</text>
+        <text class="body" x="426" y="742">Later: Baileys account/session logic</text>
+
+        <rect class="panel" x="708" y="620" width="250" height="150"></rect>
+        <text class="subtitle" x="732" y="658">Hermes Adapter</text>
+        <text class="body" x="732" y="690">createSession(chatId)</text>
+        <text class="body" x="732" y="716">sendMessage(sessionId, event)</text>
+        <text class="body" x="732" y="742">resetSession(sessionId)</text>
+
+        <rect class="store" x="1048" y="184" width="246" height="170"></rect>
+        <text class="subtitle" x="1072" y="222">Postgres</text>
+        <text class="body" x="1072" y="256">Planned durable state:</text>
+        <text class="body" x="1072" y="284">chat records</text>
+        <text class="body" x="1072" y="312">session records</text>
+        <text class="body" x="1072" y="340">mapping records</text>
+
+        <rect class="store" x="1048" y="420" width="246" height="188"></rect>
+        <text class="subtitle" x="1072" y="458">Baileys State</text>
+        <text class="body" x="1072" y="492">Persistent auth/session files</text>
+        <text class="body" x="1072" y="520">Connection status</text>
+        <text class="body" x="1072" y="548">QR/linking lifecycle</text>
+        <text class="body" x="1072" y="576">Separate from Hermes state</text>
+
+        <rect class="panel-soft" x="1048" y="680" width="246" height="140"></rect>
+        <text class="subtitle" x="1072" y="718">Hermes Runtime</text>
+        <text class="body" x="1072" y="752">CLI wrapper or local bridge</text>
+        <text class="body" x="1072" y="780">Session execution target</text>
+
+        <path class="line-accent" d="M 310 235 C 340 235, 340 280, 402 280"></path>
+        <text class="small" x="318" y="216">inbound / outbound events</text>
+
+        <path class="line" d="M 652 280 L 710 280"></path>
+        <path class="line" d="M 680 340 L 680 392"></path>
+        <path class="line" d="M 528 568 L 528 620"></path>
+        <path class="line" d="M 834 568 L 834 620"></path>
+
+        <path class="line-dashed" d="M 958 280 C 990 280, 1000 270, 1048 270"></path>
+        <text class="small" x="900" y="250">persist mappings and logs</text>
+
+        <path class="line-dashed" d="M 652 694 C 760 694, 880 514, 1048 514"></path>
+        <text class="small" x="708" y="604">persist transport auth/state</text>
+
+        <path class="line-dashed" d="M 958 694 C 992 694, 1006 750, 1048 750"></path>
+        <text class="small" x="890" y="676">invoke downstream execution</text>
+
+        <path class="line-accent" d="M 1048 750 C 942 750, 932 760, 958 760"></path>
+
+        <text class="subtitle" x="62" y="898">Message lifecycle</text>
+        <text class="body" x="62" y="928">
+          1. WhatsApp event arrives -> 2. API normalizes payload -> 3. Router resolves chat mapping ->
+        </text>
+        <text class="body" x="62" y="952">
+          4. Hermes adapter executes in mapped session -> 5. Reply returns -> 6. WhatsApp gateway sends outbound message
+        </text>
+      </svg>
+
+      <p class="note">
+        Open this file directly in a browser or keep it beside
+        <code>docs/whatsapp-hermes-routing.md</code> as the visual counterpart to the routing notes.
+      </p>
+    </main>
+  </body>
+</html>

@@ -5,6 +5,7 @@ const configSchema = z.object({
   PORT: z.coerce.number().int().positive().default(3000),
   LOG_LEVEL: z.enum(["fatal", "error", "warn", "info", "debug", "trace"]).default("info"),
   API_TOKEN: z.string().min(1).default("local-dev-token"),
+  CORS_ORIGIN: z.string().min(1).default("http://127.0.0.1:4173,http://localhost:4173"),
   DATABASE_URL: z.string().min(1).default("postgres://postgres:postgres@127.0.0.1:5432/auto_bot"),
   BAILEYS_STATE_DIR: z.string().min(1).default("/opt/data/whatsapp-manager/baileys"),
   HERMES_ADAPTER_MODE: z.enum(["mock", "cli"]).default("mock"),

@@ -5,6 +5,8 @@
   "scripts": {
     "build": "turbo run build",
     "dev": "turbo run dev --parallel",
+    "dev:api": "pnpm --filter @auto-bot/whatsapp-manager-api dev",
+    "dev:ui": "pnpm --filter @auto-bot/whatsapp-manager-ui dev",
     "lint": "turbo run lint",
     "test": "turbo run test",
     "typecheck": "turbo run typecheck"

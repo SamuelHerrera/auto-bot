@@ -5,12 +5,12 @@ import {
   MockHermesAdapter,
   type HermesAdapter,
 } from "./services/hermes-adapter.js";
-import { MockWhatsAppGateway } from "./services/whatsapp-service.js";
+import { MockWhatsAppGateway, type WhatsAppGateway } from "./services/whatsapp-service.js";
 
 export interface AppServices {
   hermesAdapter: HermesAdapter;
   router: InMemoryChatSessionRouter;
-  whatsappGateway: MockWhatsAppGateway;
+  whatsappGateway: WhatsAppGateway;
 }
 
 export function buildServices(config: AppConfig): AppServices {

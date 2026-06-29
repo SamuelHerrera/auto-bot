@@ -13,6 +13,7 @@ Hermes-first monorepo scaffold for `~/Work/HYP/auto-bot`.
 - SSH server enabled for key-based shell access as `hermes`
 - interactive container setup so `hermes` can be used directly inside the container
 - `apps/whatsapp-manager-api` backend scaffold for WhatsApp-to-Hermes routing
+- `apps/whatsapp-manager-ui` React/Vite dashboard for WhatsApp account and session management
 
 ## Build
 
@@ -44,6 +45,7 @@ pnpm install
 pnpm typecheck
 pnpm test
 pnpm --filter @auto-bot/whatsapp-manager-api dev
+pnpm --filter @auto-bot/whatsapp-manager-ui dev
 ```
 
 ## Monorepo layout
@@ -51,12 +53,18 @@ pnpm --filter @auto-bot/whatsapp-manager-api dev
 ```text
 apps/
   whatsapp-manager-api/
+  whatsapp-manager-ui/
 docs/
 scripts/
 ssh/
 ```
 
-The WhatsApp manager is a backend-only Fastify service. It owns WhatsApp transport and routes chats into Hermes sessions through an adapter boundary. The current scaffold includes a mock adapter plus the routing design notes in `docs/whatsapp-hermes-routing.md`.
+The WhatsApp manager now has two apps:
+
+- `apps/whatsapp-manager-api`: Fastify service that owns WhatsApp transport and routes chats into Hermes sessions through an adapter boundary.
+- `apps/whatsapp-manager-ui`: browser dashboard for operators to connect or disconnect WhatsApp accounts, review chat-to-session mappings, remap or reset sessions, and send outbound test messages.
+
+The current scaffold still uses a mock WhatsApp gateway and mock Hermes adapter, plus the routing design notes in `docs/whatsapp-hermes-routing.md`.
 
 ## Notes
 
@@ -65,6 +73,7 @@ The WhatsApp manager is a backend-only Fastify service. It owns WhatsApp transpo
 - If token vars are absent, the container falls back to `codex login --with-api-key` when `OPENAI_API_KEY` is set.
 - The only provider env vars left are `OPENAI_API_KEY` and `ANTHROPIC_API_KEY`.
 - SSH listens on `SSH_PORT` and allows only key-based login for user `hermes`.
+- Docker exposes the WhatsApp API on `3000` and the UI dev server on `4173` by default.
 - `zerotier-one` is installed, but actual ZeroTier networking inside the container requires `/dev/net/tun` plus extra capabilities; Docker Desktop on this Mac does not provide that.
 - Keep secrets in a local `.env` file, not committed to git.
 
@@ -80,6 +89,11 @@ CODEX_ID_TOKEN=...
 CODEX_ACCOUNT_ID=...
 SSH_AUTHORIZED_KEY=ssh-rsa ...
 SSH_PORT=2222
+WHATSAPP_MANAGER_API_PORT=3000
+WHATSAPP_MANAGER_UI_PORT=4173
+WHATSAPP_MANAGER_UI_CORS_ORIGIN=http://127.0.0.1:4173,http://localhost:4173
+VITE_WHATSAPP_MANAGER_API_URL=http://127.0.0.1:3000
+VITE_WHATSAPP_MANAGER_UI_TITLE=WhatsApp Account Console
 AUTO_BOT_DATA_DIR=./data
 ZEROTIER_AUTOSTART=1
 ZEROTIER_NETWORK_ID=56374ac9a42f1be5
@@ -106,6 +120,24 @@ Docker exec shell:
 
 ```bash
 docker compose exec -u hermes auto-bot bash
+```
+
+Run the API:
+
+```bash
+pnpm --filter @auto-bot/whatsapp-manager-api dev
+```
+
+Run the UI:
+
+```bash
+pnpm --filter @auto-bot/whatsapp-manager-ui dev
+```
+
+Open the dashboard:
+
+```text
+http://127.0.0.1:4173
 ```
 
 SSH shell:

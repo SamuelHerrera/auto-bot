@@ -1,3 +1,4 @@
+import cors from "@fastify/cors";
 import Fastify from "fastify";
 import { ZodError } from "zod";
 import type { AppConfig } from "./config.js";
@@ -13,8 +14,12 @@ export function createApp({ config, services = buildServices(config) }: CreateAp
     logger: config.NODE_ENV === "test" ? false : { level: config.LOG_LEVEL },
   });
 
+  void app.register(cors, {
+    origin: parseCorsOrigin(config.CORS_ORIGIN),
+  });
+
   app.addHook("onRequest", async (request, reply) => {
-    if (request.url.startsWith("/health/")) {
+    if (request.method === "OPTIONS" || request.url.startsWith("/health/")) {
       return;
     }
 
@@ -37,6 +42,17 @@ export function createApp({ config, services = buildServices(config) }: CreateAp
   app.post<{ Body: { accountId: string } }>("/whatsapp/connect", async (request) => {
     return services.whatsappGateway.initializeAccount(request.body.accountId);
   });
+
+  app.get("/whatsapp/accounts", async () => ({
+    items: await services.whatsappGateway.listAccounts(),
+  }));
+
+  app.post<{ Params: { accountId: string } }>(
+    "/whatsapp/accounts/:accountId/disconnect",
+    async (request) => {
+      return services.whatsappGateway.disconnectAccount(request.params.accountId);
+    },
+  );
 
   app.get("/whatsapp/status", async () => services.whatsappGateway.getStatus());
 
@@ -103,4 +119,17 @@ function requestLog(error: Error) {
   if (process.env.NODE_ENV !== "test") {
     console.error(error);
   }
+}
+
+function parseCorsOrigin(value: string) {
+  const origins = value
+    .split(",")
+    .map((origin) => origin.trim())
+    .filter(Boolean);
+
+  if (origins.length === 1 && origins[0] === "*") {
+    return true;
+  }
+
+  return origins;
 }

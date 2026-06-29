@@ -6,26 +6,68 @@ import type {
 
 export interface WhatsAppGateway {
   getStatus(): Promise<WhatsAppAccountStatus>;
+  listAccounts(): Promise<WhatsAppAccountStatus[]>;
   initializeAccount(accountId: string): Promise<WhatsAppAccountStatus>;
+  disconnectAccount(accountId: string): Promise<WhatsAppAccountStatus>;
   sendMessage(message: OutboundWhatsAppMessage): Promise<void>;
   normalizeInboundEvent(payload: unknown): Promise<WhatsAppMessageEvent>;
 }
 
 export class MockWhatsAppGateway implements WhatsAppGateway {
+  private readonly accounts = new Map<string, WhatsAppAccountStatus>();
+  private lastConnectedAccountId: string | null = null;
+
   async getStatus(): Promise<WhatsAppAccountStatus> {
-    return {
-      accountId: "mock-account",
-      status: "connected",
-      connectedAt: new Date().toISOString(),
-    };
+    const accountId =
+      this.lastConnectedAccountId && this.accounts.has(this.lastConnectedAccountId)
+        ? this.lastConnectedAccountId
+        : [...this.accounts.keys()][0];
+
+    if (!accountId) {
+      return {
+        accountId: "unassigned",
+        status: "disconnected",
+      };
+    }
+
+    return this.accounts.get(accountId)!;
+  }
+
+  async listAccounts(): Promise<WhatsAppAccountStatus[]> {
+    return [...this.accounts.values()];
   }
 
   async initializeAccount(accountId: string): Promise<WhatsAppAccountStatus> {
-    return {
+    const account: WhatsAppAccountStatus = {
       accountId,
       status: "connected",
       connectedAt: new Date().toISOString(),
     };
+
+    this.accounts.set(accountId, account);
+    this.lastConnectedAccountId = accountId;
+    return account;
+  }
+
+  async disconnectAccount(accountId: string): Promise<WhatsAppAccountStatus> {
+    const existing = this.accounts.get(accountId);
+    const account: WhatsAppAccountStatus = existing
+      ? {
+          accountId,
+          status: "disconnected",
+        }
+      : {
+          accountId,
+          status: "disconnected",
+        };
+
+    this.accounts.set(accountId, account);
+
+    if (this.lastConnectedAccountId === accountId) {
+      this.lastConnectedAccountId = null;
+    }
+
+    return account;
   }
 
   async sendMessage(_message: OutboundWhatsAppMessage): Promise<void> {}
