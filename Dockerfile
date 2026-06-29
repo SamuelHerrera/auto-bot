@@ -25,6 +25,7 @@ RUN apt-get update \
     && rm -rf /var/lib/apt/lists/* \
     && curl -s https://install.zerotier.com | bash \
     && npm install --global --omit=dev @openai/codex@0.128.0 \
+    && npm install --global --omit=dev pnpm@9.15.0 \
     && ln -sf /opt/hermes/bin/hermes /usr/local/bin/hermes \
     && usermod -s /bin/bash hermes \
     && mkdir -p /opt/data/.ssh /opt/data/.hermes /opt/data/.codex /opt/data/logs /opt/data/zerotier-one /run/sshd \

@@ -1,22 +1,25 @@
 # auto-bot
 
-Minimal Hermes-first project scaffold for `~/Work/HYP/auto-bot`.
+Hermes-first monorepo scaffold for `~/Work/HYP/auto-bot`.
 
 ## Included
 
 - `Dockerfile` based on `nousresearch/hermes-agent`
 - `docker-compose.yml` with a persistent Hermes home mounted at `/opt/data`
 - `codex` CLI installed in the image
+- `pnpm`-based monorepo tooling with Turborepo
 - `zerotier-one` installed in the image
 - automatic Codex auth bootstrap from env vars
 - SSH server enabled for key-based shell access as `hermes`
 - interactive container setup so `hermes` can be used directly inside the container
+- `apps/whatsapp-manager-api` backend scaffold for WhatsApp-to-Hermes routing
 
 ## Build
 
 ```bash
 cd /Users/samuelherrerafuente/Work/HYP/auto-bot
 docker compose build
+npx pnpm@9.15.0 install
 ```
 
 ## Start
@@ -26,12 +29,34 @@ docker compose up -d
 docker compose exec -u hermes auto-bot bash
 ```
 
-Inside the container, both Hermes and Codex are available on the path:
+Inside the container, Hermes, Codex, and `pnpm` are available on the path:
 
 ```bash
 hermes --help
 codex --version
+pnpm --version
 ```
+
+Run the workspace tasks from the repo root:
+
+```bash
+pnpm install
+pnpm typecheck
+pnpm test
+pnpm --filter @auto-bot/whatsapp-manager-api dev
+```
+
+## Monorepo layout
+
+```text
+apps/
+  whatsapp-manager-api/
+docs/
+scripts/
+ssh/
+```
+
+The WhatsApp manager is a backend-only Fastify service. It owns WhatsApp transport and routes chats into Hermes sessions through an adapter boundary. The current scaffold includes a mock adapter plus the routing design notes in `docs/whatsapp-hermes-routing.md`.
 
 ## Notes
 
