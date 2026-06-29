@@ -39,7 +39,11 @@ export function createApp({ config, services = buildServices(config) }: CreateAp
     },
   }));
 
-  app.post<{ Body: { accountId: string } }>("/whatsapp/connect", async (request) => {
+  app.post<{ Body: { accountId: string } }>("/whatsapp/connect", async (request, reply) => {
+    if (!request.body.accountId?.trim()) {
+      return reply.code(400).send({ error: "accountId is required" });
+    }
+
     return services.whatsappGateway.initializeAccount(request.body.accountId);
   });
 
@@ -88,14 +92,18 @@ export function createApp({ config, services = buildServices(config) }: CreateAp
     items: await services.router.getMappings(),
   }));
 
-  app.post<{ Body: { chatId: string; text: string } }>("/messages/outbound", async (request) => {
-    await services.whatsappGateway.sendMessage({
-      chatId: request.body.chatId,
-      text: request.body.text,
-    });
+  app.post<{ Body: { accountId?: string; chatId: string; text: string } }>(
+    "/messages/outbound",
+    async (request) => {
+      await services.whatsappGateway.sendMessage({
+        ...(request.body.accountId ? { accountId: request.body.accountId } : {}),
+        chatId: request.body.chatId,
+        text: request.body.text,
+      });
 
-    return { status: "queued" };
-  });
+      return { status: "queued" };
+    },
+  );
 
   app.post<{ Body: unknown }>("/messages/inbound", async (request) => {
     const event = await services.whatsappGateway.normalizeInboundEvent(request.body);

@@ -5,6 +5,7 @@ import type {
 } from "../domain/types.js";
 
 export interface WhatsAppGateway {
+  onInboundMessage(handler: (event: WhatsAppMessageEvent) => Promise<void>): void;
   getStatus(): Promise<WhatsAppAccountStatus>;
   listAccounts(): Promise<WhatsAppAccountStatus[]>;
   initializeAccount(accountId: string): Promise<WhatsAppAccountStatus>;
@@ -15,7 +16,13 @@ export interface WhatsAppGateway {
 
 export class MockWhatsAppGateway implements WhatsAppGateway {
   private readonly accounts = new Map<string, WhatsAppAccountStatus>();
+  private readonly sentMessages: OutboundWhatsAppMessage[] = [];
   private lastConnectedAccountId: string | null = null;
+  private inboundHandler: ((event: WhatsAppMessageEvent) => Promise<void>) | null = null;
+
+  onInboundMessage(handler: (event: WhatsAppMessageEvent) => Promise<void>): void {
+    this.inboundHandler = handler;
+  }
 
   async getStatus(): Promise<WhatsAppAccountStatus> {
     const accountId =
@@ -70,7 +77,13 @@ export class MockWhatsAppGateway implements WhatsAppGateway {
     return account;
   }
 
-  async sendMessage(_message: OutboundWhatsAppMessage): Promise<void> {}
+  async sendMessage(message: OutboundWhatsAppMessage): Promise<void> {
+    this.sentMessages.push(message);
+  }
+
+  getSentMessages(): OutboundWhatsAppMessage[] {
+    return [...this.sentMessages];
+  }
 
   async normalizeInboundEvent(payload: unknown): Promise<WhatsAppMessageEvent> {
     if (!payload || typeof payload !== "object") {
@@ -96,5 +109,13 @@ export class MockWhatsAppGateway implements WhatsAppGateway {
           ? candidate.timestamp
           : new Date().toISOString(),
     };
+  }
+
+  async injectInboundMessage(payload: unknown): Promise<void> {
+    if (!this.inboundHandler) {
+      return;
+    }
+
+    await this.inboundHandler(await this.normalizeInboundEvent(payload));
   }
 }

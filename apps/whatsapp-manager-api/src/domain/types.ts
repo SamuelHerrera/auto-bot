@@ -32,10 +32,14 @@ export interface HermesReply {
 export interface OutboundWhatsAppMessage {
   chatId: WhatsAppChatId;
   text: string;
+  accountId?: string;
 }
 
 export interface WhatsAppAccountStatus {
   accountId: string;
   status: "disconnected" | "connecting" | "connected";
   connectedAt?: string;
+  disconnectedAt?: string;
+  qrCode?: string;
+  lastError?: string;
 }

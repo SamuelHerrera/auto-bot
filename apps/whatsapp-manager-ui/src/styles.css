@@ -226,6 +226,24 @@ button:disabled {
   padding: 18px;
 }
 
+.qr-panel {
+  display: inline-grid;
+  place-items: center;
+  margin-top: 14px;
+  border-radius: 16px;
+  padding: 10px;
+  background: #f8fff8;
+}
+
+.qr-panel svg {
+  display: block;
+}
+
+.error-text {
+  color: #ffb3a7;
+  font-size: 0.92rem;
+}
+
 .account-card-header,
 .detail-row {
   display: flex;

@@ -1,4 +1,5 @@
 import { FormEvent, useEffect, useState } from "react";
+import { QRCodeSVG } from "qrcode.react";
 
 type AccountStatus = "disconnected" | "connecting" | "connected";
 
@@ -6,6 +7,9 @@ interface WhatsAppAccount {
   accountId: string;
   status: AccountStatus;
   connectedAt?: string;
+  disconnectedAt?: string;
+  qrCode?: string;
+  lastError?: string;
 }
 
 interface SessionMapping {
@@ -66,6 +70,18 @@ export function App() {
       void refreshData(false);
     }
   }, []);
+
+  useEffect(() => {
+    if (!apiToken.trim() || !accounts.some((account) => account.status === "connecting")) {
+      return;
+    }
+
+    const interval = window.setInterval(() => {
+      void refreshData(false);
+    }, 3000);
+
+    return () => window.clearInterval(interval);
+  }, [accounts, apiToken, apiUrl]);
 
   async function request<T>(path: string, init?: RequestInit): Promise<T> {
     const response = await fetch(`${apiUrl}${path}`, {
@@ -351,8 +367,18 @@ export function App() {
                     </button>
                   </div>
                   <p className="mono">
-                    {account.connectedAt ? formatTimestamp(account.connectedAt) : "No active session"}
+                    {account.connectedAt
+                      ? formatTimestamp(account.connectedAt)
+                      : account.disconnectedAt
+                        ? formatTimestamp(account.disconnectedAt)
+                        : "No active session"}
                   </p>
+                  {account.qrCode ? (
+                    <div className="qr-panel" aria-label={`Pairing QR for ${account.accountId}`}>
+                      <QRCodeSVG value={account.qrCode} size={164} marginSize={2} />
+                    </div>
+                  ) : null}
+                  {account.lastError ? <p className="error-text">{account.lastError}</p> : null}
                 </article>
               ))
             )}

@@ -9,6 +9,7 @@ const configSchema = z.object({
   DATABASE_URL: z.string().min(1).default("postgres://postgres:postgres@127.0.0.1:5432/auto_bot"),
   BAILEYS_STATE_DIR: z.string().min(1).default("/opt/data/whatsapp-manager/baileys"),
   HERMES_ADAPTER_MODE: z.enum(["mock", "cli"]).default("mock"),
+  WHATSAPP_GATEWAY_MODE: z.enum(["mock", "baileys"]).default("mock"),
 });
 
 export type AppConfig = z.infer<typeof configSchema>;

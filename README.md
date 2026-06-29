@@ -74,6 +74,7 @@ The current scaffold still uses a mock WhatsApp gateway and mock Hermes adapter,
 - The only provider env vars left are `OPENAI_API_KEY` and `ANTHROPIC_API_KEY`.
 - SSH listens on `SSH_PORT` and allows only key-based login for user `hermes`.
 - Docker exposes the WhatsApp API on `3000` and the UI dev server on `4173` by default.
+- The WhatsApp manager defaults to mock transport. Set `WHATSAPP_GATEWAY_MODE=baileys` to run the real Baileys gateway and persist its auth state under `/opt/data/whatsapp-manager/baileys`.
 - `zerotier-one` is installed, but actual ZeroTier networking inside the container requires `/dev/net/tun` plus extra capabilities; Docker Desktop on this Mac does not provide that.
 - Keep secrets in a local `.env` file, not committed to git.
 
@@ -90,10 +91,14 @@ CODEX_ACCOUNT_ID=...
 SSH_AUTHORIZED_KEY=ssh-rsa ...
 SSH_PORT=2222
 WHATSAPP_MANAGER_API_PORT=3000
+WHATSAPP_MANAGER_API_TOKEN=local-dev-token
 WHATSAPP_MANAGER_UI_PORT=4173
 WHATSAPP_MANAGER_UI_CORS_ORIGIN=http://127.0.0.1:4173,http://localhost:4173
 VITE_WHATSAPP_MANAGER_API_URL=http://127.0.0.1:3000
 VITE_WHATSAPP_MANAGER_UI_TITLE=WhatsApp Account Console
+WHATSAPP_GATEWAY_MODE=mock
+HERMES_ADAPTER_MODE=mock
+BAILEYS_STATE_DIR=/opt/data/whatsapp-manager/baileys
 AUTO_BOT_DATA_DIR=./data
 ZEROTIER_AUTOSTART=1
 ZEROTIER_NETWORK_ID=56374ac9a42f1be5
