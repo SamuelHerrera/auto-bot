@@ -1,10 +1,11 @@
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { createApp } from "./app.js";
 import { buildServices } from "./build-services.js";
 import { loadConfig } from "./config.js";
+import { HermesApiAdapter } from "./services/hermes-adapter.js";
 import { MockWhatsAppGateway } from "./services/whatsapp-service.js";
 
 describe("whatsapp-manager-api", () => {
@@ -23,6 +24,7 @@ describe("whatsapp-manager-api", () => {
   });
 
   afterEach(async () => {
+    vi.unstubAllGlobals();
     await app.close();
   });
 
@@ -326,5 +328,77 @@ describe("whatsapp-manager-api", () => {
     } finally {
       rmSync(dir, { force: true, recursive: true });
     }
+  });
+
+  it("sends WhatsApp turns to the Hermes API adapter", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        choices: [
+          {
+            message: {
+              content: "Hermes reply",
+            },
+          },
+        ],
+      }),
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const adapter = new HermesApiAdapter({
+      apiKey: "test-key",
+      baseUrl: "http://127.0.0.1:8642/v1/",
+      model: "hermes-agent",
+    });
+
+    const reply = await adapter.sendMessage("session-1", {
+      accountId: "ops-main",
+      chatJid: "12345@s.whatsapp.net",
+      chatType: "direct",
+      senderJid: "12345@s.whatsapp.net",
+      sessionKey: "whatsapp:ops-main:direct:12345@s.whatsapp.net",
+      chatId: "12345@s.whatsapp.net",
+      messageId: "wamid.api",
+      senderId: "12345@s.whatsapp.net",
+      text: "hello hermes",
+      timestamp: "2026-06-29T00:00:00.000Z",
+    });
+
+    expect(reply).toEqual({
+      sessionId: "session-1",
+      outputText: "Hermes reply",
+    });
+    expect(fetchMock).toHaveBeenCalledWith(
+      "http://127.0.0.1:8642/v1/chat/completions",
+      expect.objectContaining({
+        method: "POST",
+        headers: expect.objectContaining({
+          authorization: "Bearer test-key",
+        }),
+      }),
+    );
+  });
+
+  it("requires an API key for the Hermes API adapter", async () => {
+    const adapter = new HermesApiAdapter({
+      apiKey: "",
+      baseUrl: "http://127.0.0.1:8642/v1",
+      model: "hermes-agent",
+    });
+
+    await expect(
+      adapter.sendMessage("session-1", {
+        accountId: "ops-main",
+        chatJid: "12345@s.whatsapp.net",
+        chatType: "direct",
+        senderJid: "12345@s.whatsapp.net",
+        sessionKey: "whatsapp:ops-main:direct:12345@s.whatsapp.net",
+        chatId: "12345@s.whatsapp.net",
+        messageId: "wamid.api",
+        senderId: "12345@s.whatsapp.net",
+        text: "hello hermes",
+        timestamp: "2026-06-29T00:00:00.000Z",
+      }),
+    ).rejects.toThrow("HERMES_API_KEY");
   });
 });

@@ -9,7 +9,10 @@ const configSchema = z.object({
   DATABASE_URL: z.string().min(1).default("postgres://postgres:postgres@127.0.0.1:5432/auto_bot"),
   BAILEYS_STATE_DIR: z.string().min(1).default("/opt/data/whatsapp-manager/baileys"),
   BRIDGE_STATE_FILE: z.string().default(""),
-  HERMES_ADAPTER_MODE: z.enum(["mock", "cli"]).default("mock"),
+  HERMES_ADAPTER_MODE: z.enum(["mock", "cli", "api"]).default("mock"),
+  HERMES_API_BASE_URL: z.string().url().default("http://127.0.0.1:8642/v1"),
+  HERMES_API_KEY: z.string().default(""),
+  HERMES_API_MODEL: z.string().default("hermes-agent"),
   WHATSAPP_GATEWAY_MODE: z.enum(["mock", "baileys"]).default("mock"),
 });
 

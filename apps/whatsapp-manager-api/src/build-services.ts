@@ -2,6 +2,7 @@ import type { AppConfig } from "./config.js";
 import { InMemoryChatSessionRouter } from "./services/chat-session-router.js";
 import {
   CliHermesAdapter,
+  HermesApiAdapter,
   MockHermesAdapter,
   type HermesAdapter,
 } from "./services/hermes-adapter.js";
@@ -16,8 +17,7 @@ export interface AppServices {
 }
 
 export function buildServices(config: AppConfig): AppServices {
-  const hermesAdapter =
-    config.HERMES_ADAPTER_MODE === "cli" ? new CliHermesAdapter() : new MockHermesAdapter();
+  const hermesAdapter = buildHermesAdapter(config);
   const whatsappGateway =
     config.WHATSAPP_GATEWAY_MODE === "baileys"
       ? new BaileysWhatsAppGateway(config.BAILEYS_STATE_DIR)
@@ -46,4 +46,20 @@ export function buildServices(config: AppConfig): AppServices {
     router,
     whatsappGateway,
   };
+}
+
+function buildHermesAdapter(config: AppConfig): HermesAdapter {
+  if (config.HERMES_ADAPTER_MODE === "api") {
+    return new HermesApiAdapter({
+      apiKey: config.HERMES_API_KEY,
+      baseUrl: config.HERMES_API_BASE_URL,
+      model: config.HERMES_API_MODEL,
+    });
+  }
+
+  if (config.HERMES_ADAPTER_MODE === "cli") {
+    return new CliHermesAdapter();
+  }
+
+  return new MockHermesAdapter();
 }
