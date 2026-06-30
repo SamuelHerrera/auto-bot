@@ -1,17 +1,21 @@
 import type { HermesReply, HermesSession, WhatsAppMessageEvent } from "../domain/types.js";
 
 export interface HermesAdapter {
-  createSession(chatId: string): Promise<HermesSession>;
+  createSession(sessionKey: string): Promise<HermesSession>;
   sendMessage(sessionId: string, event: WhatsAppMessageEvent): Promise<HermesReply>;
   resetSession(sessionId: string): Promise<void>;
 }
 
 export class MockHermesAdapter implements HermesAdapter {
-  async createSession(chatId: string): Promise<HermesSession> {
+  async createSession(sessionKey: string): Promise<HermesSession> {
     const now = new Date().toISOString();
     return {
-      id: `hermes_${chatId}_${Date.now()}`,
-      chatId,
+      id: `hermes_${sessionKey}_${Date.now()}`,
+      sessionKey,
+      accountId: "unassigned",
+      chatJid: sessionKey,
+      chatType: "direct",
+      chatId: sessionKey,
       createdAt: now,
       lastActivityAt: now,
       status: "active",
@@ -29,7 +33,7 @@ export class MockHermesAdapter implements HermesAdapter {
 }
 
 export class CliHermesAdapter implements HermesAdapter {
-  async createSession(_chatId: string): Promise<HermesSession> {
+  async createSession(_sessionKey: string): Promise<HermesSession> {
     throw new Error("CLI Hermes adapter is not implemented yet.");
   }
 

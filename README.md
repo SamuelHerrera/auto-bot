@@ -99,6 +99,7 @@ VITE_WHATSAPP_MANAGER_UI_TITLE=WhatsApp Account Console
 WHATSAPP_GATEWAY_MODE=mock
 HERMES_ADAPTER_MODE=mock
 BAILEYS_STATE_DIR=/opt/data/whatsapp-manager/baileys
+BRIDGE_STATE_FILE=/opt/data/whatsapp-manager/bridge-state.json
 AUTO_BOT_DATA_DIR=./data
 ZEROTIER_AUTOSTART=1
 ZEROTIER_NETWORK_ID=56374ac9a42f1be5

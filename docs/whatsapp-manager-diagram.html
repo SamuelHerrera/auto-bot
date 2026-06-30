@@ -94,14 +94,14 @@
       <h1>WhatsApp Manager API</h1>
       <p class="lede">
         This diagram reflects the current monorepo definition: the new backend owns
-        WhatsApp transport, exposes a private API, maps each WhatsApp chat to one
+        WhatsApp transport, exposes a private API, maps each WhatsApp account/chat route to one
         Hermes session, and keeps Hermes behind an adapter boundary.
       </p>
 
       <div class="legend">
         <span>Solid arrows: active request or event flow</span>
         <span>Dashed arrows: persistence or future implementation boundary</span>
-        <span>Default policy: 1 WhatsApp chat -> 1 Hermes session</span>
+        <span>Default policy: 1 WhatsApp account + chat -> 1 Hermes session</span>
       </div>
 
       <svg viewBox="0 0 1360 980" role="img" aria-label="WhatsApp manager architecture diagram">
@@ -146,7 +146,7 @@
 
         <text class="title" x="48" y="70">Architecture overview</text>
         <text class="small" x="48" y="96">
-          Current scaffold: private internal API, mock WhatsApp gateway, mock Hermes adapter, Postgres planned as durable store.
+          Current bridge: private internal API, Baileys transport, account-aware routing, mock/adapter Hermes boundary.
         </text>
 
         <rect class="panel-soft" x="60" y="150" width="250" height="170"></rect>
@@ -175,12 +175,12 @@
 
         <rect class="panel-soft" x="402" y="392" width="556" height="176"></rect>
         <text class="subtitle" x="426" y="430">Chat Session Router</text>
-        <text class="body" x="426" y="462">Policy: get-or-create one Hermes session per WhatsApp chat</text>
+        <text class="body" x="426" y="462">Policy: get-or-create one Hermes session per account/chat route</text>
         <text class="body" x="426" y="490">Creates mapping on first inbound message</text>
         <text class="body" x="426" y="518">Reuses mapping on later messages</text>
         <text class="body" x="426" y="546">Supports reset and remap operations</text>
         <rect class="chip" x="424" y="525" width="250" height="30"></rect>
-        <text class="small" x="440" y="545">chatId -> hermesSessionId</text>
+        <text class="small" x="440" y="545">sessionKey -> hermesSessionId</text>
 
         <rect class="panel" x="402" y="620" width="250" height="150"></rect>
         <text class="subtitle" x="426" y="658">WhatsApp Gateway</text>

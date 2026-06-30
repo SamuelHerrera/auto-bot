@@ -13,6 +13,10 @@ interface WhatsAppAccount {
 }
 
 interface SessionMapping {
+  sessionKey: string;
+  accountId: string;
+  chatJid: string;
+  chatType: "direct" | "group";
   chatId: string;
   hermesSessionId: string;
   createdAt: string;
@@ -21,6 +25,10 @@ interface SessionMapping {
 
 interface HermesSession {
   id: string;
+  sessionKey: string;
+  accountId: string;
+  chatJid: string;
+  chatType: "direct" | "group";
   chatId: string;
   createdAt: string;
   lastActivityAt: string;
@@ -48,9 +56,12 @@ export function App() {
   const [mappings, setMappings] = useState<SessionMapping[]>([]);
   const [selectedSession, setSelectedSession] = useState<HermesSession | null>(null);
   const [activeChatId, setActiveChatId] = useState("");
+  const [activeAccountId, setActiveAccountId] = useState("");
   const [accountIdInput, setAccountIdInput] = useState("");
+  const [sessionAccountId, setSessionAccountId] = useState("manual");
   const [chatIdInput, setChatIdInput] = useState("");
   const [remapSessionId, setRemapSessionId] = useState("");
+  const [outboundAccountId, setOutboundAccountId] = useState("manual");
   const [outboundChatId, setOutboundChatId] = useState("");
   const [outboundText, setOutboundText] = useState("");
   const [statusMessage, setStatusMessage] = useState("Enter the API token, then sync the current WhatsApp workspace.");
@@ -173,36 +184,54 @@ export function App() {
     await runAction(async () => {
       const session = await request<HermesSession>(
         `/chats/${encodeURIComponent(chatIdInput.trim())}/session`,
-        { method: "POST" },
+        {
+          method: "POST",
+          body: JSON.stringify({ accountId: sessionAccountId.trim() || "manual" }),
+        },
       );
 
       setSelectedSession(session);
       setActiveChatId(chatIdInput.trim());
+      setActiveAccountId(session.accountId);
       setStatusMessage(`Hermes session ready for ${chatIdInput.trim()}.`);
       setChatIdInput("");
       await refreshData(false);
     });
   }
 
-  async function inspectSession(chatId: string) {
+  async function inspectSession(mapping: SessionMapping) {
     await runAction(async () => {
-      const session = await request<HermesSession>(`/chats/${encodeURIComponent(chatId)}/session`);
+      const query = new URLSearchParams({
+        accountId: mapping.accountId,
+        chatType: mapping.chatType,
+      });
+      const session = await request<HermesSession>(
+        `/chats/${encodeURIComponent(mapping.chatJid)}/session?${query.toString()}`,
+      );
       setSelectedSession(session);
-      setActiveChatId(chatId);
-      setStatusMessage(`Loaded session for ${chatId}.`);
+      setActiveChatId(mapping.chatJid);
+      setActiveAccountId(mapping.accountId);
+      setStatusMessage(`Loaded session for ${mapping.chatJid}.`);
     });
   }
 
-  async function resetSession(chatId: string) {
+  async function resetSession(mapping: SessionMapping) {
     await runAction(async () => {
       const session = await request<HermesSession>(
-        `/chats/${encodeURIComponent(chatId)}/session/reset`,
-        { method: "POST" },
+        `/chats/${encodeURIComponent(mapping.chatJid)}/session/reset`,
+        {
+          method: "POST",
+          body: JSON.stringify({
+            accountId: mapping.accountId,
+            chatType: mapping.chatType,
+          }),
+        },
       );
 
       setSelectedSession(session);
-      setActiveChatId(chatId);
-      setStatusMessage(`Session reset for ${chatId}.`);
+      setActiveChatId(mapping.chatJid);
+      setActiveAccountId(mapping.accountId);
+      setStatusMessage(`Session reset for ${mapping.chatJid}.`);
       await refreshData(false);
     });
   }
@@ -222,13 +251,15 @@ export function App() {
     await runAction(async () => {
       await request(`/chats/${encodeURIComponent(activeChatId)}/session/remap`, {
         method: "POST",
-        body: JSON.stringify({ hermesSessionId: remapSessionId.trim() }),
+        body: JSON.stringify({
+          accountId: activeAccountId || "manual",
+          hermesSessionId: remapSessionId.trim(),
+        }),
       });
 
       setRemapSessionId("");
       setStatusMessage(`Session remapped for ${activeChatId}.`);
       await refreshData(false);
-      await inspectSession(activeChatId);
     });
   }
 
@@ -243,6 +274,7 @@ export function App() {
       await request("/messages/outbound", {
         method: "POST",
         body: JSON.stringify({
+          accountId: outboundAccountId.trim() || "manual",
           chatId: outboundChatId.trim(),
           text: outboundText.trim(),
         }),
@@ -272,6 +304,9 @@ export function App() {
   }
 
   const connectedAccounts = accounts.filter((account) => account.status === "connected").length;
+  const selectedMapping = mappings.find(
+    (mapping) => mapping.chatJid === activeChatId && mapping.accountId === activeAccountId,
+  );
 
   return (
     <div className="shell">
@@ -397,6 +432,11 @@ export function App() {
 
           <form className="inline-form" onSubmit={createSession}>
             <input
+              value={sessionAccountId}
+              onChange={(event) => setSessionAccountId(event.target.value)}
+              placeholder="Account ID"
+            />
+            <input
               value={chatIdInput}
               onChange={(event) => setChatIdInput(event.target.value)}
               placeholder="15551234567@s.whatsapp.net"
@@ -415,15 +455,21 @@ export function App() {
             ) : (
               mappings.map((mapping) => (
                 <button
-                  key={mapping.chatId}
-                  className={`mapping-card${activeChatId === mapping.chatId ? " mapping-card-active" : ""}`}
-                  onClick={() => void inspectSession(mapping.chatId)}
+                  key={mapping.sessionKey}
+                  className={`mapping-card${
+                    activeChatId === mapping.chatJid && activeAccountId === mapping.accountId
+                      ? " mapping-card-active"
+                      : ""
+                  }`}
+                  onClick={() => void inspectSession(mapping)}
                 >
                   <div>
-                    <h3>{mapping.chatId}</h3>
+                    <h3>{mapping.chatJid}</h3>
+                    <p className="mono">{mapping.accountId}</p>
                     <p className="mono">{mapping.hermesSessionId}</p>
                   </div>
                   <div className="mapping-card-meta">
+                    <span>{mapping.chatType}</span>
                     <span>Updated {formatTimestamp(mapping.updatedAt)}</span>
                     <span>Created {formatTimestamp(mapping.createdAt)}</span>
                   </div>
@@ -439,8 +485,8 @@ export function App() {
               <span className="panel-kicker">Inspector</span>
               <h2>Session controls</h2>
             </div>
-            {activeChatId ? (
-              <button className="secondary-button" onClick={() => void resetSession(activeChatId)} disabled={isBusy}>
+            {selectedMapping ? (
+              <button className="secondary-button" onClick={() => void resetSession(selectedMapping)} disabled={isBusy}>
                 Reset
               </button>
             ) : null}
@@ -454,8 +500,16 @@ export function App() {
                   <strong className="mono">{selectedSession.id}</strong>
                 </div>
                 <div className="detail-row">
-                  <span>Chat ID</span>
-                  <strong className="mono">{selectedSession.chatId}</strong>
+                  <span>Account</span>
+                  <strong className="mono">{selectedSession.accountId}</strong>
+                </div>
+                <div className="detail-row">
+                  <span>Chat</span>
+                  <strong className="mono">{selectedSession.chatJid}</strong>
+                </div>
+                <div className="detail-row">
+                  <span>Route</span>
+                  <strong className="mono">{selectedSession.sessionKey}</strong>
                 </div>
                 <div className="detail-row">
                   <span>Status</span>
@@ -503,6 +557,11 @@ export function App() {
         </div>
 
         <form className="outbound-form" onSubmit={sendOutboundMessage}>
+          <input
+            value={outboundAccountId}
+            onChange={(event) => setOutboundAccountId(event.target.value)}
+            placeholder="Account ID"
+          />
           <input
             value={outboundChatId}
             onChange={(event) => setOutboundChatId(event.target.value)}

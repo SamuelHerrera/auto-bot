@@ -1,4 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
 import { createApp } from "./app.js";
 import { buildServices } from "./build-services.js";
 import { loadConfig } from "./config.js";
@@ -41,6 +44,7 @@ describe("whatsapp-manager-api", () => {
         authorization: "Bearer test-token",
       },
       payload: {
+        accountId: "ops-main",
         chatId: "12345@s.whatsapp.net",
         text: "hello",
       },
@@ -53,6 +57,7 @@ describe("whatsapp-manager-api", () => {
         authorization: "Bearer test-token",
       },
       payload: {
+        accountId: "ops-main",
         chatId: "12345@s.whatsapp.net",
         text: "follow up",
       },
@@ -65,7 +70,48 @@ describe("whatsapp-manager-api", () => {
     const secondBody = second.json();
 
     expect(firstBody.session.id).toBe(secondBody.session.id);
+    expect(firstBody.mapping.sessionKey).toBe("whatsapp:ops-main:direct:12345@s.whatsapp.net");
     expect(secondBody.reply.outputText).toContain("follow up");
+  });
+
+  it("keeps the same remote chat isolated across WhatsApp accounts", async () => {
+    const first = await app.inject({
+      method: "POST",
+      url: "/messages/inbound",
+      headers: {
+        authorization: "Bearer test-token",
+      },
+      payload: {
+        accountId: "ops-main",
+        chatJid: "12345@s.whatsapp.net",
+        messageId: "wamid.ops.1",
+        text: "ops hello",
+      },
+    });
+
+    const second = await app.inject({
+      method: "POST",
+      url: "/messages/inbound",
+      headers: {
+        authorization: "Bearer test-token",
+      },
+      payload: {
+        accountId: "sales-main",
+        chatJid: "12345@s.whatsapp.net",
+        messageId: "wamid.sales.1",
+        text: "sales hello",
+      },
+    });
+
+    expect(first.statusCode).toBe(200);
+    expect(second.statusCode).toBe(200);
+
+    const firstBody = first.json();
+    const secondBody = second.json();
+
+    expect(firstBody.session.id).not.toBe(secondBody.session.id);
+    expect(firstBody.mapping.sessionKey).toBe("whatsapp:ops-main:direct:12345@s.whatsapp.net");
+    expect(secondBody.mapping.sessionKey).toBe("whatsapp:sales-main:direct:12345@s.whatsapp.net");
   });
 
   it("rejects protected routes without auth", async () => {
@@ -184,6 +230,7 @@ describe("whatsapp-manager-api", () => {
     const gateway = services.whatsappGateway as MockWhatsAppGateway;
 
     await gateway.injectInboundMessage({
+      accountId: "ops-main",
       chatId: "12345@s.whatsapp.net",
       messageId: "wamid.1",
       senderId: "12345@s.whatsapp.net",
@@ -197,13 +244,87 @@ describe("whatsapp-manager-api", () => {
     expect(mappings[0]).toEqual(
       expect.objectContaining({
         chatId: "12345@s.whatsapp.net",
+        accountId: "ops-main",
+        sessionKey: "whatsapp:ops-main:direct:12345@s.whatsapp.net",
       }),
     );
     expect(gateway.getSentMessages()).toEqual([
       {
+        accountId: "ops-main",
+        chatJid: "12345@s.whatsapp.net",
         chatId: "12345@s.whatsapp.net",
         text: "mock-hermes-response: hello through gateway",
       },
     ]);
+  });
+
+  it("deduplicates repeated WhatsApp messages before routing to Hermes", async () => {
+    const services = buildServices(config);
+    const gateway = services.whatsappGateway as MockWhatsAppGateway;
+
+    const payload = {
+      accountId: "ops-main",
+      chatId: "12345@s.whatsapp.net",
+      messageId: "wamid.duplicate",
+      senderId: "12345@s.whatsapp.net",
+      text: "only process once",
+      timestamp: "2026-06-29T00:00:00.000Z",
+    };
+
+    await gateway.injectInboundMessage(payload);
+    await gateway.injectInboundMessage(payload);
+
+    expect(await services.router.getMappings()).toHaveLength(1);
+    expect(gateway.getSentMessages()).toEqual([
+      {
+        accountId: "ops-main",
+        chatJid: "12345@s.whatsapp.net",
+        chatId: "12345@s.whatsapp.net",
+        text: "mock-hermes-response: only process once",
+      },
+    ]);
+  });
+
+  it("persists mappings and processed message keys across service rebuilds", async () => {
+    const dir = mkdtempSync(path.join(tmpdir(), "auto-bot-bridge-state-"));
+    const persistedConfig = loadConfig({
+      ...process.env,
+      API_TOKEN: "test-token",
+      BRIDGE_STATE_FILE: path.join(dir, "bridge-state.json"),
+      DATABASE_URL: "postgres://postgres:postgres@127.0.0.1:5432/auto_bot",
+      NODE_ENV: "test",
+      PORT: "3000",
+    });
+
+    try {
+      const firstServices = buildServices(persistedConfig);
+      const firstGateway = firstServices.whatsappGateway as MockWhatsAppGateway;
+      const payload = {
+        accountId: "ops-main",
+        chatId: "12345@s.whatsapp.net",
+        messageId: "wamid.persisted",
+        senderId: "12345@s.whatsapp.net",
+        text: "persist me",
+        timestamp: "2026-06-29T00:00:00.000Z",
+      };
+
+      await firstGateway.injectInboundMessage(payload);
+
+      const secondServices = buildServices(persistedConfig);
+      const secondGateway = secondServices.whatsappGateway as MockWhatsAppGateway;
+
+      expect(await secondServices.router.getMappings()).toEqual([
+        expect.objectContaining({
+          accountId: "ops-main",
+          chatJid: "12345@s.whatsapp.net",
+          sessionKey: "whatsapp:ops-main:direct:12345@s.whatsapp.net",
+        }),
+      ]);
+
+      await secondGateway.injectInboundMessage(payload);
+      expect(secondGateway.getSentMessages()).toEqual([]);
+    } finally {
+      rmSync(dir, { force: true, recursive: true });
+    }
   });
 });

@@ -14,6 +14,7 @@ import type {
   WhatsAppAccountStatus,
   WhatsAppMessageEvent,
 } from "../domain/types.js";
+import { getWhatsAppChatType, getWhatsAppSessionKey } from "../domain/types.js";
 import type { WhatsAppGateway } from "./whatsapp-service.js";
 
 interface BaileysAccountRuntime {
@@ -133,12 +134,12 @@ export class BaileysWhatsAppGateway implements WhatsAppGateway {
       throw new Error(`WhatsApp account ${runtime.accountId} is not connected.`);
     }
 
-    await runtime.socket.sendMessage(message.chatId, { text: message.text });
+    await runtime.socket.sendMessage(message.chatJid ?? message.chatId, { text: message.text });
   }
 
   async normalizeInboundEvent(payload: unknown): Promise<WhatsAppMessageEvent> {
     if (isBaileysMessage(payload)) {
-      const event = normalizeBaileysMessage(payload);
+      const event = normalizeBaileysMessage("manual", payload);
       if (!event) {
         throw new Error("Baileys message does not contain a routable text payload.");
       }
@@ -152,18 +153,48 @@ export class BaileysWhatsAppGateway implements WhatsAppGateway {
 
     const candidate = payload as Record<string, unknown>;
     const text = typeof candidate.text === "string" ? candidate.text : "";
-    const chatId = typeof candidate.chatId === "string" ? candidate.chatId : "";
+    const chatJid =
+      typeof candidate.chatJid === "string"
+        ? candidate.chatJid
+        : typeof candidate.chatId === "string"
+          ? candidate.chatId
+          : "";
+    const accountId = typeof candidate.accountId === "string" ? candidate.accountId : "manual";
+    const chatType =
+      candidate.chatType === "group" || candidate.chatType === "direct"
+        ? candidate.chatType
+        : getWhatsAppChatType(chatJid);
+    const participantJid =
+      typeof candidate.participantJid === "string" ? candidate.participantJid : undefined;
 
-    if (!chatId || !text) {
-      throw new Error("Inbound payload must contain chatId and text.");
+    if (!chatJid || !text) {
+      throw new Error("Inbound payload must contain chatJid/chatId and text.");
     }
 
+    const sessionKey = getWhatsAppSessionKey({
+      accountId,
+      chatJid,
+      chatType,
+      ...(participantJid ? { participantJid } : {}),
+    });
+
     return {
-      chatId,
+      accountId,
+      chatJid,
+      chatType,
+      senderJid: typeof candidate.senderJid === "string" ? candidate.senderJid : chatJid,
+      ...(participantJid ? { participantJid } : {}),
+      sessionKey,
+      chatId: chatJid,
       text,
       messageId:
         typeof candidate.messageId === "string" ? candidate.messageId : `msg_${Date.now()}`,
-      senderId: typeof candidate.senderId === "string" ? candidate.senderId : chatId,
+      senderId:
+        typeof candidate.senderId === "string"
+          ? candidate.senderId
+          : typeof candidate.senderJid === "string"
+            ? candidate.senderJid
+            : chatJid,
       timestamp:
         typeof candidate.timestamp === "string"
           ? candidate.timestamp
@@ -248,7 +279,7 @@ export class BaileysWhatsAppGateway implements WhatsAppGateway {
         continue;
       }
 
-      const normalized = normalizeBaileysMessage(message);
+      const normalized = normalizeBaileysMessage(_accountId, message);
       if (!normalized) {
         continue;
       }
@@ -272,18 +303,32 @@ export class BaileysWhatsAppGateway implements WhatsAppGateway {
   }
 }
 
-function normalizeBaileysMessage(message: WAMessage): WhatsAppMessageEvent | null {
-  const chatId = message.key.remoteJid;
+function normalizeBaileysMessage(accountId: string, message: WAMessage): WhatsAppMessageEvent | null {
+  const chatJid = message.key.remoteJid;
   const text = extractText(message.message ?? undefined);
 
-  if (!chatId || !message.key.id || !text) {
+  if (!chatJid || !message.key.id || !text) {
     return null;
   }
 
+  const chatType = getWhatsAppChatType(chatJid);
+  const participantJid = message.key.participant ?? undefined;
+  const sessionKey = getWhatsAppSessionKey({
+    accountId,
+    chatJid,
+    chatType,
+  });
+
   return {
-    chatId,
+    accountId,
+    chatJid,
+    chatType,
+    senderJid: participantJid ?? chatJid,
+    ...(participantJid ? { participantJid } : {}),
+    sessionKey,
+    chatId: chatJid,
     messageId: message.key.id,
-    senderId: message.key.participant ?? chatId,
+    senderId: participantJid ?? chatJid,
     text,
     timestamp: normalizeTimestamp(message.messageTimestamp),
   };

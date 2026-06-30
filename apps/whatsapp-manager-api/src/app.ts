@@ -3,6 +3,7 @@ import Fastify from "fastify";
 import { ZodError } from "zod";
 import type { AppConfig } from "./config.js";
 import { buildServices, type AppServices } from "./build-services.js";
+import type { RoutingInput } from "./services/chat-session-router.js";
 
 interface CreateAppOptions {
   config: AppConfig;
@@ -64,28 +65,41 @@ export function createApp({ config, services = buildServices(config) }: CreateAp
     items: await services.router.getMappings(),
   }));
 
-  app.get<{ Params: { chatId: string } }>("/chats/:chatId/session", async (request, reply) => {
-    const session = await services.router.getSession(request.params.chatId);
-    if (!session) {
-      return reply.code(404).send({ error: "Session not found" });
-    }
+  app.get<{ Params: { chatId: string }; Querystring: SessionQuery }>(
+    "/chats/:chatId/session",
+    async (request, reply) => {
+      const route = getRouteFromRequest(request.params.chatId, request.query);
+      const session = await services.router.getSessionForRoute(route);
+      if (!session) {
+        return reply.code(404).send({ error: "Session not found" });
+      }
 
-    return session;
-  });
+      return session;
+    },
+  );
 
-  app.post<{ Params: { chatId: string } }>("/chats/:chatId/session", async (request) => {
-    return services.router.getOrCreateSession(request.params.chatId);
-  });
+  app.post<{ Params: { chatId: string }; Body: Partial<RoutingInput> }>(
+    "/chats/:chatId/session",
+    async (request) => {
+      return services.router.getOrCreateSession(getRouteFromRequest(request.params.chatId, request.body));
+    },
+  );
 
-  app.post<{ Params: { chatId: string } }>("/chats/:chatId/session/reset", async (request) => {
-    return services.router.resetSession(request.params.chatId);
-  });
+  app.post<{ Params: { chatId: string }; Body: Partial<RoutingInput> }>(
+    "/chats/:chatId/session/reset",
+    async (request) => {
+      return services.router.resetSession(getRouteFromRequest(request.params.chatId, request.body));
+    },
+  );
 
   app.post<{
     Params: { chatId: string };
-    Body: { hermesSessionId: string };
+    Body: { hermesSessionId: string } & Partial<RoutingInput>;
   }>("/chats/:chatId/session/remap", async (request) => {
-    return services.router.remapSession(request.params.chatId, request.body.hermesSessionId);
+    return services.router.remapSession(
+      getRouteFromRequest(request.params.chatId, request.body),
+      request.body.hermesSessionId,
+    );
   });
 
   app.get("/sessions", async () => ({
@@ -140,4 +154,22 @@ function parseCorsOrigin(value: string) {
   }
 
   return origins;
+}
+
+interface SessionQuery {
+  accountId?: string;
+  chatType?: "direct" | "group";
+  participantJid?: string;
+}
+
+function getRouteFromRequest(chatId: string, input?: Partial<RoutingInput>): RoutingInput {
+  const accountId = input?.accountId?.trim() || "manual";
+  return {
+    accountId,
+    chatJid: input?.chatJid ?? chatId,
+    chatId,
+    ...(input?.chatType ? { chatType: input.chatType } : {}),
+    ...(input?.participantJid ? { participantJid: input.participantJid } : {}),
+    ...(input?.sessionKey ? { sessionKey: input.sessionKey } : {}),
+  };
 }

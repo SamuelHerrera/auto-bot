@@ -4,14 +4,26 @@ This service owns WhatsApp transport and routing. Hermes is treated as a downstr
 
 ## Recommended default
 
-Use `1 WhatsApp chat -> 1 Hermes session`.
+Use `1 WhatsApp account + chat -> 1 Hermes session`.
 
-- Each WhatsApp JID gets one dedicated Hermes session.
-- The service persists `chat_id -> hermes_session_id`.
+- Each WhatsApp routing key gets one dedicated Hermes session.
+- The service persists `session_key -> hermes_session_id`.
 - The first inbound message creates the mapping.
 - Later messages reuse the same Hermes session until the mapping is reset or remapped.
 
 This is the safest model for context isolation and debugging.
+
+The default routing key is:
+
+```text
+whatsapp:{accountId}:{chatType}:{chatJid}
+```
+
+For participant-isolated group routing, the key can include the participant JID:
+
+```text
+whatsapp:{accountId}:group:{groupJid}:user:{participantJid}
+```
 
 ## Other mapping options
 
@@ -62,7 +74,9 @@ The API service enqueues work and a Hermes worker consumes it asynchronously.
 
 Start with the routing model implemented in this repo:
 
-- persist one mapping per WhatsApp chat
+- persist one mapping per WhatsApp account/chat routing key
+- deduplicate WhatsApp messages by account, chat, and message ID
+- serialize Hermes turns per routing key
 - keep the Hermes adapter behind an interface
 - begin with a local adapter contract
 - upgrade the adapter to CLI or HTTP once the exact Hermes runtime behavior is confirmed

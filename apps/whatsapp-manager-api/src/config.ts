@@ -8,6 +8,7 @@ const configSchema = z.object({
   CORS_ORIGIN: z.string().min(1).default("http://127.0.0.1:4173,http://localhost:4173"),
   DATABASE_URL: z.string().min(1).default("postgres://postgres:postgres@127.0.0.1:5432/auto_bot"),
   BAILEYS_STATE_DIR: z.string().min(1).default("/opt/data/whatsapp-manager/baileys"),
+  BRIDGE_STATE_FILE: z.string().default(""),
   HERMES_ADAPTER_MODE: z.enum(["mock", "cli"]).default("mock"),
   WHATSAPP_GATEWAY_MODE: z.enum(["mock", "baileys"]).default("mock"),
 });

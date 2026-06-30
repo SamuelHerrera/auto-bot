@@ -3,6 +3,7 @@ import type {
   WhatsAppAccountStatus,
   WhatsAppMessageEvent,
 } from "../domain/types.js";
+import { getWhatsAppChatType, getWhatsAppSessionKey } from "../domain/types.js";
 
 export interface WhatsAppGateway {
   onInboundMessage(handler: (event: WhatsAppMessageEvent) => Promise<void>): void;
@@ -92,18 +93,48 @@ export class MockWhatsAppGateway implements WhatsAppGateway {
 
     const candidate = payload as Record<string, unknown>;
     const text = typeof candidate.text === "string" ? candidate.text : "";
-    const chatId = typeof candidate.chatId === "string" ? candidate.chatId : "";
+    const chatJid =
+      typeof candidate.chatJid === "string"
+        ? candidate.chatJid
+        : typeof candidate.chatId === "string"
+          ? candidate.chatId
+          : "";
+    const accountId = typeof candidate.accountId === "string" ? candidate.accountId : "manual";
+    const chatType =
+      candidate.chatType === "group" || candidate.chatType === "direct"
+        ? candidate.chatType
+        : getWhatsAppChatType(chatJid);
+    const participantJid =
+      typeof candidate.participantJid === "string" ? candidate.participantJid : undefined;
 
-    if (!chatId || !text) {
-      throw new Error("Inbound payload must contain chatId and text.");
+    if (!chatJid || !text) {
+      throw new Error("Inbound payload must contain chatJid/chatId and text.");
     }
 
+    const sessionKey = getWhatsAppSessionKey({
+      accountId,
+      chatJid,
+      chatType,
+      ...(participantJid ? { participantJid } : {}),
+    });
+
     return {
-      chatId,
+      accountId,
+      chatJid,
+      chatType,
+      senderJid: typeof candidate.senderJid === "string" ? candidate.senderJid : chatJid,
+      ...(participantJid ? { participantJid } : {}),
+      sessionKey,
+      chatId: chatJid,
       text,
       messageId:
         typeof candidate.messageId === "string" ? candidate.messageId : `msg_${Date.now()}`,
-      senderId: typeof candidate.senderId === "string" ? candidate.senderId : chatId,
+      senderId:
+        typeof candidate.senderId === "string"
+          ? candidate.senderId
+          : typeof candidate.senderJid === "string"
+            ? candidate.senderJid
+            : chatJid,
       timestamp:
         typeof candidate.timestamp === "string"
           ? candidate.timestamp
