@@ -12,6 +12,8 @@ describe("whatsapp-manager-api", () => {
   let app: ReturnType<typeof createApp>;
   const config = loadConfig({
     API_TOKEN: "test-token",
+    BRIDGE_DATABASE_FILE: "",
+    BRIDGE_STATE_FILE: "",
     DATABASE_URL: "postgres://postgres:postgres@127.0.0.1:5432/auto_bot",
     NODE_ENV: "test",
     PORT: "3000",
@@ -292,6 +294,7 @@ describe("whatsapp-manager-api", () => {
     const persistedConfig = loadConfig({
       ...process.env,
       API_TOKEN: "test-token",
+      BRIDGE_DATABASE_FILE: "",
       BRIDGE_STATE_FILE: path.join(dir, "bridge-state.json"),
       DATABASE_URL: "postgres://postgres:postgres@127.0.0.1:5432/auto_bot",
       NODE_ENV: "test",
@@ -330,19 +333,243 @@ describe("whatsapp-manager-api", () => {
     }
   });
 
-  it("sends WhatsApp turns to the Hermes API adapter", async () => {
-    const fetchMock = vi.fn().mockResolvedValue({
-      ok: true,
-      json: async () => ({
-        choices: [
-          {
-            message: {
-              content: "Hermes reply",
-            },
-          },
-        ],
-      }),
+  it("persists mappings and deliveries in the SQLite bridge database", async () => {
+    const dir = mkdtempSync(path.join(tmpdir(), "auto-bot-bridge-sqlite-"));
+    const databaseFile = path.join(dir, "bridge-state.sqlite");
+    const persistedConfig = loadConfig({
+      ...process.env,
+      API_TOKEN: "test-token",
+      BRIDGE_DATABASE_FILE: databaseFile,
+      BRIDGE_STATE_FILE: "",
+      DATABASE_URL: "postgres://postgres:postgres@127.0.0.1:5432/auto_bot",
+      NODE_ENV: "test",
+      PORT: "3000",
     });
+
+    try {
+      const firstServices = buildServices(persistedConfig);
+      const firstGateway = firstServices.whatsappGateway as MockWhatsAppGateway;
+      await firstGateway.injectInboundMessage({
+        accountId: "ops-main",
+        chatId: "12345@s.whatsapp.net",
+        messageId: "wamid.sqlite",
+        senderId: "12345@s.whatsapp.net",
+        text: "persist in sqlite",
+        timestamp: "2026-06-29T00:00:00.000Z",
+      });
+
+      const secondServices = buildServices(persistedConfig);
+
+      expect(await secondServices.router.getMappings()).toEqual([
+        expect.objectContaining({
+          accountId: "ops-main",
+          sessionKey: "whatsapp:ops-main:direct:12345@s.whatsapp.net",
+        }),
+      ]);
+      expect(secondServices.deliveryStore?.listDeliveries()).toEqual([
+        expect.objectContaining({
+          accountId: "ops-main",
+          inboundMessageId: "wamid.sqlite",
+          status: "sent",
+          attempts: 1,
+        }),
+      ]);
+    } finally {
+      rmSync(dir, { force: true, recursive: true });
+    }
+  });
+
+  it("routes group messages by participant when the group policy requires it", async () => {
+    const dir = mkdtempSync(path.join(tmpdir(), "auto-bot-group-policy-"));
+    const services = buildServices(
+      loadConfig({
+        ...process.env,
+        API_TOKEN: "test-token",
+        BRIDGE_DATABASE_FILE: path.join(dir, "bridge-state.sqlite"),
+        BRIDGE_STATE_FILE: "",
+        DATABASE_URL: "postgres://postgres:postgres@127.0.0.1:5432/auto_bot",
+        NODE_ENV: "test",
+        PORT: "3000",
+      }),
+    );
+
+    try {
+      await services.router.setGroupPolicy({
+        accountId: "ops-main",
+        groupJid: "120363000000000000@g.us",
+        policy: "participant",
+      });
+
+      const gateway = services.whatsappGateway as MockWhatsAppGateway;
+      await gateway.injectInboundMessage({
+        accountId: "ops-main",
+        chatId: "120363000000000000@g.us",
+        chatType: "group",
+        participantJid: "15550000001@s.whatsapp.net",
+        messageId: "wamid.group.1",
+        text: "group participant hello",
+      });
+
+      expect(await services.router.getMappings()).toEqual([
+        expect.objectContaining({
+          sessionKey:
+            "whatsapp:ops-main:group:120363000000000000@g.us:user:15550000001@s.whatsapp.net",
+        }),
+      ]);
+    } finally {
+      rmSync(dir, { force: true, recursive: true });
+    }
+  });
+
+  it("lists failed deliveries and retries them through the API", async () => {
+    const dir = mkdtempSync(path.join(tmpdir(), "auto-bot-delivery-retry-"));
+    const retryConfig = loadConfig({
+      ...process.env,
+      API_TOKEN: "test-token",
+      BRIDGE_DATABASE_FILE: path.join(dir, "bridge-state.sqlite"),
+      BRIDGE_STATE_FILE: "",
+      DATABASE_URL: "postgres://postgres:postgres@127.0.0.1:5432/auto_bot",
+      NODE_ENV: "test",
+      PORT: "3000",
+    });
+
+    try {
+      const services = buildServices(retryConfig);
+      const gateway = services.whatsappGateway as MockWhatsAppGateway;
+      app = createApp({ config: retryConfig, services });
+
+      await gateway.injectInboundMessage({
+        accountId: "ops-main",
+        chatId: "12345@s.whatsapp.net",
+        messageId: "wamid.retry",
+        senderId: "12345@s.whatsapp.net",
+        text: "retry me",
+      });
+
+      const delivery = services.deliveryStore?.listDeliveries()[0];
+      expect(delivery).toEqual(expect.objectContaining({ status: "sent" }));
+
+      services.deliveryStore?.saveDelivery({
+        ...delivery!,
+        status: "failed",
+        attempts: 1,
+        error: "forced failure",
+        updatedAt: new Date().toISOString(),
+      });
+
+      const list = await app.inject({
+        method: "GET",
+        url: "/deliveries",
+        headers: {
+          authorization: "Bearer test-token",
+        },
+      });
+      expect(list.json().items[0]).toEqual(expect.objectContaining({ status: "failed" }));
+
+      const retry = await app.inject({
+        method: "POST",
+        url: `/deliveries/${encodeURIComponent(delivery!.id)}/retry`,
+        headers: {
+          authorization: "Bearer test-token",
+        },
+      });
+
+      expect(retry.statusCode).toBe(200);
+      expect(retry.json()).toEqual(expect.objectContaining({ status: "sent" }));
+    } finally {
+      rmSync(dir, { force: true, recursive: true });
+    }
+  });
+
+  it("records failed Hermes turns and retries them through the API", async () => {
+    const dir = mkdtempSync(path.join(tmpdir(), "auto-bot-hermes-retry-"));
+    const retryConfig = loadConfig({
+      ...process.env,
+      API_TOKEN: "test-token",
+      BRIDGE_DATABASE_FILE: path.join(dir, "bridge-state.sqlite"),
+      BRIDGE_STATE_FILE: "",
+      DATABASE_URL: "postgres://postgres:postgres@127.0.0.1:5432/auto_bot",
+      NODE_ENV: "test",
+      PORT: "3000",
+    });
+
+    try {
+      const services = buildServices(retryConfig);
+      const gateway = services.whatsappGateway as MockWhatsAppGateway;
+      app = createApp({ config: retryConfig, services });
+
+      vi.spyOn(services.hermesAdapter, "sendMessage")
+        .mockRejectedValueOnce(new Error("forced Hermes failure"))
+        .mockResolvedValueOnce({
+          sessionId: "retry-session",
+          outputText: "Hermes retry reply",
+        });
+
+      await expect(
+        gateway.injectInboundMessage({
+          accountId: "ops-main",
+          chatId: "12345@s.whatsapp.net",
+          messageId: "wamid.hermes.retry",
+          senderId: "12345@s.whatsapp.net",
+          text: "retry hermes",
+        }),
+      ).rejects.toThrow("forced Hermes failure");
+
+      const delivery = services.deliveryStore?.listDeliveries()[0];
+      expect(delivery).toEqual(
+        expect.objectContaining({
+          failureStage: "hermes",
+          inboundText: "retry hermes",
+          status: "failed",
+        }),
+      );
+
+      const retry = await app.inject({
+        method: "POST",
+        url: `/deliveries/${encodeURIComponent(delivery!.id)}/retry`,
+        headers: {
+          authorization: "Bearer test-token",
+        },
+      });
+
+      expect(retry.statusCode).toBe(200);
+      expect(retry.json()).toEqual(expect.objectContaining({ status: "sent" }));
+      expect(gateway.getSentMessages()).toEqual([
+        expect.objectContaining({
+          accountId: "ops-main",
+          chatJid: "12345@s.whatsapp.net",
+          text: "Hermes retry reply",
+        }),
+      ]);
+    } finally {
+      rmSync(dir, { force: true, recursive: true });
+    }
+  });
+
+  it("creates persisted Hermes API sessions and sends turns through session chat", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 201,
+        json: async () => ({
+          session: {
+            id: "whatsapp_test",
+            started_at: "2026-06-29T00:00:00.000Z",
+            last_active: "2026-06-29T00:00:00.000Z",
+          },
+        }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        headers: new Headers({ "x-hermes-session-id": "whatsapp_test" }),
+        json: async () => ({
+          session_id: "whatsapp_test",
+          message: {
+            content: "Hermes reply",
+          },
+        }),
+      });
     vi.stubGlobal("fetch", fetchMock);
 
     const adapter = new HermesApiAdapter({
@@ -351,7 +578,8 @@ describe("whatsapp-manager-api", () => {
       model: "hermes-agent",
     });
 
-    const reply = await adapter.sendMessage("session-1", {
+    const session = await adapter.createSession("whatsapp:ops-main:direct:12345@s.whatsapp.net");
+    const reply = await adapter.sendMessage(session.id, {
       accountId: "ops-main",
       chatJid: "12345@s.whatsapp.net",
       chatType: "direct",
@@ -364,18 +592,73 @@ describe("whatsapp-manager-api", () => {
       timestamp: "2026-06-29T00:00:00.000Z",
     });
 
+    expect(session).toEqual(
+      expect.objectContaining({
+        id: "whatsapp_test",
+        sessionKey: "whatsapp:ops-main:direct:12345@s.whatsapp.net",
+      }),
+    );
     expect(reply).toEqual({
-      sessionId: "session-1",
+      sessionId: "whatsapp_test",
       outputText: "Hermes reply",
     });
     expect(fetchMock).toHaveBeenCalledWith(
-      "http://127.0.0.1:8642/v1/chat/completions",
+      "http://127.0.0.1:8642/api/sessions",
       expect.objectContaining({
         method: "POST",
         headers: expect.objectContaining({
           authorization: "Bearer test-key",
+          "x-hermes-session-key": "whatsapp:ops-main:direct:12345@s.whatsapp.net",
         }),
       }),
+    );
+    expect(fetchMock).toHaveBeenCalledWith(
+      "http://127.0.0.1:8642/api/sessions/whatsapp_test/chat",
+      expect.objectContaining({
+        method: "POST",
+        headers: expect.objectContaining({
+          authorization: "Bearer test-key",
+          "x-hermes-session-key": "whatsapp:ops-main:direct:12345@s.whatsapp.net",
+        }),
+      }),
+    );
+  });
+
+  it("updates mappings when Hermes API rotates the effective session ID", async () => {
+    const services = buildServices(config);
+    const router = services.router;
+    const session = await router.getOrCreateSession({
+      accountId: "ops-main",
+      chatJid: "12345@s.whatsapp.net",
+    });
+    const originalSessionId = session.id;
+
+    vi.spyOn(services.hermesAdapter, "sendMessage").mockResolvedValue({
+      sessionId: "hermes-rotated-session",
+      outputText: "rotated reply",
+    });
+
+    await router.handleInboundMessage({
+      accountId: "ops-main",
+      chatJid: "12345@s.whatsapp.net",
+      chatType: "direct",
+      senderJid: "12345@s.whatsapp.net",
+      sessionKey: "whatsapp:ops-main:direct:12345@s.whatsapp.net",
+      chatId: "12345@s.whatsapp.net",
+      messageId: "wamid.rotate",
+      senderId: "12345@s.whatsapp.net",
+      text: "rotate",
+      timestamp: "2026-06-29T00:00:00.000Z",
+    });
+
+    expect(originalSessionId).not.toBe("hermes-rotated-session");
+    expect(await router.getMappings()).toEqual([
+      expect.objectContaining({
+        hermesSessionId: "hermes-rotated-session",
+      }),
+    ]);
+    await expect(router.getSession("whatsapp:ops-main:direct:12345@s.whatsapp.net")).resolves.toEqual(
+      expect.objectContaining({ id: "hermes-rotated-session" }),
     );
   });
 

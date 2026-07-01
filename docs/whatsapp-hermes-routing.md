@@ -56,11 +56,17 @@ The API service launches Hermes commands or a long-lived terminal session and ma
 
 ### Local HTTP bridge
 
-Run a small local service beside Hermes that exposes stable APIs for session create/send/reset/read operations.
+Use Hermes' native API server session endpoints:
+
+```text
+POST /api/sessions
+POST /api/sessions/{session_id}/chat
+DELETE /api/sessions/{session_id}
+```
 
 - Cleaner contract for the WhatsApp manager.
 - Easier to observe and test than raw CLI process control.
-- Requires an extra local runtime component.
+- Requires `hermes gateway run` with `API_SERVER_KEY` configured.
 
 ### Queue or job worker handoff
 
@@ -78,5 +84,5 @@ Start with the routing model implemented in this repo:
 - deduplicate WhatsApp messages by account, chat, and message ID
 - serialize Hermes turns per routing key
 - keep the Hermes adapter behind an interface
-- begin with a local adapter contract
-- upgrade the adapter to CLI or HTTP once the exact Hermes runtime behavior is confirmed
+- use SQLite-backed bridge persistence by default
+- use the Hermes API adapter when a Hermes gateway API server is running

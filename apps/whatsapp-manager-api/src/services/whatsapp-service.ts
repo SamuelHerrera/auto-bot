@@ -135,6 +135,7 @@ export class MockWhatsAppGateway implements WhatsAppGateway {
           : typeof candidate.senderJid === "string"
             ? candidate.senderJid
             : chatJid,
+      media: [],
       timestamp:
         typeof candidate.timestamp === "string"
           ? candidate.timestamp

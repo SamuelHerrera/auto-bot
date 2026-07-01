@@ -2,7 +2,7 @@ import cors from "@fastify/cors";
 import Fastify from "fastify";
 import { ZodError } from "zod";
 import type { AppConfig } from "./config.js";
-import { buildServices, type AppServices } from "./build-services.js";
+import { buildServices, sendReplyWithDeliveryRecord, type AppServices } from "./build-services.js";
 import type { RoutingInput } from "./services/chat-session-router.js";
 
 interface CreateAppOptions {
@@ -105,6 +105,98 @@ export function createApp({ config, services = buildServices(config) }: CreateAp
   app.get("/sessions", async () => ({
     items: await services.router.getMappings(),
   }));
+
+  app.get("/deliveries", async () => ({
+    items: services.deliveryStore?.listDeliveries() ?? [],
+  }));
+
+  app.post<{ Params: { deliveryId: string } }>("/deliveries/:deliveryId/retry", async (request, reply) => {
+    const record = services.deliveryStore?.getDelivery(decodeURIComponent(request.params.deliveryId));
+    if (!record) {
+      return reply.code(404).send({ error: "Delivery record not found" });
+    }
+
+    if (record.failureStage === "hermes") {
+      if (!record.inboundText?.trim()) {
+        return reply.code(409).send({ error: "Hermes failure record has no inbound text to retry" });
+      }
+
+      const result = await services.router.retryInboundMessage({
+        accountId: record.accountId,
+        chatJid: record.chatJid,
+        chatType: record.chatType,
+        chatId: record.chatJid,
+        messageId: record.inboundMessageId,
+        senderJid: record.chatJid,
+        senderId: record.chatJid,
+        sessionKey: record.sessionKey,
+        text: record.inboundText,
+        timestamp: new Date().toISOString(),
+      });
+
+      if (!result.reply) {
+        return reply.code(409).send({ error: "Hermes retry produced no reply" });
+      }
+
+      await sendReplyWithDeliveryRecord({
+        ...(services.deliveryStore ? { deliveryStore: services.deliveryStore } : {}),
+        event: result.event ?? {
+          accountId: record.accountId,
+          chatJid: record.chatJid,
+          chatType: record.chatType,
+          chatId: record.chatJid,
+          messageId: record.inboundMessageId,
+          sessionKey: record.sessionKey,
+        },
+        text: result.reply.outputText,
+        whatsappGateway: services.whatsappGateway,
+      });
+
+      const { error: _error, failureStage: _failureStage, ...resolvedRecord } = record;
+      services.deliveryStore?.saveDelivery({
+        ...resolvedRecord,
+        status: "sent",
+        attempts: record.attempts + 1,
+        updatedAt: new Date().toISOString(),
+      });
+
+      return services.deliveryStore?.getDelivery(record.id) ?? record;
+    }
+
+    if (!record.outboundText.trim()) {
+      return reply.code(409).send({ error: "Delivery record has no outbound text to retry" });
+    }
+
+    await sendReplyWithDeliveryRecord({
+      ...(services.deliveryStore ? { deliveryStore: services.deliveryStore } : {}),
+      event: {
+        accountId: record.accountId,
+        chatJid: record.chatJid,
+        chatType: record.chatType,
+        chatId: record.chatJid,
+        messageId: record.inboundMessageId,
+        sessionKey: record.sessionKey,
+      },
+      text: record.outboundText,
+      whatsappGateway: services.whatsappGateway,
+    });
+
+    return services.deliveryStore?.getDelivery(record.id) ?? record;
+  });
+
+  app.get("/group-policies", async () => ({
+    items: await services.router.listGroupPolicies(),
+  }));
+
+  app.put<{
+    Body: { accountId: string; groupJid: string; policy: "group" | "participant" };
+  }>("/group-policies", async (request, reply) => {
+    if (!request.body.accountId || !request.body.groupJid) {
+      return reply.code(400).send({ error: "accountId and groupJid are required" });
+    }
+
+    return services.router.setGroupPolicy(request.body);
+  });
 
   app.post<{ Body: { accountId?: string; chatId: string; text: string } }>(
     "/messages/outbound",

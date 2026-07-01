@@ -35,6 +35,31 @@ interface HermesSession {
   status: "active" | "reset";
 }
 
+interface DeliveryRecord {
+  id: string;
+  accountId: string;
+  chatJid: string;
+  chatType: "direct" | "group";
+  sessionKey: string;
+  inboundMessageId: string;
+  inboundText?: string;
+  outboundText: string;
+  status: "pending" | "sent" | "failed";
+  attempts: number;
+  failureStage?: "hermes" | "whatsapp";
+  error?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+interface GroupPolicy {
+  accountId: string;
+  groupJid: string;
+  policy: "group" | "participant";
+  createdAt: string;
+  updatedAt: string;
+}
+
 interface ApiError {
   error: string;
 }
@@ -54,6 +79,8 @@ export function App() {
   const [apiToken, setApiToken] = useState(() => localStorage.getItem(storageKeys.apiToken) || "");
   const [accounts, setAccounts] = useState<WhatsAppAccount[]>([]);
   const [mappings, setMappings] = useState<SessionMapping[]>([]);
+  const [deliveries, setDeliveries] = useState<DeliveryRecord[]>([]);
+  const [groupPolicies, setGroupPolicies] = useState<GroupPolicy[]>([]);
   const [selectedSession, setSelectedSession] = useState<HermesSession | null>(null);
   const [activeChatId, setActiveChatId] = useState("");
   const [activeAccountId, setActiveAccountId] = useState("");
@@ -64,6 +91,9 @@ export function App() {
   const [outboundAccountId, setOutboundAccountId] = useState("manual");
   const [outboundChatId, setOutboundChatId] = useState("");
   const [outboundText, setOutboundText] = useState("");
+  const [groupPolicyAccountId, setGroupPolicyAccountId] = useState("");
+  const [groupPolicyJid, setGroupPolicyJid] = useState("");
+  const [groupPolicyValue, setGroupPolicyValue] = useState<"group" | "participant">("group");
   const [statusMessage, setStatusMessage] = useState("Enter the API token, then sync the current WhatsApp workspace.");
   const [errorMessage, setErrorMessage] = useState("");
   const [isBusy, setIsBusy] = useState(false);
@@ -126,13 +156,17 @@ export function App() {
     setErrorMessage("");
 
     try {
-      const [accountResponse, mappingResponse] = await Promise.all([
+      const [accountResponse, mappingResponse, deliveryResponse, groupPolicyResponse] = await Promise.all([
         request<{ items: WhatsAppAccount[] }>("/whatsapp/accounts"),
         request<{ items: SessionMapping[] }>("/sessions"),
+        request<{ items: DeliveryRecord[] }>("/deliveries"),
+        request<{ items: GroupPolicy[] }>("/group-policies"),
       ]);
 
       setAccounts(accountResponse.items);
       setMappings(mappingResponse.items);
+      setDeliveries(deliveryResponse.items);
+      setGroupPolicies(groupPolicyResponse.items);
 
       if (showMessage) {
         setStatusMessage("Workspace synced.");
@@ -285,6 +319,38 @@ export function App() {
     });
   }
 
+  async function retryDelivery(deliveryId: string) {
+    await runAction(async () => {
+      await request(`/deliveries/${encodeURIComponent(deliveryId)}/retry`, {
+        method: "POST",
+      });
+      setStatusMessage("Delivery retry queued.");
+      await refreshData(false);
+    });
+  }
+
+  async function saveGroupPolicy(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!groupPolicyAccountId.trim() || !groupPolicyJid.trim()) {
+      setErrorMessage("Provide both account ID and group JID before saving a group policy.");
+      return;
+    }
+
+    await runAction(async () => {
+      await request("/group-policies", {
+        method: "PUT",
+        body: JSON.stringify({
+          accountId: groupPolicyAccountId.trim(),
+          groupJid: groupPolicyJid.trim(),
+          policy: groupPolicyValue,
+        }),
+      });
+
+      setStatusMessage(`Group policy saved for ${groupPolicyJid.trim()}.`);
+      await refreshData(false);
+    });
+  }
+
   async function runAction(action: () => Promise<void>) {
     if (!apiToken.trim()) {
       setErrorMessage("An API token is required before the UI can manage accounts.");
@@ -307,6 +373,7 @@ export function App() {
   const selectedMapping = mappings.find(
     (mapping) => mapping.chatJid === activeChatId && mapping.accountId === activeAccountId,
   );
+  const failedDeliveries = deliveries.filter((delivery) => delivery.status === "failed");
 
   return (
     <div className="shell">
@@ -578,6 +645,84 @@ export function App() {
           </button>
         </form>
       </section>
+
+      <div className="content-grid">
+        <section className="panel">
+          <div className="panel-header">
+            <div>
+              <span className="panel-kicker">Failures</span>
+              <h2>Delivery retry queue</h2>
+            </div>
+          </div>
+
+          <div className="mapping-list">
+            {failedDeliveries.length === 0 ? (
+              <EmptyState title="No failed deliveries" description="Failed Hermes or WhatsApp sends will appear here." />
+            ) : (
+              failedDeliveries.map((delivery) => (
+                <article key={delivery.id} className="detail-card">
+                  <div className="detail-row">
+                    <span>{delivery.accountId}</span>
+                    <strong className="mono">{delivery.chatJid}</strong>
+                  </div>
+                  <p>{delivery.failureStage === "hermes" ? "Hermes turn failed" : "WhatsApp send failed"}</p>
+                  <p>{delivery.error || "Delivery failed"}</p>
+                  <p className="mono">{delivery.outboundText || delivery.inboundText || "(no retry payload)"}</p>
+                  <button
+                    className="secondary-button"
+                    onClick={() => void retryDelivery(delivery.id)}
+                    disabled={isBusy || !(delivery.outboundText.trim() || delivery.inboundText?.trim())}
+                  >
+                    Retry
+                  </button>
+                </article>
+              ))
+            )}
+          </div>
+        </section>
+
+        <section className="panel">
+          <div className="panel-header">
+            <div>
+              <span className="panel-kicker">Groups</span>
+              <h2>Routing policy</h2>
+            </div>
+          </div>
+
+          <form className="stack" onSubmit={saveGroupPolicy}>
+            <label className="field">
+              <span>Account ID</span>
+              <input value={groupPolicyAccountId} onChange={(event) => setGroupPolicyAccountId(event.target.value)} />
+            </label>
+            <label className="field">
+              <span>Group JID</span>
+              <input value={groupPolicyJid} onChange={(event) => setGroupPolicyJid(event.target.value)} />
+            </label>
+            <label className="field">
+              <span>Policy</span>
+              <select value={groupPolicyValue} onChange={(event) => setGroupPolicyValue(event.target.value as "group" | "participant")}>
+                <option value="group">One session per group</option>
+                <option value="participant">One session per participant</option>
+              </select>
+            </label>
+            <button type="submit" disabled={isBusy}>
+              Save policy
+            </button>
+          </form>
+
+          <div className="mapping-list">
+            {groupPolicies.map((policy) => (
+              <div className="detail-card" key={`${policy.accountId}:${policy.groupJid}`}>
+                <div className="detail-row">
+                  <span>{policy.accountId}</span>
+                  <strong>{policy.policy}</strong>
+                </div>
+                <p className="mono">{policy.groupJid}</p>
+              </div>
+            ))}
+          </div>
+        </section>
+      </div>
     </div>
   );
 }

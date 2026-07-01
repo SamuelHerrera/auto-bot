@@ -146,7 +146,7 @@
 
         <text class="title" x="48" y="70">Architecture overview</text>
         <text class="small" x="48" y="96">
-          Current bridge: private internal API, Baileys transport, account-aware routing, mock/adapter Hermes boundary.
+          Current bridge: private internal API, Baileys transport, SQLite bridge state, and Hermes native API session adapter.
         </text>
 
         <rect class="panel-soft" x="60" y="150" width="250" height="170"></rect>
@@ -185,21 +185,21 @@
         <rect class="panel" x="402" y="620" width="250" height="150"></rect>
         <text class="subtitle" x="426" y="658">WhatsApp Gateway</text>
         <text class="body" x="426" y="690">Owns transport abstraction</text>
-        <text class="body" x="426" y="716">Today: mock implementation</text>
-        <text class="body" x="426" y="742">Later: Baileys account/session logic</text>
+        <text class="body" x="426" y="716">Mock or Baileys implementation</text>
+        <text class="body" x="426" y="742">Media, reactions, typing, splitting</text>
 
         <rect class="panel" x="708" y="620" width="250" height="150"></rect>
         <text class="subtitle" x="732" y="658">Hermes Adapter</text>
-        <text class="body" x="732" y="690">createSession(chatId)</text>
-        <text class="body" x="732" y="716">sendMessage(sessionId, event)</text>
-        <text class="body" x="732" y="742">resetSession(sessionId)</text>
+        <text class="body" x="732" y="690">POST /api/sessions</text>
+        <text class="body" x="732" y="716">POST /api/sessions/{id}/chat</text>
+        <text class="body" x="732" y="742">DELETE /api/sessions/{id}</text>
 
         <rect class="store" x="1048" y="184" width="246" height="170"></rect>
-        <text class="subtitle" x="1072" y="222">Postgres</text>
-        <text class="body" x="1072" y="256">Planned durable state:</text>
-        <text class="body" x="1072" y="284">chat records</text>
-        <text class="body" x="1072" y="312">session records</text>
-        <text class="body" x="1072" y="340">mapping records</text>
+        <text class="subtitle" x="1072" y="222">SQLite Bridge DB</text>
+        <text class="body" x="1072" y="256">Durable bridge state:</text>
+        <text class="body" x="1072" y="284">session mappings</text>
+        <text class="body" x="1072" y="312">deliveries + retries</text>
+        <text class="body" x="1072" y="340">group policies</text>
 
         <rect class="store" x="1048" y="420" width="246" height="188"></rect>
         <text class="subtitle" x="1072" y="458">Baileys State</text>

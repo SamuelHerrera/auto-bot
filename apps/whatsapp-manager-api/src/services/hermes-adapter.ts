@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import type { HermesReply, HermesSession, WhatsAppMessageEvent } from "../domain/types.js";
 
 export interface HermesAdapter {
@@ -56,18 +57,33 @@ export class HermesApiAdapter implements HermesAdapter {
   constructor(private readonly options: HermesApiAdapterOptions) {}
 
   async createSession(sessionKey: string): Promise<HermesSession> {
-    const now = new Date().toISOString();
-    return {
-      id: `hermes-api:${sessionKey}`,
-      sessionKey,
-      accountId: "unassigned",
-      chatJid: sessionKey,
-      chatType: "direct",
-      chatId: sessionKey,
-      createdAt: now,
-      lastActivityAt: now,
-      status: "active",
-    };
+    if (!this.options.apiKey) {
+      throw new Error("HERMES_API_KEY is required when HERMES_ADAPTER_MODE=api.");
+    }
+
+    const sessionId = getHermesApiSessionId(sessionKey);
+    const response = await fetch(`${getHermesApiRoot(this.options.baseUrl)}/api/sessions`, {
+      method: "POST",
+      headers: this.getHeaders(sessionKey),
+      body: JSON.stringify({
+        id: sessionId,
+        model: this.options.model,
+        title: sessionKey,
+        system_prompt:
+          "You are replying to a WhatsApp conversation routed through an external bridge. Return only the message text to send back.",
+      }),
+    });
+
+    if (response.status === 409) {
+      return this.getSession(sessionId, sessionKey);
+    }
+
+    if (!response.ok) {
+      throw new Error(`Hermes session create failed with ${response.status}: ${await response.text()}`);
+    }
+
+    const payload = (await response.json()) as HermesSessionResponse;
+    return this.toHermesSession(payload.session, sessionKey);
   }
 
   async sendMessage(sessionId: string, event: WhatsAppMessageEvent): Promise<HermesReply> {
@@ -75,63 +91,126 @@ export class HermesApiAdapter implements HermesAdapter {
       throw new Error("HERMES_API_KEY is required when HERMES_ADAPTER_MODE=api.");
     }
 
-    const response = await fetch(`${trimTrailingSlash(this.options.baseUrl)}/chat/completions`, {
-      method: "POST",
-      headers: {
-        authorization: `Bearer ${this.options.apiKey}`,
-        "content-type": "application/json",
+    const response = await fetch(
+      `${getHermesApiRoot(this.options.baseUrl)}/api/sessions/${encodeURIComponent(sessionId)}/chat`,
+      {
+        method: "POST",
+        headers: this.getHeaders(event.sessionKey),
+        body: JSON.stringify({
+          message: [
+            `WhatsApp account: ${event.accountId}`,
+            `Chat: ${event.chatJid}`,
+            `Sender: ${event.senderJid}`,
+            `Message ID: ${event.messageId}`,
+            "",
+            event.text,
+          ].join("\n"),
+        }),
       },
-      body: JSON.stringify({
-        model: this.options.model,
-        stream: false,
-        messages: [
-          {
-            role: "system",
-            content:
-              "You are replying to a WhatsApp conversation routed through an external bridge. Return only the message text to send back.",
-          },
-          {
-            role: "user",
-            content: [
-              `Routing key: ${event.sessionKey}`,
-              `WhatsApp account: ${event.accountId}`,
-              `Chat: ${event.chatJid}`,
-              `Sender: ${event.senderJid}`,
-              "",
-              event.text,
-            ].join("\n"),
-          },
-        ],
-      }),
-    });
+    );
 
     if (!response.ok) {
-      throw new Error(`Hermes API request failed with ${response.status}: ${await response.text()}`);
+      throw new Error(`Hermes session chat failed with ${response.status}: ${await response.text()}`);
     }
 
-    const payload = (await response.json()) as ChatCompletionsResponse;
-    const outputText = payload.choices[0]?.message?.content?.trim();
+    const payload = (await response.json()) as HermesSessionChatResponse;
+    const outputText = payload.message?.content?.trim();
     if (!outputText) {
       throw new Error("Hermes API returned an empty response.");
     }
 
     return {
-      sessionId,
+      sessionId: payload.session_id || response.headers.get("x-hermes-session-id") || sessionId,
       outputText,
     };
   }
 
-  async resetSession(_sessionId: string): Promise<void> {}
-}
+  async resetSession(sessionId: string): Promise<void> {
+    if (!this.options.apiKey) {
+      throw new Error("HERMES_API_KEY is required when HERMES_ADAPTER_MODE=api.");
+    }
 
-interface ChatCompletionsResponse {
-  choices: Array<{
-    message?: {
-      content?: string;
+    const response = await fetch(
+      `${getHermesApiRoot(this.options.baseUrl)}/api/sessions/${encodeURIComponent(sessionId)}`,
+      {
+        method: "DELETE",
+        headers: this.getHeaders(),
+      },
+    );
+
+    if (response.status === 404) {
+      return;
+    }
+
+    if (!response.ok) {
+      throw new Error(`Hermes session reset failed with ${response.status}: ${await response.text()}`);
+    }
+  }
+
+  private async getSession(sessionId: string, sessionKey: string): Promise<HermesSession> {
+    const response = await fetch(
+      `${getHermesApiRoot(this.options.baseUrl)}/api/sessions/${encodeURIComponent(sessionId)}`,
+      {
+        method: "GET",
+        headers: this.getHeaders(sessionKey),
+      },
+    );
+
+    if (!response.ok) {
+      throw new Error(`Hermes session lookup failed with ${response.status}: ${await response.text()}`);
+    }
+
+    const payload = (await response.json()) as HermesSessionResponse;
+    return this.toHermesSession(payload.session, sessionKey);
+  }
+
+  private toHermesSession(session: HermesApiSessionPayload, sessionKey: string): HermesSession {
+    const now = new Date().toISOString();
+    return {
+      id: session.id,
+      sessionKey,
+      accountId: "unassigned",
+      chatJid: sessionKey,
+      chatType: "direct",
+      chatId: sessionKey,
+      createdAt: session.started_at ?? now,
+      lastActivityAt: session.last_active ?? session.started_at ?? now,
+      status: session.end_reason ? "reset" : "active",
     };
-  }>;
+  }
+
+  private getHeaders(sessionKey?: string) {
+    return {
+      authorization: `Bearer ${this.options.apiKey}`,
+      "content-type": "application/json",
+      ...(sessionKey ? { "x-hermes-session-key": sessionKey } : {}),
+    };
+  }
 }
 
-function trimTrailingSlash(value: string) {
-  return value.replace(/\/+$/, "");
+interface HermesSessionResponse {
+  session: HermesApiSessionPayload;
+}
+
+interface HermesApiSessionPayload {
+  id: string;
+  started_at?: string;
+  last_active?: string;
+  end_reason?: string;
+}
+
+interface HermesSessionChatResponse {
+  session_id?: string;
+  message?: {
+    content?: string;
+  };
+}
+
+function getHermesApiRoot(value: string) {
+  return value.replace(/\/+$/, "").replace(/\/v1$/, "");
+}
+
+function getHermesApiSessionId(sessionKey: string) {
+  const digest = createHash("sha256").update(sessionKey).digest("hex").slice(0, 24);
+  return `whatsapp_${digest}`;
 }

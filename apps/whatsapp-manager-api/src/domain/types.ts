@@ -1,6 +1,23 @@
 export type WhatsAppChatId = string;
 export type HermesSessionId = string;
 export type WhatsAppChatType = "direct" | "group";
+export type WhatsAppGroupRoutingPolicy = "group" | "participant";
+export type DeliveryStatus = "pending" | "sent" | "failed";
+export type DeliveryFailureStage = "hermes" | "whatsapp";
+export type MediaType = "image" | "video" | "audio" | "document";
+
+export interface WhatsAppMediaAttachment {
+  type: MediaType;
+  url?: string;
+  mimetype?: string;
+  fileName?: string;
+  caption?: string;
+}
+
+export interface WhatsAppReaction {
+  emoji: string;
+  targetMessageId: string;
+}
 
 export interface WhatsAppMessageEvent {
   accountId: string;
@@ -13,6 +30,8 @@ export interface WhatsAppMessageEvent {
   chatId: WhatsAppChatId;
   senderId: string;
   text: string;
+  media?: WhatsAppMediaAttachment[];
+  reaction?: WhatsAppReaction;
   timestamp: string;
 }
 
@@ -49,6 +68,8 @@ export interface OutboundWhatsAppMessage {
   chatId: WhatsAppChatId;
   text: string;
   accountId?: string;
+  media?: WhatsAppMediaAttachment[];
+  reaction?: WhatsAppReaction;
 }
 
 export interface WhatsAppAccountStatus {
@@ -65,6 +86,32 @@ export interface InboundMessageResult {
   mapping?: ChatSessionMapping;
   reply?: HermesReply;
   session?: HermesSession;
+  event?: WhatsAppMessageEvent;
+}
+
+export interface DeliveryRecord {
+  id: string;
+  accountId: string;
+  chatJid: WhatsAppChatId;
+  chatType: WhatsAppChatType;
+  sessionKey: string;
+  inboundMessageId: string;
+  inboundText?: string;
+  outboundText: string;
+  status: DeliveryStatus;
+  attempts: number;
+  failureStage?: DeliveryFailureStage;
+  error?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface GroupRoutingPolicyRecord {
+  accountId: string;
+  groupJid: string;
+  policy: WhatsAppGroupRoutingPolicy;
+  createdAt: string;
+  updatedAt: string;
 }
 
 export function getWhatsAppChatType(chatJid: string): WhatsAppChatType {
@@ -76,9 +123,10 @@ export function getWhatsAppSessionKey(input: {
   chatJid: string;
   chatType?: WhatsAppChatType;
   participantJid?: string;
+  groupPolicy?: WhatsAppGroupRoutingPolicy;
 }) {
   const chatType = input.chatType ?? getWhatsAppChatType(input.chatJid);
-  if (chatType === "group" && input.participantJid) {
+  if (chatType === "group" && input.groupPolicy === "participant" && input.participantJid) {
     return `whatsapp:${input.accountId}:group:${input.chatJid}:user:${input.participantJid}`;
   }
 

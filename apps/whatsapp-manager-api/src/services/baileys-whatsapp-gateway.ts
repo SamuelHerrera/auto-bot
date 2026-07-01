@@ -11,6 +11,7 @@ import path from "node:path";
 import pino from "pino";
 import type {
   OutboundWhatsAppMessage,
+  WhatsAppMediaAttachment,
   WhatsAppAccountStatus,
   WhatsAppMessageEvent,
 } from "../domain/types.js";
@@ -134,7 +135,60 @@ export class BaileysWhatsAppGateway implements WhatsAppGateway {
       throw new Error(`WhatsApp account ${runtime.accountId} is not connected.`);
     }
 
-    await runtime.socket.sendMessage(message.chatJid ?? message.chatId, { text: message.text });
+    const chatJid = message.chatJid ?? message.chatId;
+
+    if (message.reaction) {
+      await runtime.socket.sendMessage(chatJid, {
+        react: {
+          text: message.reaction.emoji,
+          key: {
+            remoteJid: chatJid,
+            id: message.reaction.targetMessageId,
+          },
+        },
+      });
+      return;
+    }
+
+    await runtime.socket.sendPresenceUpdate("composing", chatJid).catch(() => undefined);
+
+    for (const attachment of message.media ?? []) {
+      if (!attachment.url) {
+        continue;
+      }
+
+      if (attachment.type === "image") {
+        await runtime.socket.sendMessage(chatJid, {
+          image: { url: attachment.url },
+          caption: attachment.caption ?? message.text,
+          ...(attachment.mimetype ? { mimetype: attachment.mimetype } : {}),
+        });
+      } else if (attachment.type === "video") {
+        await runtime.socket.sendMessage(chatJid, {
+          video: { url: attachment.url },
+          caption: attachment.caption ?? message.text,
+          ...(attachment.mimetype ? { mimetype: attachment.mimetype } : {}),
+        });
+      } else if (attachment.type === "audio") {
+        await runtime.socket.sendMessage(chatJid, {
+          audio: { url: attachment.url },
+          ...(attachment.mimetype ? { mimetype: attachment.mimetype } : {}),
+        });
+      } else {
+        await runtime.socket.sendMessage(chatJid, {
+          document: { url: attachment.url },
+          caption: attachment.caption ?? message.text,
+          fileName: attachment.fileName ?? "attachment",
+          mimetype: attachment.mimetype ?? "application/octet-stream",
+        });
+      }
+    }
+
+    for (const chunk of splitWhatsAppText(message.text)) {
+      await runtime.socket.sendMessage(chatJid, { text: chunk });
+    }
+
+    await runtime.socket.sendPresenceUpdate("paused", chatJid).catch(() => undefined);
   }
 
   async normalizeInboundEvent(payload: unknown): Promise<WhatsAppMessageEvent> {
@@ -153,6 +207,7 @@ export class BaileysWhatsAppGateway implements WhatsAppGateway {
 
     const candidate = payload as Record<string, unknown>;
     const text = typeof candidate.text === "string" ? candidate.text : "";
+    const media = Array.isArray(candidate.media) ? candidate.media : [];
     const chatJid =
       typeof candidate.chatJid === "string"
         ? candidate.chatJid
@@ -167,8 +222,8 @@ export class BaileysWhatsAppGateway implements WhatsAppGateway {
     const participantJid =
       typeof candidate.participantJid === "string" ? candidate.participantJid : undefined;
 
-    if (!chatJid || !text) {
-      throw new Error("Inbound payload must contain chatJid/chatId and text.");
+    if (!chatJid || (!text && media.length === 0)) {
+      throw new Error("Inbound payload must contain chatJid/chatId and text or media.");
     }
 
     const sessionKey = getWhatsAppSessionKey({
@@ -195,6 +250,9 @@ export class BaileysWhatsAppGateway implements WhatsAppGateway {
           : typeof candidate.senderJid === "string"
             ? candidate.senderJid
             : chatJid,
+      ...(media.length > 0
+        ? { media: media.map((item) => item as NonNullable<WhatsAppMessageEvent["media"]>[number]) }
+        : {}),
       timestamp:
         typeof candidate.timestamp === "string"
           ? candidate.timestamp
@@ -306,8 +364,10 @@ export class BaileysWhatsAppGateway implements WhatsAppGateway {
 function normalizeBaileysMessage(accountId: string, message: WAMessage): WhatsAppMessageEvent | null {
   const chatJid = message.key.remoteJid;
   const text = extractText(message.message ?? undefined);
+  const media = extractMedia(message.message ?? undefined);
+  const reaction = extractReaction(message.message ?? undefined);
 
-  if (!chatJid || !message.key.id || !text) {
+  if (!chatJid || !message.key.id || (!text && media.length === 0 && !reaction)) {
     return null;
   }
 
@@ -330,6 +390,8 @@ function normalizeBaileysMessage(accountId: string, message: WAMessage): WhatsAp
     messageId: message.key.id,
     senderId: participantJid ?? chatJid,
     text,
+    ...(media.length > 0 ? { media } : {}),
+    ...(reaction ? { reaction } : {}),
     timestamp: normalizeTimestamp(message.messageTimestamp),
   };
 }
@@ -354,6 +416,85 @@ function extractText(message: WAMessageContent | null | undefined): string {
     extractText(message.documentWithCaptionMessage?.message) ??
     ""
   ).trim();
+}
+
+function extractMedia(message: WAMessageContent | null | undefined): WhatsAppMediaAttachment[] {
+  if (!message) {
+    return [];
+  }
+
+  if (message.imageMessage) {
+    return [
+      {
+        type: "image",
+        ...(message.imageMessage.mimetype ? { mimetype: message.imageMessage.mimetype } : {}),
+        ...(message.imageMessage.caption ? { caption: message.imageMessage.caption } : {}),
+      },
+    ];
+  }
+
+  if (message.videoMessage) {
+    return [
+      {
+        type: "video",
+        ...(message.videoMessage.mimetype ? { mimetype: message.videoMessage.mimetype } : {}),
+        ...(message.videoMessage.caption ? { caption: message.videoMessage.caption } : {}),
+      },
+    ];
+  }
+
+  if (message.audioMessage) {
+    return [
+      {
+        type: "audio",
+        ...(message.audioMessage.mimetype ? { mimetype: message.audioMessage.mimetype } : {}),
+      },
+    ];
+  }
+
+  if (message.documentMessage) {
+    return [
+      {
+        type: "document",
+        ...(message.documentMessage.mimetype ? { mimetype: message.documentMessage.mimetype } : {}),
+        ...(message.documentMessage.fileName ? { fileName: message.documentMessage.fileName } : {}),
+        ...(message.documentMessage.caption ? { caption: message.documentMessage.caption } : {}),
+      },
+    ];
+  }
+
+  return (
+    extractMedia(message.ephemeralMessage?.message) ??
+    extractMedia(message.viewOnceMessage?.message) ??
+    extractMedia(message.viewOnceMessageV2?.message) ??
+    extractMedia(message.documentWithCaptionMessage?.message) ??
+    []
+  );
+}
+
+function extractReaction(message: WAMessageContent | null | undefined): WhatsAppMessageEvent["reaction"] | undefined {
+  const reaction = message?.reactionMessage;
+  if (!reaction?.text || !reaction.key?.id) {
+    return undefined;
+  }
+
+  return {
+    emoji: reaction.text,
+    targetMessageId: reaction.key.id,
+  };
+}
+
+function splitWhatsAppText(text: string, maxLength = 3500): string[] {
+  if (!text.trim()) {
+    return [];
+  }
+
+  const chunks: string[] = [];
+  for (let index = 0; index < text.length; index += maxLength) {
+    chunks.push(text.slice(index, index + maxLength));
+  }
+
+  return chunks;
 }
 
 function normalizeTimestamp(timestamp: WAMessage["messageTimestamp"]): string {

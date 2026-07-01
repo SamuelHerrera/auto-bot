@@ -1,9 +1,12 @@
 import type {
   ChatSessionMapping,
+  DeliveryRecord,
+  GroupRoutingPolicyRecord,
   HermesSession,
   InboundMessageResult,
   WhatsAppChatId,
   WhatsAppChatType,
+  WhatsAppGroupRoutingPolicy,
   WhatsAppMessageEvent,
 } from "../domain/types.js";
 import { getWhatsAppSessionKey } from "../domain/types.js";
@@ -18,6 +21,7 @@ export class InMemoryChatSessionRouter {
   constructor(
     private readonly hermesAdapter: HermesAdapter,
     private readonly store?: ChatSessionRouterStore,
+    private readonly groupPolicyStore?: GroupRoutingPolicyStore,
   ) {
     const snapshot = store?.load();
     for (const mapping of snapshot?.mappings ?? []) {
@@ -35,6 +39,27 @@ export class InMemoryChatSessionRouter {
     return [...this.mappings.values()];
   }
 
+  async listGroupPolicies(): Promise<GroupRoutingPolicyRecord[]> {
+    return this.groupPolicyStore?.listGroupPolicies() ?? [];
+  }
+
+  async setGroupPolicy(input: {
+    accountId: string;
+    groupJid: string;
+    policy: WhatsAppGroupRoutingPolicy;
+  }): Promise<GroupRoutingPolicyRecord> {
+    if (this.groupPolicyStore) {
+      return this.groupPolicyStore.setGroupPolicy(input);
+    }
+
+    const now = new Date().toISOString();
+    return {
+      ...input,
+      createdAt: now,
+      updatedAt: now,
+    };
+  }
+
   async getSession(sessionKey: string): Promise<HermesSession | null> {
     const mapping = this.mappings.get(sessionKey);
     if (!mapping) {
@@ -45,11 +70,11 @@ export class InMemoryChatSessionRouter {
   }
 
   async getSessionForRoute(input: RoutingInput): Promise<HermesSession | null> {
-    return this.getSession(normalizeRoutingInput(input).sessionKey);
+    return this.getSession(this.normalizeRoutingInput(input).sessionKey);
   }
 
   async getOrCreateSession(input: RoutingInput): Promise<HermesSession> {
-    const route = normalizeRoutingInput(input);
+    const route = this.normalizeRoutingInput(input);
     const existing = await this.getSession(route.sessionKey);
     if (existing) {
       return existing;
@@ -83,7 +108,7 @@ export class InMemoryChatSessionRouter {
   }
 
   async resetSession(input: RoutingInput): Promise<HermesSession> {
-    const route = normalizeRoutingInput(input);
+    const route = this.normalizeRoutingInput(input);
     const existing = await this.getSession(route.sessionKey);
     if (existing) {
       await this.hermesAdapter.resetSession(existing.id);
@@ -96,7 +121,7 @@ export class InMemoryChatSessionRouter {
   }
 
   async remapSession(input: RoutingInput, hermesSessionId: string): Promise<ChatSessionMapping> {
-    const route = normalizeRoutingInput(input);
+    const route = this.normalizeRoutingInput(input);
     const current = this.sessions.get(hermesSessionId);
     const now = new Date().toISOString();
 
@@ -123,25 +148,65 @@ export class InMemoryChatSessionRouter {
   }
 
   async handleInboundMessage(event: WhatsAppMessageEvent): Promise<InboundMessageResult> {
-    if (this.hasProcessed(event)) {
+    const route = this.normalizeRoutingInput(event);
+    const routedEvent: WhatsAppMessageEvent = {
+      ...event,
+      chatJid: route.chatJid,
+      chatType: route.chatType,
+      sessionKey: route.sessionKey,
+    };
+
+    if (this.hasProcessed(routedEvent)) {
       return { duplicate: true };
     }
 
-    this.markProcessed(event);
-    return this.enqueue(event.sessionKey, async () => this.processInboundMessage(event));
+    this.markProcessed(routedEvent);
+    return this.enqueue(route.sessionKey, async () => this.processInboundMessage(routedEvent));
+  }
+
+  async retryInboundMessage(event: WhatsAppMessageEvent): Promise<InboundMessageResult> {
+    const route = this.normalizeRoutingInput(event);
+    const routedEvent: WhatsAppMessageEvent = {
+      ...event,
+      chatJid: route.chatJid,
+      chatType: route.chatType,
+      sessionKey: route.sessionKey,
+      messageId: `${event.messageId}:retry:${Date.now()}`,
+    };
+    return this.enqueue(route.sessionKey, async () => this.processInboundMessage(routedEvent));
   }
 
   private async processInboundMessage(event: WhatsAppMessageEvent): Promise<InboundMessageResult> {
     const session = await this.getOrCreateSession(event);
     const reply = await this.hermesAdapter.sendMessage(session.id, event);
 
+    if (reply.sessionId !== session.id) {
+      this.sessions.delete(session.id);
+      session.id = reply.sessionId;
+      const currentMapping = this.mappings.get(session.sessionKey);
+      if (currentMapping) {
+        this.mappings.set(session.sessionKey, {
+          ...currentMapping,
+          hermesSessionId: reply.sessionId,
+          updatedAt: new Date().toISOString(),
+        });
+      }
+    }
+
     session.lastActivityAt = new Date().toISOString();
+    this.sessions.set(session.id, session);
     this.saveState();
+    const mapping = this.mappings.get(session.sessionKey);
+    if (!mapping) {
+      throw new Error(`Session mapping not found for ${session.sessionKey}`);
+    }
+
     return {
       duplicate: false,
-      mapping: this.mappings.get(event.sessionKey)!,
+      mapping,
       reply,
       session,
+      event,
     };
   }
 
@@ -149,11 +214,13 @@ export class InMemoryChatSessionRouter {
     const previous = this.sessionQueues.get(sessionKey) ?? Promise.resolve({ duplicate: false });
     const next = previous.catch(() => ({ duplicate: false })).then(task);
     this.sessionQueues.set(sessionKey, next);
-    void next.finally(() => {
-      if (this.sessionQueues.get(sessionKey) === next) {
-        this.sessionQueues.delete(sessionKey);
-      }
-    });
+    void next
+      .finally(() => {
+        if (this.sessionQueues.get(sessionKey) === next) {
+          this.sessionQueues.delete(sessionKey);
+        }
+      })
+      .catch(() => undefined);
 
     return next;
   }
@@ -169,6 +236,36 @@ export class InMemoryChatSessionRouter {
 
   private getProcessedMessageKey(event: WhatsAppMessageEvent) {
     return `${event.accountId}:${event.chatJid}:${event.messageId}`;
+  }
+
+  private normalizeRoutingInput(input: RoutingInput): NormalizedRoutingInput {
+    const chatJid = input.chatJid ?? input.chatId;
+    if (!chatJid) {
+      throw new Error("chatJid is required");
+    }
+
+    const chatType = input.chatType ?? (chatJid.endsWith("@g.us") ? "group" : "direct");
+    const groupPolicy =
+      chatType === "group"
+        ? input.groupPolicy ?? this.groupPolicyStore?.getGroupPolicy(input.accountId, chatJid)
+        : undefined;
+    const shouldUseProvidedSessionKey = Boolean(input.sessionKey && chatType !== "group");
+    const sessionKey = shouldUseProvidedSessionKey
+      ? input.sessionKey!
+      : getWhatsAppSessionKey({
+        accountId: input.accountId,
+        chatJid,
+        chatType,
+        ...(groupPolicy ? { groupPolicy } : {}),
+        ...(input.participantJid ? { participantJid: input.participantJid } : {}),
+      });
+
+    return {
+      accountId: input.accountId,
+      chatJid,
+      chatType,
+      sessionKey,
+    };
   }
 
   private saveState() {
@@ -191,6 +288,22 @@ export interface ChatSessionRouterStore {
   save(snapshot: ChatSessionRouterSnapshot): void;
 }
 
+export interface BridgeDeliveryStore {
+  listDeliveries(): DeliveryRecord[];
+  getDelivery(id: string): DeliveryRecord | null;
+  saveDelivery(record: DeliveryRecord): void;
+}
+
+export interface GroupRoutingPolicyStore {
+  listGroupPolicies(): GroupRoutingPolicyRecord[];
+  getGroupPolicy(accountId: string, groupJid: string): WhatsAppGroupRoutingPolicy;
+  setGroupPolicy(input: {
+    accountId: string;
+    groupJid: string;
+    policy: WhatsAppGroupRoutingPolicy;
+  }): GroupRoutingPolicyRecord;
+}
+
 export interface RoutingInput {
   accountId: string;
   chatJid?: WhatsAppChatId;
@@ -198,28 +311,12 @@ export interface RoutingInput {
   chatType?: WhatsAppChatType;
   participantJid?: string;
   sessionKey?: string;
+  groupPolicy?: WhatsAppGroupRoutingPolicy;
 }
 
-function normalizeRoutingInput(input: RoutingInput) {
-  const chatJid = input.chatJid ?? input.chatId;
-  if (!chatJid) {
-    throw new Error("chatJid is required");
-  }
-
-  const chatType = input.chatType ?? (chatJid.endsWith("@g.us") ? "group" : "direct");
-  const sessionKey =
-    input.sessionKey ??
-    getWhatsAppSessionKey({
-      accountId: input.accountId,
-      chatJid,
-      chatType,
-      ...(input.participantJid ? { participantJid: input.participantJid } : {}),
-    });
-
-  return {
-    accountId: input.accountId,
-    chatJid,
-    chatType,
-    sessionKey,
-  };
+interface NormalizedRoutingInput {
+  accountId: string;
+  chatJid: WhatsAppChatId;
+  chatType: WhatsAppChatType;
+  sessionKey: string;
 }
