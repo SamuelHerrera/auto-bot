@@ -2,16 +2,16 @@ import type { AppConfig } from "./config.js";
 import {
   type BridgeDeliveryStore,
   InMemoryChatSessionRouter,
+  type NumberRuleStore,
 } from "./services/chat-session-router.js";
 import {
-  CliHermesAdapter,
   HermesApiAdapter,
-  MockHermesAdapter,
   type HermesAdapter,
 } from "./services/hermes-adapter.js";
 import { BaileysWhatsAppGateway } from "./services/baileys-whatsapp-gateway.js";
 import { FileBridgeStateStore } from "./services/bridge-state-store.js";
 import { SqliteBridgeStateStore } from "./services/sqlite-bridge-state-store.js";
+import { evaluateNumberRules, recordBlockedNumberDelivery } from "./services/number-rules.js";
 import type { WhatsAppGateway } from "./services/whatsapp-service.js";
 
 export interface AppServices {
@@ -19,6 +19,7 @@ export interface AppServices {
   router: InMemoryChatSessionRouter;
   whatsappGateway: WhatsAppGateway;
   deliveryStore?: BridgeDeliveryStore;
+  numberRuleStore?: NumberRuleStore;
 }
 
 export function buildServices(config: AppConfig): AppServices {
@@ -36,18 +37,17 @@ export function buildServices(config: AppConfig): AppServices {
   );
 
   whatsappGateway.onInboundMessage(async (event) => {
-    try {
-      const result = await router.handleInboundMessage(event);
-      if (result.duplicate || !result.reply) {
-        return;
-      }
+    const deliveryStore = bridgeStore instanceof SqliteBridgeStateStore ? bridgeStore : undefined;
+    const numberRuleStore = bridgeStore instanceof SqliteBridgeStateStore ? bridgeStore : undefined;
+    const decision = evaluateNumberRules(numberRuleStore, event);
+    if (!decision.allowed) {
+      recordBlockedNumberDelivery(deliveryStore, event, decision.reason ?? "Blocked by number rule");
+      return;
+    }
 
-      await sendReplyWithDeliveryRecord({
-        ...(bridgeStore instanceof SqliteBridgeStateStore ? { deliveryStore: bridgeStore } : {}),
-        event: result.event ?? event,
-        text: result.reply.outputText,
-        whatsappGateway,
-      });
+    let result;
+    try {
+      result = await router.handleInboundMessage(event);
     } catch (error) {
       const now = new Date().toISOString();
       if (bridgeStore instanceof SqliteBridgeStateStore) {
@@ -68,8 +68,22 @@ export function buildServices(config: AppConfig): AppServices {
           updatedAt: now,
         });
       }
-      throw error;
+      console.error("Hermes inbound turn failed", error);
+      return;
     }
+
+    if (result.duplicate || !result.reply) {
+      return;
+    }
+
+    await sendReplyWithDeliveryRecord({
+      ...(bridgeStore instanceof SqliteBridgeStateStore ? { deliveryStore: bridgeStore } : {}),
+      event: result.event ?? event,
+      text: result.reply.outputText,
+      whatsappGateway,
+    }).catch((error: unknown) => {
+      console.error("WhatsApp reply delivery failed", error);
+    });
   });
 
   return {
@@ -77,6 +91,7 @@ export function buildServices(config: AppConfig): AppServices {
     router,
     whatsappGateway,
     ...(bridgeStore instanceof SqliteBridgeStateStore ? { deliveryStore: bridgeStore } : {}),
+    ...(bridgeStore instanceof SqliteBridgeStateStore ? { numberRuleStore: bridgeStore } : {}),
   };
 }
 
@@ -136,17 +151,9 @@ export async function sendReplyWithDeliveryRecord(input: {
 }
 
 function buildHermesAdapter(config: AppConfig): HermesAdapter {
-  if (config.HERMES_ADAPTER_MODE === "api") {
-    return new HermesApiAdapter({
-      apiKey: config.HERMES_API_KEY,
-      baseUrl: config.HERMES_API_BASE_URL,
-      model: config.HERMES_API_MODEL,
-    });
-  }
-
-  if (config.HERMES_ADAPTER_MODE === "cli") {
-    return new CliHermesAdapter();
-  }
-
-  return new MockHermesAdapter();
+  return new HermesApiAdapter({
+    apiKey: config.internalApiKey,
+    baseUrl: config.HERMES_API_BASE_URL,
+    model: config.HERMES_API_MODEL,
+  });
 }

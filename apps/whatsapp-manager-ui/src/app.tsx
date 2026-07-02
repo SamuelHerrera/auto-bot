@@ -2,7 +2,9 @@ import { FormEvent, useEffect, useState } from "react";
 import { QRCodeSVG } from "qrcode.react";
 
 type AccountStatus = "disconnected" | "connecting" | "connected";
-type ActiveView = "accounts" | "messages" | "failures" | "settings";
+type ActiveView = "accounts" | "messages" | "rules" | "failures" | "settings";
+type NumberRuleAction = "allow" | "deny";
+type NumberRuleMatchType = "all" | "exact" | "regex";
 
 interface WhatsAppAccount {
   accountId: string;
@@ -37,6 +39,18 @@ interface DeliveryRecord {
   attempts: number;
   failureStage?: "hermes" | "whatsapp";
   error?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+interface NumberRule {
+  id: string;
+  accountId: string;
+  action: NumberRuleAction;
+  matchType: NumberRuleMatchType;
+  pattern: string;
+  label?: string;
+  enabled: boolean;
   createdAt: string;
   updatedAt: string;
 }
@@ -83,14 +97,19 @@ export function App() {
   const [accounts, setAccounts] = useState<WhatsAppAccount[]>([]);
   const [mappings, setMappings] = useState<SessionMapping[]>([]);
   const [deliveries, setDeliveries] = useState<DeliveryRecord[]>([]);
+  const [numberRules, setNumberRules] = useState<NumberRule[]>([]);
   const [activeView, setActiveView] = useState<ActiveView>("accounts");
   const [activeAccountId, setActiveAccountId] = useState("");
   const [activeChatJid, setActiveChatJid] = useState("");
   const [isLinkDialogOpen, setIsLinkDialogOpen] = useState(false);
   const [linkingStatus, setLinkingStatus] = useState<WhatsAppAccount | null>(null);
-  const [statusMessage, setStatusMessage] = useState("Workspace ready. Sync or register an account.");
+  const [statusMessage, setStatusMessage] = useState("Live. Register an account to begin.");
   const [errorMessage, setErrorMessage] = useState("");
   const [isBusy, setIsBusy] = useState(false);
+  const [ruleAction, setRuleAction] = useState<NumberRuleAction>("allow");
+  const [ruleMatchType, setRuleMatchType] = useState<NumberRuleMatchType>("exact");
+  const [rulePattern, setRulePattern] = useState("");
+  const [ruleLabel, setRuleLabel] = useState("");
 
   useEffect(() => {
     if (apiUrl.trim()) {
@@ -112,19 +131,16 @@ export function App() {
   }, []);
 
   useEffect(() => {
-    if (
-      !apiToken.trim() ||
-      (!isLinkDialogOpen && !linkingStatus && !accounts.some((account) => account.status === "connecting"))
-    ) {
+    if (!apiToken.trim()) {
       return;
     }
 
     const interval = window.setInterval(() => {
-      void refreshData(false);
+      void refreshData(false, false);
     }, 3000);
 
     return () => window.clearInterval(interval);
-  }, [accounts, apiToken, apiUrl, isLinkDialogOpen, linkingStatus]);
+  }, [apiToken, apiUrl]);
 
   useEffect(() => {
     const firstAccount = accounts[0];
@@ -154,29 +170,39 @@ export function App() {
       return undefined as T;
     }
 
+    const contentType = response.headers.get("content-type") ?? "";
+    if (!contentType.includes("application/json")) {
+      const body = await response.text();
+      throw new Error(`Expected JSON from ${path}, got ${contentType || "unknown content type"}: ${body.slice(0, 80)}`);
+    }
+
     return response.json() as Promise<T>;
   }
 
-  async function refreshData(showMessage = true) {
+  async function refreshData(showMessage = true, showBusy = true) {
     if (!apiToken.trim()) {
       setErrorMessage("An API token is required before the UI can manage accounts.");
       return;
     }
 
-    setIsBusy(true);
+    if (showBusy) {
+      setIsBusy(true);
+    }
     setErrorMessage("");
 
     try {
-      const [accountResponse, mappingResponse, deliveryResponse, linkStatus] = await Promise.all([
+      const [accountResponse, mappingResponse, deliveryResponse, ruleResponse, linkStatus] = await Promise.all([
         request<{ items: WhatsAppAccount[] }>("/whatsapp/accounts"),
         request<{ items: SessionMapping[] }>("/sessions"),
         request<{ items: DeliveryRecord[] }>("/deliveries"),
+        request<{ items: NumberRule[] }>("/number-rules"),
         request<WhatsAppAccount>("/whatsapp/status"),
       ]);
 
       setAccounts(accountResponse.items);
       setMappings(mappingResponse.items.filter((mapping) => mapping.chatType === "direct"));
       setDeliveries(deliveryResponse.items.filter((delivery) => delivery.chatType === "direct"));
+      setNumberRules(ruleResponse.items);
       if (linkStatus.qrCode || linkStatus.status === "connecting") {
         setLinkingStatus(linkStatus);
       } else if (linkingStatus || isLinkDialogOpen) {
@@ -194,7 +220,9 @@ export function App() {
     } catch (error) {
       setErrorMessage(normalizeError(error));
     } finally {
-      setIsBusy(false);
+      if (showBusy) {
+        setIsBusy(false);
+      }
     }
   }
 
@@ -253,6 +281,54 @@ export function App() {
     });
   }
 
+  async function createNumberRule(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+
+    await runAction(async () => {
+      const accountId = activeAccountId || accounts[0]?.accountId || "";
+      if (!accountId) {
+        throw new Error("Select an account before adding a rule.");
+      }
+
+      await request<NumberRule>("/number-rules", {
+        method: "POST",
+        body: JSON.stringify({
+          accountId,
+          action: ruleAction,
+          matchType: ruleMatchType,
+          pattern: ruleMatchType === "all" ? "" : rulePattern,
+          label: ruleLabel,
+          enabled: true,
+        }),
+      });
+      setRulePattern("");
+      setRuleLabel("");
+      setStatusMessage("Number rule saved.");
+      await refreshData(false);
+    });
+  }
+
+  async function updateNumberRule(rule: NumberRule, enabled: boolean) {
+    await runAction(async () => {
+      await request<NumberRule>(`/number-rules/${encodeURIComponent(rule.id)}`, {
+        method: "PUT",
+        body: JSON.stringify({ enabled }),
+      });
+      setStatusMessage(enabled ? "Rule enabled." : "Rule disabled.");
+      await refreshData(false);
+    });
+  }
+
+  async function deleteNumberRule(ruleId: string) {
+    await runAction(async () => {
+      await request<void>(`/number-rules/${encodeURIComponent(ruleId)}`, {
+        method: "DELETE",
+      });
+      setStatusMessage("Number rule deleted.");
+      await refreshData(false);
+    });
+  }
+
   async function runAction(action: () => Promise<void>) {
     if (!apiToken.trim()) {
       setErrorMessage("An API token is required before the UI can manage accounts.");
@@ -297,21 +373,14 @@ export function App() {
   return (
     <div className="shell">
       <header className="topbar">
-        <div>
-          <span className="eyebrow">WhatsApp manager</span>
+        <div className="brand-lockup">
+          <img src="/wa-mark.svg" alt="" aria-hidden="true" />
           <h1>{appTitle}</h1>
         </div>
-        <div className="topbar-actions">
-          <button className="secondary-button" onClick={() => void refreshData()} disabled={isBusy}>
-            Sync
-          </button>
-        </div>
+        <span className={`header-status-badge${errorMessage ? " header-status-badge-error" : ""}`} aria-live="polite">
+          {errorMessage || statusMessage}
+        </span>
       </header>
-
-      <section className={`notice-strip${errorMessage ? " notice-strip-error" : ""}`} aria-live="polite">
-        <span className="status-label">Status</span>
-        <p>{errorMessage || statusMessage}</p>
-      </section>
 
       <main className="admin-layout">
         <nav className="admin-nav" aria-label="Admin sections">
@@ -320,6 +389,9 @@ export function App() {
           </TabButton>
           <TabButton active={activeView === "messages"} onClick={() => setActiveView("messages")}>
             Messages
+          </TabButton>
+          <TabButton active={activeView === "rules"} onClick={() => setActiveView("rules")}>
+            Rules
           </TabButton>
           <TabButton active={activeView === "failures"} onClick={() => setActiveView("failures")}>
             Failures
@@ -358,6 +430,30 @@ export function App() {
                 setActiveChatJid("");
               }}
               onSelectChat={setActiveChatJid}
+            />
+          ) : null}
+
+          {activeView === "rules" ? (
+            <RulesView
+              accounts={accounts}
+              activeAccountId={activeAccountId}
+              isBusy={isBusy}
+              matchType={ruleMatchType}
+              onActionChange={setRuleAction}
+              onCreate={createNumberRule}
+              onDelete={(ruleId) => void deleteNumberRule(ruleId)}
+              onEnabledChange={(rule, enabled) => void updateNumberRule(rule, enabled)}
+              onLabelChange={setRuleLabel}
+              onMatchTypeChange={setRuleMatchType}
+              onPatternChange={setRulePattern}
+              onSelectAccount={(accountId) => {
+                setActiveAccountId(accountId);
+                setActiveChatJid("");
+              }}
+              pattern={rulePattern}
+              ruleAction={ruleAction}
+              ruleLabel={ruleLabel}
+              rules={numberRules.filter((rule) => rule.accountId === activeAccountId)}
             />
           ) : null}
 
@@ -641,6 +737,130 @@ function MessagesView({
   );
 }
 
+function RulesView({
+  accounts,
+  activeAccountId,
+  isBusy,
+  matchType,
+  onActionChange,
+  onCreate,
+  onDelete,
+  onEnabledChange,
+  onLabelChange,
+  onMatchTypeChange,
+  onPatternChange,
+  onSelectAccount,
+  pattern,
+  ruleAction,
+  ruleLabel,
+  rules,
+}: {
+  accounts: WhatsAppAccount[];
+  activeAccountId: string;
+  isBusy: boolean;
+  matchType: NumberRuleMatchType;
+  onActionChange: (value: NumberRuleAction) => void;
+  onCreate: (event: FormEvent<HTMLFormElement>) => void;
+  onDelete: (ruleId: string) => void;
+  onEnabledChange: (rule: NumberRule, enabled: boolean) => void;
+  onLabelChange: (value: string) => void;
+  onMatchTypeChange: (value: NumberRuleMatchType) => void;
+  onPatternChange: (value: string) => void;
+  onSelectAccount: (accountId: string) => void;
+  pattern: string;
+  ruleAction: NumberRuleAction;
+  ruleLabel: string;
+  rules: NumberRule[];
+}) {
+  return (
+    <>
+      <div className="section-heading">
+        <div>
+          <span className="panel-kicker">Rules</span>
+          <h2>Approved number controls</h2>
+        </div>
+        <label className="select-field">
+          <span>Account</span>
+          <select value={activeAccountId} onChange={(event) => onSelectAccount(event.target.value)}>
+            <option value="">Select account</option>
+            {accounts.map((account) => (
+              <option key={account.accountId} value={account.accountId}>
+                {account.accountId}
+              </option>
+            ))}
+          </select>
+        </label>
+      </div>
+
+      <form className="rule-form" onSubmit={onCreate}>
+        <label className="compact-field">
+          <span>Action</span>
+          <select value={ruleAction} onChange={(event) => onActionChange(event.target.value as NumberRuleAction)}>
+            <option value="allow">Allow</option>
+            <option value="deny">Deny</option>
+          </select>
+        </label>
+        <label className="compact-field">
+          <span>Match</span>
+          <select value={matchType} onChange={(event) => onMatchTypeChange(event.target.value as NumberRuleMatchType)}>
+            <option value="exact">Full match</option>
+            <option value="regex">Regex</option>
+            <option value="all">All numbers</option>
+          </select>
+        </label>
+        <label className="compact-field">
+          <span>Pattern</span>
+          <input
+            value={matchType === "all" ? "" : pattern}
+            onChange={(event) => onPatternChange(event.target.value)}
+            placeholder={matchType === "regex" ? "^1555" : "15551234567"}
+            disabled={matchType === "all"}
+          />
+        </label>
+        <label className="compact-field">
+          <span>Label</span>
+          <input value={ruleLabel} onChange={(event) => onLabelChange(event.target.value)} placeholder="Ops allowlist" />
+        </label>
+        <button type="submit" disabled={isBusy || !activeAccountId || (matchType !== "all" && !pattern.trim())}>
+          Add rule
+        </button>
+      </form>
+
+      <div className="rule-list">
+        {!activeAccountId ? (
+          <EmptyState title="Select an account" description="Number rules are stored per WhatsApp account." />
+        ) : rules.length === 0 ? (
+          <EmptyState title="No number rules" description="Add allow or deny rules for this account." />
+        ) : (
+          rules.map((rule) => (
+            <article key={rule.id} className="rule-row">
+              <div className="rule-row-main">
+                <span className={`badge badge-rule-${rule.action}`}>{rule.action}</span>
+                <span>
+                  <strong>{rule.label || getRuleDisplayValue(rule)}</strong>
+                  <small>{rule.label ? getRuleDisplayValue(rule) : formatTimestamp(rule.updatedAt)}</small>
+                </span>
+              </div>
+              <label className="check-field">
+                <input
+                  type="checkbox"
+                  checked={rule.enabled}
+                  onChange={(event) => onEnabledChange(rule, event.target.checked)}
+                  disabled={isBusy}
+                />
+                <span>Enabled</span>
+              </label>
+              <button className="text-button danger-button" onClick={() => onDelete(rule.id)} disabled={isBusy}>
+                Delete
+              </button>
+            </article>
+          ))
+        )}
+      </div>
+    </>
+  );
+}
+
 function FailuresView({
   failedDeliveries,
   isBusy,
@@ -845,6 +1065,14 @@ function buildChatMessages(deliveries: DeliveryRecord[]): ChatMessage[] {
 
 function formatTimestamp(value: string) {
   return new Date(value).toLocaleString();
+}
+
+function getRuleDisplayValue(rule: NumberRule) {
+  if (rule.matchType === "all") {
+    return "All numbers";
+  }
+
+  return `${rule.matchType === "exact" ? "Full match" : "Regex"} ${rule.pattern}`;
 }
 
 function getInitialApiUrl() {

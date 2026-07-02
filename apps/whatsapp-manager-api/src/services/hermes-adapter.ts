@@ -13,52 +13,12 @@ export interface HermesApiAdapterOptions {
   model: string;
 }
 
-export class MockHermesAdapter implements HermesAdapter {
-  async createSession(sessionKey: string): Promise<HermesSession> {
-    const now = new Date().toISOString();
-    return {
-      id: `hermes_${sessionKey}_${Date.now()}`,
-      sessionKey,
-      accountId: "unassigned",
-      chatJid: sessionKey,
-      chatType: "direct",
-      chatId: sessionKey,
-      createdAt: now,
-      lastActivityAt: now,
-      status: "active",
-    };
-  }
-
-  async sendMessage(sessionId: string, event: WhatsAppMessageEvent): Promise<HermesReply> {
-    return {
-      sessionId,
-      outputText: `mock-hermes-response: ${event.text}`,
-    };
-  }
-
-  async resetSession(_sessionId: string): Promise<void> {}
-}
-
-export class CliHermesAdapter implements HermesAdapter {
-  async createSession(_sessionKey: string): Promise<HermesSession> {
-    throw new Error("CLI Hermes adapter is not implemented yet.");
-  }
-
-  async sendMessage(_sessionId: string, _event: WhatsAppMessageEvent): Promise<HermesReply> {
-    throw new Error("CLI Hermes adapter is not implemented yet.");
-  }
-
-  async resetSession(_sessionId: string): Promise<void> {
-    throw new Error("CLI Hermes adapter is not implemented yet.");
-  }
-}
-
 export class HermesApiAdapter implements HermesAdapter {
   constructor(private readonly options: HermesApiAdapterOptions) {}
 
   async createSession(sessionKey: string): Promise<HermesSession> {
     if (!this.options.apiKey) {
-      throw new Error("HERMES_API_KEY is required when HERMES_ADAPTER_MODE=api.");
+      throw new Error("Internal Hermes API key is required.");
     }
 
     const sessionId = getHermesApiSessionId(sessionKey);
@@ -88,7 +48,7 @@ export class HermesApiAdapter implements HermesAdapter {
 
   async sendMessage(sessionId: string, event: WhatsAppMessageEvent): Promise<HermesReply> {
     if (!this.options.apiKey) {
-      throw new Error("HERMES_API_KEY is required when HERMES_ADAPTER_MODE=api.");
+      throw new Error("Internal Hermes API key is required.");
     }
 
     const response = await fetch(
@@ -127,7 +87,7 @@ export class HermesApiAdapter implements HermesAdapter {
 
   async resetSession(sessionId: string): Promise<void> {
     if (!this.options.apiKey) {
-      throw new Error("HERMES_API_KEY is required when HERMES_ADAPTER_MODE=api.");
+      throw new Error("Internal Hermes API key is required.");
     }
 
     const response = await fetch(

@@ -3,6 +3,8 @@ import Fastify from "fastify";
 import { ZodError } from "zod";
 import type { AppConfig } from "./config.js";
 import { buildServices, sendReplyWithDeliveryRecord, type AppServices } from "./build-services.js";
+import type { NumberRuleInput } from "./domain/types.js";
+import { evaluateNumberRules, recordBlockedNumberDelivery } from "./services/number-rules.js";
 import type { RoutingInput } from "./services/chat-session-router.js";
 
 interface CreateAppOptions {
@@ -36,7 +38,8 @@ export function createApp({ config, services = buildServices(config) }: CreateAp
     status: "ok",
     dependencies: {
       databaseUrlConfigured: Boolean(config.DATABASE_URL),
-      hermesAdapterMode: config.HERMES_ADAPTER_MODE,
+      hermesApiBaseUrl: config.HERMES_API_BASE_URL,
+      internalApiKeyConfigured: Boolean(config.internalApiKey),
     },
   }));
 
@@ -106,6 +109,46 @@ export function createApp({ config, services = buildServices(config) }: CreateAp
     items: services.deliveryStore?.listDeliveries() ?? [],
   }));
 
+  app.get<{ Querystring: { accountId?: string } }>("/number-rules", async (request) => ({
+    items: services.numberRuleStore?.listNumberRules(request.query.accountId) ?? [],
+  }));
+
+  app.post<{ Body: unknown }>("/number-rules", async (request, reply) => {
+    if (!services.numberRuleStore) {
+      return reply.code(503).send({ error: "Number rule storage is not configured" });
+    }
+
+    const input = parseNumberRuleInput(request.body);
+    return services.numberRuleStore.createNumberRule(input);
+  });
+
+  app.put<{ Params: { ruleId: string }; Body: unknown }>("/number-rules/:ruleId", async (request, reply) => {
+    if (!services.numberRuleStore) {
+      return reply.code(503).send({ error: "Number rule storage is not configured" });
+    }
+
+    const existing = services.numberRuleStore.getNumberRule(decodeURIComponent(request.params.ruleId));
+    if (!existing) {
+      return reply.code(404).send({ error: "Number rule not found" });
+    }
+
+    const input = parseNumberRuleInput(request.body, existing);
+    return services.numberRuleStore.updateNumberRule(existing.id, input);
+  });
+
+  app.delete<{ Params: { ruleId: string } }>("/number-rules/:ruleId", async (request, reply) => {
+    if (!services.numberRuleStore) {
+      return reply.code(503).send({ error: "Number rule storage is not configured" });
+    }
+
+    const deleted = services.numberRuleStore.deleteNumberRule(decodeURIComponent(request.params.ruleId));
+    if (!deleted) {
+      return reply.code(404).send({ error: "Number rule not found" });
+    }
+
+    return reply.code(204).send();
+  });
+
   app.post<{ Params: { deliveryId: string } }>("/deliveries/:deliveryId/retry", async (request, reply) => {
     const record = services.deliveryStore?.getDelivery(decodeURIComponent(request.params.deliveryId));
     if (!record) {
@@ -117,7 +160,7 @@ export function createApp({ config, services = buildServices(config) }: CreateAp
         return reply.code(409).send({ error: "Hermes failure record has no inbound text to retry" });
       }
 
-      const result = await services.router.retryInboundMessage({
+      const retryEvent = {
         accountId: record.accountId,
         chatJid: record.chatJid,
         chatType: record.chatType,
@@ -128,7 +171,14 @@ export function createApp({ config, services = buildServices(config) }: CreateAp
         sessionKey: record.sessionKey,
         text: record.inboundText,
         timestamp: new Date().toISOString(),
-      });
+      };
+      const decision = evaluateNumberRules(services.numberRuleStore, retryEvent);
+      if (!decision.allowed) {
+        recordBlockedNumberDelivery(services.deliveryStore, retryEvent, decision.reason ?? "Blocked by number rule");
+        return reply.code(409).send({ error: decision.reason ?? "Blocked by number rule" });
+      }
+
+      const result = await services.router.retryInboundMessage(retryEvent);
 
       if (!result.reply) {
         return reply.code(409).send({ error: "Hermes retry produced no reply" });
@@ -205,6 +255,12 @@ export function createApp({ config, services = buildServices(config) }: CreateAp
       throw error;
     }
 
+    const decision = evaluateNumberRules(services.numberRuleStore, event);
+    if (!decision.allowed) {
+      recordBlockedNumberDelivery(services.deliveryStore, event, decision.reason ?? "Blocked by number rule");
+      return { ignored: true, reason: "number-rule" };
+    }
+
     return services.router.handleInboundMessage(event);
   });
 
@@ -219,6 +275,63 @@ export function createApp({ config, services = buildServices(config) }: CreateAp
   });
 
   return app;
+}
+
+function parseNumberRuleInput(body: unknown, existing?: NumberRuleInput): NumberRuleInput {
+  if (!body || typeof body !== "object") {
+    throw badRequest("Rule payload must be an object");
+  }
+
+  const value = body as Record<string, unknown>;
+  const accountId = readString(value.accountId, existing?.accountId ?? "").trim();
+  const action = readString(value.action, existing?.action ?? "");
+  const matchType = readString(value.matchType, existing?.matchType ?? "");
+  const pattern = readString(value.pattern, existing?.pattern ?? "");
+  const label = readString(value.label, existing?.label ?? "").trim();
+  const enabled = typeof value.enabled === "boolean" ? value.enabled : existing?.enabled ?? true;
+
+  if (!accountId) {
+    throw badRequest("accountId is required");
+  }
+
+  if (action !== "allow" && action !== "deny") {
+    throw badRequest("action must be allow or deny");
+  }
+
+  if (matchType !== "all" && matchType !== "exact" && matchType !== "regex") {
+    throw badRequest("matchType must be all, exact, or regex");
+  }
+
+  if (matchType !== "all" && !pattern.trim()) {
+    throw badRequest("pattern is required for exact and regex rules");
+  }
+
+  if (matchType === "regex") {
+    try {
+      new RegExp(pattern);
+    } catch (error) {
+      throw badRequest(error instanceof Error ? `Invalid regex: ${error.message}` : "Invalid regex");
+    }
+  }
+
+  return {
+    accountId,
+    action,
+    matchType,
+    pattern: matchType === "all" ? "" : pattern.trim(),
+    ...(label ? { label } : {}),
+    enabled,
+  };
+}
+
+function readString(value: unknown, fallback: string) {
+  return typeof value === "string" ? value : fallback;
+}
+
+function badRequest(message: string) {
+  const error = new Error(message) as Error & { statusCode: number };
+  error.statusCode = 400;
+  return error;
 }
 
 function requestLog(error: Error) {

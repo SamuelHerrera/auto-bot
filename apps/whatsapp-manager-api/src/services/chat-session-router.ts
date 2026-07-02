@@ -4,6 +4,8 @@ import type {
   GroupRoutingPolicyRecord,
   HermesSession,
   InboundMessageResult,
+  NumberRuleInput,
+  NumberRuleRecord,
   WhatsAppChatId,
   WhatsAppChatType,
   WhatsAppGroupRoutingPolicy,
@@ -302,6 +304,14 @@ export interface GroupRoutingPolicyStore {
     groupJid: string;
     policy: WhatsAppGroupRoutingPolicy;
   }): GroupRoutingPolicyRecord;
+}
+
+export interface NumberRuleStore {
+  listNumberRules(accountId?: string): NumberRuleRecord[];
+  getNumberRule(id: string): NumberRuleRecord | null;
+  createNumberRule(input: NumberRuleInput): NumberRuleRecord;
+  updateNumberRule(id: string, input: Partial<NumberRuleInput>): NumberRuleRecord | null;
+  deleteNumberRule(id: string): boolean;
 }
 
 export interface RoutingInput {

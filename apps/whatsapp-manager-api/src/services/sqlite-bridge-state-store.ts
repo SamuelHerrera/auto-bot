@@ -1,11 +1,14 @@
 import { mkdirSync } from "node:fs";
 import path from "node:path";
+import { randomUUID } from "node:crypto";
 import { DatabaseSync } from "node:sqlite";
 import type {
   ChatSessionMapping,
   DeliveryRecord,
   GroupRoutingPolicyRecord,
   HermesSession,
+  NumberRuleInput,
+  NumberRuleRecord,
   WhatsAppGroupRoutingPolicy,
 } from "../domain/types.js";
 import type {
@@ -13,10 +16,11 @@ import type {
   ChatSessionRouterSnapshot,
   ChatSessionRouterStore,
   GroupRoutingPolicyStore,
+  NumberRuleStore,
 } from "./chat-session-router.js";
 
 export class SqliteBridgeStateStore
-  implements ChatSessionRouterStore, BridgeDeliveryStore, GroupRoutingPolicyStore
+  implements ChatSessionRouterStore, BridgeDeliveryStore, GroupRoutingPolicyStore, NumberRuleStore
 {
   private readonly db: DatabaseSync;
 
@@ -190,6 +194,110 @@ export class SqliteBridgeStateStore
     return record;
   }
 
+  listNumberRules(accountId?: string): NumberRuleRecord[] {
+    const query = accountId?.trim()
+      ? this.db.prepare("SELECT * FROM number_rules WHERE account_id = ? ORDER BY created_at DESC")
+      : this.db.prepare("SELECT * FROM number_rules ORDER BY created_at DESC");
+    const rows = accountId?.trim() ? query.all(accountId.trim()) : query.all();
+    return rows.map(rowToNumberRule);
+  }
+
+  getNumberRule(id: string): NumberRuleRecord | null {
+    const row = this.db.prepare("SELECT * FROM number_rules WHERE id = ?").get(id);
+    return row ? rowToNumberRule(row) : null;
+  }
+
+  createNumberRule(input: NumberRuleInput): NumberRuleRecord {
+    const now = new Date().toISOString();
+    const record: NumberRuleRecord = {
+      id: randomUUID(),
+      accountId: input.accountId,
+      action: input.action,
+      matchType: input.matchType,
+      pattern: input.matchType === "all" ? "" : input.pattern ?? "",
+      ...(input.label?.trim() ? { label: input.label.trim() } : {}),
+      enabled: input.enabled ?? true,
+      createdAt: now,
+      updatedAt: now,
+    };
+
+    this.db
+      .prepare(`
+        INSERT INTO number_rules
+          (id, account_id, action, match_type, pattern, label, enabled, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `)
+      .run(
+        record.id,
+        record.accountId,
+        record.action,
+        record.matchType,
+        record.pattern,
+        record.label ?? null,
+        record.enabled ? 1 : 0,
+        record.createdAt,
+        record.updatedAt,
+      );
+
+    return record;
+  }
+
+  updateNumberRule(id: string, input: Partial<NumberRuleInput>): NumberRuleRecord | null {
+    const existing = this.getNumberRule(id);
+    if (!existing) {
+      return null;
+    }
+
+    const record: NumberRuleRecord = {
+      ...existing,
+      ...(input.accountId !== undefined ? { accountId: input.accountId } : {}),
+      ...(input.action !== undefined ? { action: input.action } : {}),
+      ...(input.matchType !== undefined ? { matchType: input.matchType } : {}),
+      ...(input.pattern !== undefined ? { pattern: input.pattern } : {}),
+      ...(input.label !== undefined && input.label.trim() ? { label: input.label.trim() } : {}),
+      enabled: input.enabled ?? existing.enabled,
+      updatedAt: new Date().toISOString(),
+    };
+
+    if (input.label !== undefined && !input.label.trim()) {
+      delete record.label;
+    }
+
+    if (record.matchType === "all") {
+      record.pattern = "";
+    }
+
+    this.db
+      .prepare(`
+        UPDATE number_rules SET
+          account_id = ?,
+          action = ?,
+          match_type = ?,
+          pattern = ?,
+          label = ?,
+          enabled = ?,
+          updated_at = ?
+        WHERE id = ?
+      `)
+      .run(
+        record.accountId,
+        record.action,
+        record.matchType,
+        record.pattern,
+        record.label ?? null,
+        record.enabled ? 1 : 0,
+        record.updatedAt,
+        record.id,
+      );
+
+    return record;
+  }
+
+  deleteNumberRule(id: string): boolean {
+    const result = this.db.prepare("DELETE FROM number_rules WHERE id = ?").run(id);
+    return result.changes > 0;
+  }
+
   private migrate() {
     this.db.exec(`
       CREATE TABLE IF NOT EXISTS hermes_sessions (
@@ -245,6 +353,21 @@ export class SqliteBridgeStateStore
         updated_at TEXT NOT NULL,
         PRIMARY KEY (account_id, group_jid)
       );
+
+      CREATE TABLE IF NOT EXISTS number_rules (
+        id TEXT PRIMARY KEY,
+        account_id TEXT NOT NULL,
+        action TEXT NOT NULL,
+        match_type TEXT NOT NULL,
+        pattern TEXT NOT NULL DEFAULT '',
+        label TEXT,
+        enabled INTEGER NOT NULL,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      );
+
+      CREATE INDEX IF NOT EXISTS number_rules_account_idx
+        ON number_rules(account_id, enabled);
     `);
     this.ensureColumn("delivery_records", "inbound_text", "TEXT");
     this.ensureColumn("delivery_records", "failure_stage", "TEXT");
@@ -316,6 +439,21 @@ function rowToGroupPolicy(row: unknown): GroupRoutingPolicyRecord {
     policy: requiredString(value, "policy") as WhatsAppGroupRoutingPolicy,
     createdAt: requiredString(value, "created_at"),
     updatedAt: requiredString(value, "updated_at"),
+  };
+}
+
+function rowToNumberRule(row: unknown): NumberRuleRecord {
+  const value = row as Record<string, string | number | null>;
+  return {
+    id: String(value.id),
+    accountId: String(value.account_id),
+    action: String(value.action) as NumberRuleRecord["action"],
+    matchType: String(value.match_type) as NumberRuleRecord["matchType"],
+    pattern: String(value.pattern ?? ""),
+    ...(value.label ? { label: String(value.label) } : {}),
+    enabled: Boolean(value.enabled),
+    createdAt: String(value.created_at),
+    updatedAt: String(value.updated_at),
   };
 }
 

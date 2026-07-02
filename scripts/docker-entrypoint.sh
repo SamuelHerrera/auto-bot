@@ -18,7 +18,17 @@ ZEROTIER_AUTOSTART_VALUE="${ZEROTIER_AUTOSTART:-0}"
 ZEROTIER_NETWORK_ID_VALUE="${ZEROTIER_NETWORK_ID:-}"
 
 mkdir -p "${CODEX_HOME}"
+mkdir -p /opt/data/whatsapp-manager
 passwd -d hermes >/dev/null 2>&1 || true
+
+if [ ! -f /opt/data/whatsapp-manager/internal-api-key ]; then
+  node -e 'process.stdout.write(require("node:crypto").randomBytes(32).toString("hex"))' \
+    > /opt/data/whatsapp-manager/internal-api-key
+  chmod 0600 /opt/data/whatsapp-manager/internal-api-key
+fi
+INTERNAL_API_KEY_VALUE="$(cat /opt/data/whatsapp-manager/internal-api-key)"
+export HERMES_API_KEY="${INTERNAL_API_KEY_VALUE}"
+export API_SERVER_KEY="${INTERNAL_API_KEY_VALUE}"
 
 cat > /opt/data/.bashrc <<'EOF'
 export HERMES_HOME=/opt/data
@@ -31,6 +41,20 @@ export HERMES_HOME=/opt/data
 export CODEX_HOME=/opt/data/.codex
 export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:$PATH
 EOF
+
+printf 'export HERMES_API_KEY=%q\nexport API_SERVER_KEY=%q\n' \
+  "${INTERNAL_API_KEY_VALUE}" \
+  "${INTERNAL_API_KEY_VALUE}" \
+  >> /opt/data/.bashrc
+printf 'export HERMES_API_KEY=%q\nexport API_SERVER_KEY=%q\n' \
+  "${INTERNAL_API_KEY_VALUE}" \
+  "${INTERNAL_API_KEY_VALUE}" \
+  >> /opt/data/.profile
+printf 'export HERMES_API_KEY=%q\nexport API_SERVER_KEY=%q\n' \
+  "${INTERNAL_API_KEY_VALUE}" \
+  "${INTERNAL_API_KEY_VALUE}" \
+  > /etc/profile.d/auto-bot-runtime-env.sh
+chmod 0644 /etc/profile.d/auto-bot-runtime-env.sh
 
 chown hermes:hermes /opt/data/.bashrc /opt/data/.profile
 
@@ -250,5 +274,13 @@ EOF
 fi
 
 chown hermes:hermes /opt/data/.env /opt/data/config.yaml /opt/data/auth.json 2>/dev/null || true
+
+mkdir -p /opt/data/logs
+chown hermes:hermes /opt/data/logs
+if ! curl -fsS -H "authorization: Bearer ${INTERNAL_API_KEY_VALUE}" http://127.0.0.1:8642/health >/dev/null 2>&1; then
+  sudo -E -H -u hermes bash -lc \
+    'nohup hermes gateway run --replace --force --accept-hooks >>/opt/data/logs/hermes-gateway.log 2>&1 &' \
+    >/dev/null 2>&1 || true
+fi
 
 exec sudo -E -H -u hermes "$@"

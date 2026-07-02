@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { readFileSync } from "node:fs";
 
 const configSchema = z.object({
   NODE_ENV: z.enum(["development", "test", "production"]).default("development"),
@@ -10,14 +11,28 @@ const configSchema = z.object({
   BAILEYS_STATE_DIR: z.string().min(1).default("/opt/data/whatsapp-manager/baileys"),
   BRIDGE_DATABASE_FILE: z.string().default("/opt/data/whatsapp-manager/bridge-state.sqlite"),
   BRIDGE_STATE_FILE: z.string().default(""),
-  HERMES_ADAPTER_MODE: z.enum(["mock", "cli", "api"]).default("mock"),
   HERMES_API_BASE_URL: z.string().url().default("http://127.0.0.1:8642"),
-  HERMES_API_KEY: z.string().default(""),
   HERMES_API_MODEL: z.string().default("hermes-agent"),
 });
 
-export type AppConfig = z.infer<typeof configSchema>;
+type ParsedConfig = z.infer<typeof configSchema>;
+
+export type AppConfig = ParsedConfig & {
+  internalApiKey: string;
+};
 
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
-  return configSchema.parse(env);
+  const config = configSchema.parse(env);
+  return {
+    ...config,
+    internalApiKey: getInternalApiKey(),
+  };
+}
+
+function getInternalApiKey() {
+  try {
+    return readFileSync("/opt/data/whatsapp-manager/internal-api-key", "utf8").trim();
+  } catch {
+    return "auto-bot-internal-hermes-api-key";
+  }
 }

@@ -76,7 +76,7 @@ The WhatsApp manager runs the Baileys gateway for live WhatsApp connectivity and
 - Docker exposes the WhatsApp API on `3000` and the UI dev server on `4173` by default.
 - The WhatsApp manager always uses live Baileys transport and persists auth state under `/opt/data/whatsapp-manager/baileys`.
 - Bridge mappings, processed WhatsApp message IDs, and delivery records persist in SQLite at `/opt/data/whatsapp-manager/bridge-state.sqlite` by default.
-- Set `HERMES_ADAPTER_MODE=api`, `HERMES_API_KEY`, and run `hermes gateway run --force --accept-hooks` to use Hermes' native `/api/sessions/{id}/chat` session API. The compose environment also exports `API_SERVER_KEY=${HERMES_API_KEY}` because Hermes refuses to start the API server without it.
+- Run `hermes gateway run --force --accept-hooks`; the WhatsApp manager always uses Hermes' native `/api/sessions/{id}/chat` session API. The container creates a persistent internal key at `/opt/data/whatsapp-manager/internal-api-key` and exports it under the compatibility names Hermes and the manager expect.
 - `zerotier-one` is installed, but actual ZeroTier networking inside the container requires `/dev/net/tun` plus extra capabilities; Docker Desktop on this Mac does not provide that.
 - Keep secrets in a local `.env` file, not committed to git.
 
@@ -98,11 +98,8 @@ WHATSAPP_MANAGER_UI_PORT=4173
 WHATSAPP_MANAGER_UI_CORS_ORIGIN=*
 VITE_WHATSAPP_MANAGER_API_URL=
 VITE_WHATSAPP_MANAGER_UI_TITLE=WhatsApp Account Console
-HERMES_ADAPTER_MODE=mock
 HERMES_API_BASE_URL=http://127.0.0.1:8642
-HERMES_API_KEY=
 HERMES_API_MODEL=hermes-agent
-API_SERVER_KEY=
 BAILEYS_STATE_DIR=/opt/data/whatsapp-manager/baileys
 BRIDGE_DATABASE_FILE=/opt/data/whatsapp-manager/bridge-state.sqlite
 BRIDGE_STATE_FILE=

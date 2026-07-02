@@ -5,13 +5,20 @@ import path from "node:path";
 import { createApp } from "./app.js";
 import { sendReplyWithDeliveryRecord, type AppServices } from "./build-services.js";
 import { loadConfig } from "./config.js";
-import { HermesApiAdapter, MockHermesAdapter } from "./services/hermes-adapter.js";
+import { evaluateNumberRules, recordBlockedNumberDelivery } from "./services/number-rules.js";
+import { HermesApiAdapter, type HermesAdapter } from "./services/hermes-adapter.js";
 import { FileBridgeStateStore } from "./services/bridge-state-store.js";
 import { InMemoryChatSessionRouter } from "./services/chat-session-router.js";
 import { SqliteBridgeStateStore } from "./services/sqlite-bridge-state-store.js";
 import type { WhatsAppGateway } from "./services/whatsapp-service.js";
 import type { AppConfig } from "./config.js";
-import type { OutboundWhatsAppMessage, WhatsAppAccountStatus, WhatsAppMessageEvent } from "./domain/types.js";
+import type {
+  HermesReply,
+  HermesSession,
+  OutboundWhatsAppMessage,
+  WhatsAppAccountStatus,
+  WhatsAppMessageEvent,
+} from "./domain/types.js";
 import { getWhatsAppChatType, getWhatsAppSessionKey } from "./domain/types.js";
 
 describe("whatsapp-manager-api", () => {
@@ -316,7 +323,7 @@ describe("whatsapp-manager-api", () => {
         accountId: "ops-main",
         chatJid: "12345@s.whatsapp.net",
         chatId: "12345@s.whatsapp.net",
-        text: "mock-hermes-response: hello through gateway",
+        text: "test-hermes-response: hello through gateway",
       },
     ]);
   });
@@ -343,7 +350,7 @@ describe("whatsapp-manager-api", () => {
         accountId: "ops-main",
         chatJid: "12345@s.whatsapp.net",
         chatId: "12345@s.whatsapp.net",
-        text: "mock-hermes-response: only process once",
+        text: "test-hermes-response: only process once",
       },
     ]);
   });
@@ -566,7 +573,7 @@ describe("whatsapp-manager-api", () => {
           senderId: "12345@s.whatsapp.net",
           text: "retry hermes",
         }),
-      ).rejects.toThrow("forced Hermes failure");
+      ).resolves.toBeUndefined();
 
       const delivery = services.deliveryStore?.listDeliveries()[0];
       expect(delivery).toEqual(
@@ -594,6 +601,207 @@ describe("whatsapp-manager-api", () => {
           text: "Hermes retry reply",
         }),
       ]);
+    } finally {
+      rmSync(dir, { force: true, recursive: true });
+    }
+  });
+
+  it("creates, updates, lists, and deletes account number rules", async () => {
+    const dir = mkdtempSync(path.join(tmpdir(), "auto-bot-number-rules-api-"));
+    const rulesConfig = loadConfig({
+      ...process.env,
+      API_TOKEN: "test-token",
+      BRIDGE_DATABASE_FILE: path.join(dir, "bridge-state.sqlite"),
+      BRIDGE_STATE_FILE: "",
+      DATABASE_URL: "postgres://postgres:postgres@127.0.0.1:5432/auto_bot",
+      NODE_ENV: "test",
+      PORT: "3000",
+    });
+
+    try {
+      const services = createTestServices(rulesConfig);
+      app = createApp({ config: rulesConfig, services });
+
+      const created = await app.inject({
+        method: "POST",
+        url: "/number-rules",
+        headers: {
+          authorization: "Bearer test-token",
+        },
+        payload: {
+          accountId: "ops-main",
+          action: "deny",
+          matchType: "regex",
+          pattern: "^1555",
+          label: "test deny prefix",
+        },
+      });
+
+      expect(created.statusCode).toBe(200);
+      const rule = created.json();
+      expect(rule).toEqual(
+        expect.objectContaining({
+          accountId: "ops-main",
+          action: "deny",
+          matchType: "regex",
+          pattern: "^1555",
+          enabled: true,
+        }),
+      );
+
+      const updated = await app.inject({
+        method: "PUT",
+        url: `/number-rules/${encodeURIComponent(rule.id)}`,
+        headers: {
+          authorization: "Bearer test-token",
+        },
+        payload: {
+          enabled: false,
+        },
+      });
+      expect(updated.statusCode).toBe(200);
+      expect(updated.json()).toEqual(expect.objectContaining({ enabled: false }));
+
+      const list = await app.inject({
+        method: "GET",
+        url: "/number-rules?accountId=ops-main",
+        headers: {
+          authorization: "Bearer test-token",
+        },
+      });
+      expect(list.json().items).toEqual([expect.objectContaining({ id: rule.id })]);
+
+      const deleted = await app.inject({
+        method: "DELETE",
+        url: `/number-rules/${encodeURIComponent(rule.id)}`,
+        headers: {
+          authorization: "Bearer test-token",
+        },
+      });
+      expect(deleted.statusCode).toBe(204);
+      expect(services.numberRuleStore?.listNumberRules("ops-main")).toEqual([]);
+    } finally {
+      rmSync(dir, { force: true, recursive: true });
+    }
+  });
+
+  it("blocks denied gateway numbers before creating Hermes sessions", async () => {
+    const dir = mkdtempSync(path.join(tmpdir(), "auto-bot-number-rules-deny-"));
+    const rulesConfig = loadConfig({
+      ...process.env,
+      API_TOKEN: "test-token",
+      BRIDGE_DATABASE_FILE: path.join(dir, "bridge-state.sqlite"),
+      BRIDGE_STATE_FILE: "",
+      DATABASE_URL: "postgres://postgres:postgres@127.0.0.1:5432/auto_bot",
+      NODE_ENV: "test",
+      PORT: "3000",
+    });
+
+    try {
+      const services = createTestServices(rulesConfig);
+      const gateway = services.whatsappGateway as TestWhatsAppGateway;
+      app = createApp({ config: rulesConfig, services });
+      services.numberRuleStore?.createNumberRule({
+        accountId: "ops-main",
+        action: "deny",
+        matchType: "exact",
+        pattern: "12345",
+      });
+
+      await gateway.injectInboundMessage({
+        accountId: "ops-main",
+        chatId: "12345@s.whatsapp.net",
+        messageId: "wamid.denied",
+        senderId: "12345@s.whatsapp.net",
+        text: "do not route",
+      });
+
+      expect(await services.router.getMappings()).toEqual([]);
+      expect(gateway.getSentMessages()).toEqual([]);
+      expect(services.deliveryStore?.listDeliveries()).toEqual([
+        expect.objectContaining({
+          accountId: "ops-main",
+          inboundMessageId: "wamid.denied",
+          status: "failed",
+          error: expect.stringContaining("Blocked by number rule"),
+        }),
+      ]);
+
+      const delivery = services.deliveryStore?.listDeliveries()[0];
+      const retry = await app.inject({
+        method: "POST",
+        url: `/deliveries/${encodeURIComponent(delivery!.id)}/retry`,
+        headers: {
+          authorization: "Bearer test-token",
+        },
+      });
+      expect(retry.statusCode).toBe(409);
+      expect(retry.json()).toEqual({ error: expect.stringContaining("Blocked by number rule") });
+    } finally {
+      rmSync(dir, { force: true, recursive: true });
+    }
+  });
+
+  it("requires an allow rule match when account allow rules exist", async () => {
+    const dir = mkdtempSync(path.join(tmpdir(), "auto-bot-number-rules-allow-"));
+    const rulesConfig = loadConfig({
+      ...process.env,
+      API_TOKEN: "test-token",
+      BRIDGE_DATABASE_FILE: path.join(dir, "bridge-state.sqlite"),
+      BRIDGE_STATE_FILE: "",
+      DATABASE_URL: "postgres://postgres:postgres@127.0.0.1:5432/auto_bot",
+      NODE_ENV: "test",
+      PORT: "3000",
+    });
+
+    try {
+      const services = createTestServices(rulesConfig);
+      const gateway = services.whatsappGateway as TestWhatsAppGateway;
+      services.numberRuleStore?.createNumberRule({
+        accountId: "ops-main",
+        action: "allow",
+        matchType: "regex",
+        pattern: "^12345$",
+      });
+
+      await gateway.injectInboundMessage({
+        accountId: "ops-main",
+        chatId: "99999@s.whatsapp.net",
+        messageId: "wamid.not-allowed",
+        senderId: "99999@s.whatsapp.net",
+        text: "blocked by allow list",
+      });
+      await gateway.injectInboundMessage({
+        accountId: "ops-main",
+        chatId: "12345@s.whatsapp.net",
+        messageId: "wamid.allowed",
+        senderId: "12345@s.whatsapp.net",
+        text: "allowed by allow list",
+      });
+
+      expect(await services.router.getMappings()).toEqual([
+        expect.objectContaining({
+          chatJid: "12345@s.whatsapp.net",
+        }),
+      ]);
+      expect(gateway.getSentMessages()).toEqual([
+        expect.objectContaining({
+          chatJid: "12345@s.whatsapp.net",
+          text: "test-hermes-response: allowed by allow list",
+        }),
+      ]);
+      expect(services.deliveryStore?.listDeliveries()).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            inboundMessageId: "wamid.not-allowed",
+            status: "failed",
+          }),
+          expect.objectContaining({
+            inboundMessageId: "wamid.allowed",
+            status: "sent",
+          }),
+        ]),
+      );
     } finally {
       rmSync(dir, { force: true, recursive: true });
     }
@@ -735,12 +943,12 @@ describe("whatsapp-manager-api", () => {
         text: "hello hermes",
         timestamp: "2026-06-29T00:00:00.000Z",
       }),
-    ).rejects.toThrow("HERMES_API_KEY");
+    ).rejects.toThrow("Internal Hermes API key");
   });
 });
 
 function createTestServices(config: AppConfig): AppServices {
-  const hermesAdapter = new MockHermesAdapter();
+  const hermesAdapter = new TestHermesAdapter();
   const whatsappGateway = new TestWhatsAppGateway();
   const bridgeStore = config.BRIDGE_DATABASE_FILE
     ? new SqliteBridgeStateStore(config.BRIDGE_DATABASE_FILE)
@@ -754,18 +962,17 @@ function createTestServices(config: AppConfig): AppServices {
   );
 
   whatsappGateway.onInboundMessage(async (event) => {
-    try {
-      const result = await router.handleInboundMessage(event);
-      if (result.duplicate || !result.reply) {
-        return;
-      }
+    const deliveryStore = bridgeStore instanceof SqliteBridgeStateStore ? bridgeStore : undefined;
+    const numberRuleStore = bridgeStore instanceof SqliteBridgeStateStore ? bridgeStore : undefined;
+    const decision = evaluateNumberRules(numberRuleStore, event);
+    if (!decision.allowed) {
+      recordBlockedNumberDelivery(deliveryStore, event, decision.reason ?? "Blocked by number rule");
+      return;
+    }
 
-      await sendReplyWithDeliveryRecord({
-        ...(bridgeStore instanceof SqliteBridgeStateStore ? { deliveryStore: bridgeStore } : {}),
-        event: result.event ?? event,
-        text: result.reply.outputText,
-        whatsappGateway,
-      });
+    let result;
+    try {
+      result = await router.handleInboundMessage(event);
     } catch (error) {
       if (bridgeStore instanceof SqliteBridgeStateStore) {
         const now = new Date().toISOString();
@@ -786,8 +993,19 @@ function createTestServices(config: AppConfig): AppServices {
           updatedAt: now,
         });
       }
-      throw error;
+      return;
     }
+
+    if (result.duplicate || !result.reply) {
+      return;
+    }
+
+    await sendReplyWithDeliveryRecord({
+      ...(bridgeStore instanceof SqliteBridgeStateStore ? { deliveryStore: bridgeStore } : {}),
+      event: result.event ?? event,
+      text: result.reply.outputText,
+      whatsappGateway,
+    }).catch(() => undefined);
   });
 
   return {
@@ -795,7 +1013,34 @@ function createTestServices(config: AppConfig): AppServices {
     router,
     whatsappGateway,
     ...(bridgeStore instanceof SqliteBridgeStateStore ? { deliveryStore: bridgeStore } : {}),
+    ...(bridgeStore instanceof SqliteBridgeStateStore ? { numberRuleStore: bridgeStore } : {}),
   };
+}
+
+class TestHermesAdapter implements HermesAdapter {
+  async createSession(sessionKey: string): Promise<HermesSession> {
+    const now = new Date().toISOString();
+    return {
+      id: `hermes_${sessionKey}_${Date.now()}`,
+      sessionKey,
+      accountId: "unassigned",
+      chatJid: sessionKey,
+      chatType: "direct",
+      chatId: sessionKey,
+      createdAt: now,
+      lastActivityAt: now,
+      status: "active",
+    };
+  }
+
+  async sendMessage(sessionId: string, event: WhatsAppMessageEvent): Promise<HermesReply> {
+    return {
+      sessionId,
+      outputText: `test-hermes-response: ${event.text}`,
+    };
+  }
+
+  async resetSession(_sessionId: string): Promise<void> {}
 }
 
 class TestWhatsAppGateway implements WhatsAppGateway {

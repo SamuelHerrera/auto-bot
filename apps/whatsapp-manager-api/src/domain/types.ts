@@ -5,6 +5,8 @@ export type WhatsAppGroupRoutingPolicy = "group" | "participant";
 export type DeliveryStatus = "pending" | "sent" | "failed";
 export type DeliveryFailureStage = "hermes" | "whatsapp";
 export type MediaType = "image" | "video" | "audio" | "document";
+export type NumberRuleAction = "allow" | "deny";
+export type NumberRuleMatchType = "all" | "exact" | "regex";
 
 export interface WhatsAppMediaAttachment {
   type: MediaType;
@@ -112,6 +114,27 @@ export interface GroupRoutingPolicyRecord {
   policy: WhatsAppGroupRoutingPolicy;
   createdAt: string;
   updatedAt: string;
+}
+
+export interface NumberRuleRecord {
+  id: string;
+  accountId: string;
+  action: NumberRuleAction;
+  matchType: NumberRuleMatchType;
+  pattern: string;
+  label?: string;
+  enabled: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface NumberRuleInput {
+  accountId: string;
+  action: NumberRuleAction;
+  matchType: NumberRuleMatchType;
+  pattern?: string;
+  label?: string;
+  enabled?: boolean;
 }
 
 export function getWhatsAppChatType(chatJid: string): WhatsAppChatType {

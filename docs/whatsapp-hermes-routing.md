@@ -66,7 +66,7 @@ DELETE /api/sessions/{session_id}
 
 - Cleaner contract for the WhatsApp manager.
 - Easier to observe and test than raw CLI process control.
-- Requires `hermes gateway run` with `API_SERVER_KEY` configured.
+- Requires `hermes gateway run`; the container exports its internal API key for the gateway automatically.
 
 ### Queue or job worker handoff
 
