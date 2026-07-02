@@ -1,4 +1,4 @@
-import { FormEvent, useEffect, useState } from "react";
+import { FormEvent, useEffect, useRef, useState } from "react";
 import { QRCodeSVG } from "qrcode.react";
 
 type AccountStatus = "disconnected" | "connecting" | "connected";
@@ -107,6 +107,7 @@ export function App() {
   const [activeChatJid, setActiveChatJid] = useState("");
   const [isLinkDialogOpen, setIsLinkDialogOpen] = useState(false);
   const [linkingStatus, setLinkingStatus] = useState<WhatsAppAccount | null>(null);
+  const [linkingBaselineAccountIds, setLinkingBaselineAccountIds] = useState<string[]>([]);
   const [statusMessage, setStatusMessage] = useState("Live");
   const [errorMessage, setErrorMessage] = useState("");
   const [isBusy, setIsBusy] = useState(false);
@@ -114,6 +115,27 @@ export function App() {
   const [ruleMatchType, setRuleMatchType] = useState<NumberRuleMatchType>("exact");
   const [rulePattern, setRulePattern] = useState("");
   const [ruleLabel, setRuleLabel] = useState("");
+  const accountsRef = useRef(accounts);
+  const isLinkDialogOpenRef = useRef(isLinkDialogOpen);
+  const linkingStatusRef = useRef(linkingStatus);
+  const linkingBaselineAccountIdsRef = useRef(linkingBaselineAccountIds);
+  const linkingStartedAtRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    accountsRef.current = accounts;
+  }, [accounts]);
+
+  useEffect(() => {
+    isLinkDialogOpenRef.current = isLinkDialogOpen;
+  }, [isLinkDialogOpen]);
+
+  useEffect(() => {
+    linkingStatusRef.current = linkingStatus;
+  }, [linkingStatus]);
+
+  useEffect(() => {
+    linkingBaselineAccountIdsRef.current = linkingBaselineAccountIds;
+  }, [linkingBaselineAccountIds]);
 
   useEffect(() => {
     if (apiUrl.trim()) {
@@ -237,19 +259,27 @@ export function App() {
       if (ruleResponse) {
         setNumberRules(ruleResponse.items);
       }
-      const completedLinkedAccount = findCompletedLinkedAccount(refreshedAccounts ?? accounts, linkStatus, linkingStatus);
-      if (completedLinkedAccount && (linkingStatus || isLinkDialogOpen)) {
-        setLinkingStatus(null);
-        setIsLinkDialogOpen(false);
+      const currentAccounts = refreshedAccounts ?? accountsRef.current;
+      const currentLinkingStatus = linkingStatusRef.current;
+      const currentBaselineAccountIds = linkingBaselineAccountIdsRef.current;
+      const isCurrentLinkDialogOpen = isLinkDialogOpenRef.current;
+      const completedLinkedAccount = findCompletedLinkedAccount(
+        currentAccounts,
+        linkStatus,
+        currentLinkingStatus,
+        currentBaselineAccountIds,
+        linkingStartedAtRef.current,
+      );
+      if (completedLinkedAccount && (currentLinkingStatus || isCurrentLinkDialogOpen)) {
+        clearLinkSession();
         setActiveAccountId(completedLinkedAccount.accountId);
         openAccountTab(completedLinkedAccount.accountId);
         setStatusMessage(`Account ${completedLinkedAccount.accountId} linked.`);
-      } else if (linkStatus?.qrCode || linkStatus?.status === "connecting") {
-        setLinkingStatus(linkStatus);
-      } else if (linkStatus && (linkingStatus || isLinkDialogOpen)) {
-        setLinkingStatus(null);
+      } else if ((currentLinkingStatus || isCurrentLinkDialogOpen) && (linkStatus?.qrCode || linkStatus?.status === "connecting")) {
+        updateLinkingStatus(linkStatus);
+      } else if (linkStatus && (currentLinkingStatus || isCurrentLinkDialogOpen)) {
+        clearLinkSession();
         if (linkStatus.status === "connected") {
-          setIsLinkDialogOpen(false);
           setActiveAccountId(linkStatus.accountId);
           openAccountTab(linkStatus.accountId);
           setStatusMessage(`Account ${linkStatus.accountId} linked.`);
@@ -268,19 +298,49 @@ export function App() {
     }
   }
 
+  function startLinkSession(account: WhatsAppAccount, baselineAccountIds: string[], linkingStartedAt: string) {
+    linkingStatusRef.current = account;
+    linkingBaselineAccountIdsRef.current = baselineAccountIds;
+    linkingStartedAtRef.current = linkingStartedAt;
+    isLinkDialogOpenRef.current = true;
+    setLinkingStatus(account);
+    setLinkingBaselineAccountIds(baselineAccountIds);
+    setIsLinkDialogOpen(true);
+  }
+
+  function updateLinkingStatus(account: WhatsAppAccount) {
+    const nextStatus = mergeLinkingStatus(linkingStatusRef.current, account);
+    linkingStatusRef.current = nextStatus;
+    setLinkingStatus(nextStatus);
+  }
+
+  function clearLinkSession() {
+    linkingStatusRef.current = null;
+    linkingBaselineAccountIdsRef.current = [];
+    linkingStartedAtRef.current = null;
+    isLinkDialogOpenRef.current = false;
+    setLinkingStatus(null);
+    setLinkingBaselineAccountIds([]);
+    setIsLinkDialogOpen(false);
+  }
+
   async function connectAccount(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
 
     await runAction(async () => {
+      const baselineAccountIds = accounts
+        .filter((account) => !isPendingAccountId(account.accountId))
+        .map((account) => account.accountId);
+      const linkingStartedAt = new Date().toISOString();
       const account = await request<WhatsAppAccount>("/whatsapp/connect", {
         method: "POST",
         body: JSON.stringify({}),
       });
 
-      setIsLinkDialogOpen(true);
       if (account.qrCode || account.status === "connecting") {
-        setLinkingStatus(account);
+        startLinkSession(account, baselineAccountIds, linkingStartedAt);
       } else if (account.status === "connected") {
+        clearLinkSession();
         setActiveAccountId(account.accountId);
         openAccountTab(account.accountId);
       }
@@ -291,6 +351,24 @@ export function App() {
       );
       await refreshData(false, true, ["accounts"]);
     });
+  }
+
+  async function closeLinkDialog() {
+    const accountId = linkingStatusRef.current?.accountId;
+    clearLinkSession();
+
+    if (!accountId || !isPendingAccountId(accountId)) {
+      return;
+    }
+
+    try {
+      await request<WhatsAppAccount>(`/whatsapp/accounts/${encodeURIComponent(accountId)}/disconnect`, {
+        method: "POST",
+      });
+      await refreshData(false, false, ["accounts"]);
+    } catch (error) {
+      setErrorMessage(normalizeError(error));
+    }
   }
 
   async function disconnectAccount(accountId: string) {
@@ -576,7 +654,7 @@ export function App() {
         <LinkAccountDialog
           account={pendingQrAccount}
           isBusy={isBusy}
-          onClose={() => setIsLinkDialogOpen(false)}
+          onClose={() => void closeLinkDialog()}
         />
       ) : null}
     </div>
@@ -1348,26 +1426,59 @@ function findCompletedLinkedAccount(
   accounts: WhatsAppAccount[],
   linkStatus: WhatsAppAccount | null,
   linkingStatus: WhatsAppAccount | null,
+  baselineAccountIds: string[],
+  linkingStartedAt: string | null,
 ) {
-  if (linkStatus?.status === "connected" && !isPendingAccountId(linkStatus.accountId)) {
+  if (
+    linkStatus?.status === "connected" &&
+    !isPendingAccountId(linkStatus.accountId) &&
+    isLinkedAccountFromCurrentSession(linkStatus, baselineAccountIds, linkingStartedAt)
+  ) {
     return linkStatus;
-  }
-
-  const transientAccountId = linkStatus?.accountId ?? linkingStatus?.accountId;
-  if (!transientAccountId || !isPendingAccountId(transientAccountId)) {
-    return null;
   }
 
   if (!linkingStatus?.qrCode) {
     return null;
   }
 
-  const transientAccountStillListed = accounts.some((account) => account.accountId === transientAccountId);
-  if (transientAccountStillListed) {
-    return null;
+  return accounts.find(
+    (account) =>
+      account.status === "connected" &&
+      !isPendingAccountId(account.accountId) &&
+      isLinkedAccountFromCurrentSession(account, baselineAccountIds, linkingStartedAt),
+  ) ?? null;
+}
+
+function isLinkedAccountFromCurrentSession(
+  account: WhatsAppAccount,
+  baselineAccountIds: string[],
+  linkingStartedAt: string | null,
+) {
+  if (!baselineAccountIds.includes(account.accountId)) {
+    return true;
   }
 
-  return accounts.find((account) => account.status === "connected" && !isPendingAccountId(account.accountId)) ?? null;
+  if (!account.connectedAt || !linkingStartedAt) {
+    return false;
+  }
+
+  return Date.parse(account.connectedAt) >= Date.parse(linkingStartedAt);
+}
+
+function mergeLinkingStatus(currentStatus: WhatsAppAccount | null, nextStatus: WhatsAppAccount) {
+  if (
+    currentStatus?.qrCode &&
+    !nextStatus.qrCode &&
+    currentStatus.accountId === nextStatus.accountId &&
+    nextStatus.status === "connecting"
+  ) {
+    return {
+      ...nextStatus,
+      qrCode: currentStatus.qrCode,
+    };
+  }
+
+  return nextStatus;
 }
 
 function getAccountDisplayName(account: WhatsAppAccount) {
