@@ -1,5 +1,6 @@
 import type { AppConfig } from "./config.js";
 import {
+  type AuditLogStore,
   type BridgeDeliveryStore,
   InMemoryChatSessionRouter,
   type NumberRuleStore,
@@ -22,6 +23,7 @@ export interface AppServices {
   whatsappGateway: WhatsAppGateway;
   deliveryStore?: BridgeDeliveryStore;
   numberRuleStore?: NumberRuleStore;
+  auditLogStore?: AuditLogStore;
   eventBus: AppEventBus;
 }
 
@@ -45,6 +47,18 @@ export function buildServices(config: AppConfig): AppServices {
       bridgeStore instanceof SqliteBridgeStateStore ? bridgeStore : undefined,
       status,
     );
+    if (bridgeStore instanceof SqliteBridgeStateStore) {
+      bridgeStore.recordAuditLog({
+        action: "whatsapp.status-change",
+        resourceType: "whatsapp-account",
+        resourceId: status.accountId,
+        details: {
+          status: status.status,
+          createdDefaultRule,
+          hadError: Boolean(status.lastError),
+        },
+      });
+    }
     if (createdDefaultRule) {
       eventBus.publish("rules");
     }
@@ -57,6 +71,17 @@ export function buildServices(config: AppConfig): AppServices {
     const decision = evaluateNumberRules(numberRuleStore, event);
     if (!decision.allowed) {
       recordBlockedNumberDelivery(deliveryStore, event, decision.reason ?? "Blocked by number rule");
+      bridgeStore instanceof SqliteBridgeStateStore && bridgeStore.recordAuditLog({
+        action: "message.inbound",
+        outcome: "failure",
+        resourceType: "whatsapp-message",
+        resourceId: event.messageId,
+        details: {
+          accountId: event.accountId,
+          chatJid: event.chatJid,
+          reason: decision.reason ?? "Blocked by number rule",
+        },
+      });
       eventBus.publish("activity");
       return;
     }
@@ -85,11 +110,33 @@ export function buildServices(config: AppConfig): AppServices {
         });
       }
       console.error("Hermes inbound turn failed", error);
+      bridgeStore instanceof SqliteBridgeStateStore && bridgeStore.recordAuditLog({
+        action: "message.inbound",
+        outcome: "failure",
+        resourceType: "whatsapp-message",
+        resourceId: event.messageId,
+        details: {
+          accountId: event.accountId,
+          chatJid: event.chatJid,
+          reason: error instanceof Error ? error.message : "Hermes turn failed",
+        },
+      });
       eventBus.publish("activity");
       return;
     }
 
     if (result.duplicate || !result.reply) {
+      bridgeStore instanceof SqliteBridgeStateStore && bridgeStore.recordAuditLog({
+        action: "message.inbound",
+        resourceType: "whatsapp-message",
+        resourceId: event.messageId,
+        details: {
+          accountId: event.accountId,
+          chatJid: event.chatJid,
+          duplicate: result.duplicate,
+          replied: Boolean(result.reply),
+        },
+      });
       return;
     }
 
@@ -101,6 +148,18 @@ export function buildServices(config: AppConfig): AppServices {
     }).catch((error: unknown) => {
       console.error("WhatsApp reply delivery failed", error);
     });
+    bridgeStore instanceof SqliteBridgeStateStore && bridgeStore.recordAuditLog({
+      action: "message.inbound",
+      resourceType: "whatsapp-message",
+      resourceId: event.messageId,
+      details: {
+        accountId: event.accountId,
+        chatJid: event.chatJid,
+        duplicate: false,
+        hermesSessionId: result.session?.id ?? null,
+        replied: true,
+      },
+    });
     eventBus.publish("activity");
   });
 
@@ -111,6 +170,7 @@ export function buildServices(config: AppConfig): AppServices {
     eventBus,
     ...(bridgeStore instanceof SqliteBridgeStateStore ? { deliveryStore: bridgeStore } : {}),
     ...(bridgeStore instanceof SqliteBridgeStateStore ? { numberRuleStore: bridgeStore } : {}),
+    ...(bridgeStore instanceof SqliteBridgeStateStore ? { auditLogStore: bridgeStore } : {}),
   };
 }
 

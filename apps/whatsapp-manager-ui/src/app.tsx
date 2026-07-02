@@ -5,7 +5,7 @@ type AccountStatus = "disconnected" | "connecting" | "connected";
 type NumberSubview = "messages" | "rules" | "failures";
 type NumberRuleAction = "allow" | "deny";
 type NumberRuleMatchType = "all" | "exact" | "regex";
-type RefreshScope = "accounts" | "activity" | "rules";
+type RefreshScope = "accounts" | "activity" | "rules" | "logs";
 
 interface WhatsAppAccount {
   accountId: string;
@@ -81,27 +81,44 @@ interface ChatMessage {
   record: DeliveryRecord;
 }
 
-const storageKeys = {
-  apiToken: "whatsapp-manager-ui.api-token",
-  apiUrl: "whatsapp-manager-ui.api-url-override",
+interface AuditLogRecord {
+  id: string;
+  action: string;
+  actor: string;
+  outcome: "success" | "failure";
+  resourceType?: string;
+  resourceId?: string;
+  details?: Record<string, unknown>;
+  createdAt: string;
+}
+
+interface BrandingSettings {
+  title: string;
+  iconSrc: string;
+}
+
+const brandingStorageKeys = {
+  title: "whatsapp-manager-ui.branding-title",
+  iconSrc: "whatsapp-manager-ui.branding-icon-src",
 };
 
-const explicitApiUrl = import.meta.env.VITE_WHATSAPP_MANAGER_API_URL?.trim();
 const defaultApiToken =
   import.meta.env.VITE_WHATSAPP_MANAGER_API_TOKEN?.trim() || "local-dev-token";
-const appTitle =
-  import.meta.env.VITE_WHATSAPP_MANAGER_UI_TITLE?.trim() || "WhatsApp Account Console";
+const defaultAppTitle =
+  import.meta.env.VITE_WHATSAPP_MANAGER_UI_TITLE?.trim() || "Auto Bot WhatsApp Bridge";
+const defaultAppIcon = "/auto-bot-mark.svg";
 
 export function App() {
-  const [apiUrl, setApiUrl] = useState(getInitialApiUrl);
-  const [apiToken, setApiToken] = useState(() => localStorage.getItem(storageKeys.apiToken) || defaultApiToken);
+  const [branding, setBranding] = useState<BrandingSettings>(getInitialBranding);
   const [accounts, setAccounts] = useState<WhatsAppAccount[]>([]);
   const [mappings, setMappings] = useState<SessionMapping[]>([]);
   const [deliveries, setDeliveries] = useState<DeliveryRecord[]>([]);
   const [numberRules, setNumberRules] = useState<NumberRule[]>([]);
+  const [auditLogs, setAuditLogs] = useState<AuditLogRecord[]>([]);
   const [activeNumberView, setActiveNumberView] = useState<NumberSubview>("messages");
   const [accountSearch, setAccountSearch] = useState("");
   const [openAccountTabs, setOpenAccountTabs] = useState<string[]>([]);
+  const [isLogsTabOpen, setIsLogsTabOpen] = useState(false);
   const [activeTabId, setActiveTabId] = useState("settings");
   const [activeAccountId, setActiveAccountId] = useState("");
   const [activeChatJid, setActiveChatJid] = useState("");
@@ -138,30 +155,16 @@ export function App() {
   }, [linkingBaselineAccountIds]);
 
   useEffect(() => {
-    if (apiUrl.trim()) {
-      localStorage.setItem(storageKeys.apiUrl, apiUrl);
-      return;
-    }
-
-    localStorage.removeItem(storageKeys.apiUrl);
-  }, [apiUrl]);
+    document.title = branding.title;
+    setFavicon(branding.iconSrc);
+  }, [branding]);
 
   useEffect(() => {
-    localStorage.setItem(storageKeys.apiToken, apiToken);
-  }, [apiToken]);
-
-  useEffect(() => {
-    if (apiToken.trim()) {
-      void refreshData(false);
-    }
+    void refreshData(false);
   }, []);
 
   useEffect(() => {
-    if (!apiToken.trim()) {
-      return;
-    }
-
-    const events = new EventSource(buildEventUrl(apiUrl, apiToken));
+    const events = new EventSource(buildEventUrl());
     events.addEventListener("accounts", () => {
       void refreshData(false, false, ["accounts"]);
     });
@@ -179,7 +182,7 @@ export function App() {
     };
 
     return () => events.close();
-  }, [apiToken, apiUrl]);
+  }, []);
 
   useEffect(() => {
     const firstAccount = accounts[0];
@@ -193,9 +196,9 @@ export function App() {
     if (init?.body !== undefined && !headers.has("Content-Type")) {
       headers.set("Content-Type", "application/json");
     }
-    headers.set("authorization", `Bearer ${apiToken}`);
+    headers.set("authorization", `Bearer ${defaultApiToken}`);
 
-    const response = await fetch(`${apiUrl.trim()}${path}`, {
+    const response = await fetch(path, {
       ...init,
       headers,
     });
@@ -221,13 +224,8 @@ export function App() {
   async function refreshData(
     showMessage = true,
     showBusy = true,
-    scopes: RefreshScope[] = ["accounts", "activity", "rules"],
+    scopes: RefreshScope[] = ["accounts", "activity", "rules", "logs"],
   ) {
-    if (!apiToken.trim()) {
-      setErrorMessage("An API token is required before the UI can manage accounts.");
-      return;
-    }
-
     if (showBusy) {
       setIsBusy(true);
     }
@@ -237,12 +235,14 @@ export function App() {
       const shouldRefreshAccounts = scopes.includes("accounts");
       const shouldRefreshActivity = scopes.includes("activity");
       const shouldRefreshRules = scopes.includes("rules");
-      const [accountResponse, mappingResponse, deliveryResponse, ruleResponse, linkStatus] = await Promise.all([
+      const shouldRefreshLogs = scopes.includes("logs");
+      const [accountResponse, mappingResponse, deliveryResponse, ruleResponse, linkStatus, auditLogResponse] = await Promise.all([
         shouldRefreshAccounts ? request<{ items: WhatsAppAccount[] }>("/whatsapp/accounts") : Promise.resolve(null),
         shouldRefreshActivity ? request<{ items: SessionMapping[] }>("/sessions") : Promise.resolve(null),
         shouldRefreshActivity ? request<{ items: DeliveryRecord[] }>("/deliveries") : Promise.resolve(null),
         shouldRefreshRules ? request<{ items: NumberRule[] }>("/number-rules") : Promise.resolve(null),
         shouldRefreshAccounts ? request<WhatsAppAccount>("/whatsapp/status") : Promise.resolve(null),
+        shouldRefreshLogs ? request<{ items: AuditLogRecord[] }>("/audit-logs?limit=200") : Promise.resolve(null),
       ]);
 
       const refreshedAccounts = accountResponse?.items;
@@ -258,6 +258,9 @@ export function App() {
       }
       if (ruleResponse) {
         setNumberRules(ruleResponse.items);
+      }
+      if (auditLogResponse) {
+        setAuditLogs(auditLogResponse.items);
       }
       const currentAccounts = refreshedAccounts ?? accountsRef.current;
       const currentLinkingStatus = linkingStatusRef.current;
@@ -450,17 +453,53 @@ export function App() {
     });
   }
 
-  async function runAction(action: () => Promise<void>) {
-    if (!apiToken.trim()) {
-      setErrorMessage("An API token is required before the UI can manage accounts.");
-      return;
-    }
+  async function saveBranding(nextBranding: BrandingSettings) {
+    await runAction(async () => {
+      const normalizedBranding = normalizeBranding(nextBranding);
+      setBranding(normalizedBranding);
+      localStorage.setItem(brandingStorageKeys.title, normalizedBranding.title);
+      localStorage.setItem(brandingStorageKeys.iconSrc, normalizedBranding.iconSrc);
+      await request<AuditLogRecord>("/audit-logs", {
+        method: "POST",
+        body: JSON.stringify({
+          action: "ui-branding.update",
+          resourceType: "ui-settings",
+          resourceId: "branding",
+          details: {
+            title: normalizedBranding.title,
+            customIcon: normalizedBranding.iconSrc !== defaultAppIcon,
+          },
+        }),
+      });
+      setStatusMessage("Branding updated.");
+    });
+  }
 
+  async function resetBranding() {
+    await runAction(async () => {
+      const defaultBranding = { title: defaultAppTitle, iconSrc: defaultAppIcon };
+      setBranding(defaultBranding);
+      localStorage.removeItem(brandingStorageKeys.title);
+      localStorage.removeItem(brandingStorageKeys.iconSrc);
+      await request<AuditLogRecord>("/audit-logs", {
+        method: "POST",
+        body: JSON.stringify({
+          action: "ui-branding.reset",
+          resourceType: "ui-settings",
+          resourceId: "branding",
+        }),
+      });
+      setStatusMessage("Branding reset.");
+    });
+  }
+
+  async function runAction(action: () => Promise<void>) {
     setIsBusy(true);
     setErrorMessage("");
 
     try {
       await action();
+      await refreshData(false, false, ["logs"]);
     } catch (error) {
       setErrorMessage(normalizeError(error));
     } finally {
@@ -481,6 +520,19 @@ export function App() {
     setActiveTabId(accountId);
   }
 
+  function openLogsTab() {
+    setIsLogsTabOpen(true);
+    setActiveTabId("logs");
+    void refreshData(false, true, ["logs"]);
+  }
+
+  function closeLogsTab() {
+    setIsLogsTabOpen(false);
+    if (activeTabId === "logs") {
+      setActiveTabId(openAccountTabs[0] ?? "settings");
+    }
+  }
+
   function closeAccountTab(accountId: string) {
     setOpenAccountTabs((currentTabs) => currentTabs.filter((tabAccountId) => tabAccountId !== accountId));
     if (activeTabId === accountId) {
@@ -495,7 +547,7 @@ export function App() {
   const filteredAccounts = accounts.filter((account) =>
     account.accountId.toLowerCase().includes(accountSearch.trim().toLowerCase()),
   );
-  const selectedTabAccountId = activeTabId === "settings" ? activeAccountId : activeTabId;
+  const selectedTabAccountId = activeTabId === "logs" || activeTabId === "settings" ? activeAccountId : activeTabId;
   const tabAccounts = openAccountTabs
     .map((accountId) => accounts.find((account) => account.accountId === accountId))
     .filter((account): account is WhatsAppAccount => Boolean(account));
@@ -520,10 +572,15 @@ export function App() {
     <div className="shell">
       <header className="topbar">
         <div className="brand-lockup">
-          <img src="/wa-mark.svg" alt="" aria-hidden="true" />
-          <h1>{appTitle}</h1>
+          <img src={branding.iconSrc} alt="" aria-hidden="true" />
+          <h1>{branding.title}</h1>
         </div>
-        <StatusIndicator detail={errorMessage || statusMessage} tone={statusTone} />
+        <div className="topbar-actions">
+          <button className="secondary-button" onClick={openLogsTab}>
+            Logs
+          </button>
+          <StatusIndicator detail={errorMessage || statusMessage} tone={statusTone} />
+        </div>
       </header>
 
       <main className="admin-layout">
@@ -606,20 +663,43 @@ export function App() {
             >
               Settings
             </button>
+            {isLogsTabOpen ? (
+              <div className={`workspace-tab${activeTabId === "logs" ? " workspace-tab-active" : ""}`}>
+                <button
+                  className="workspace-tab-main"
+                  onClick={() => {
+                    setActiveTabId("logs");
+                    void refreshData(false, true, ["logs"]);
+                  }}
+                >
+                  <span>Logs</span>
+                </button>
+                <button className="tab-close" aria-label="Close logs" onClick={closeLogsTab}>
+                  x
+                </button>
+              </div>
+            ) : null}
           </div>
 
           {activeTabId === "settings" ? (
             <SettingsView
-              apiToken={apiToken}
-              apiUrl={apiUrl}
-              defaultApiUrl={getDefaultApiUrl()}
-              onApiTokenChange={setApiToken}
-              onApiUrlChange={setApiUrl}
-              onResetApiUrl={() => setApiUrl("")}
+              branding={branding}
+              defaultBranding={{ title: defaultAppTitle, iconSrc: defaultAppIcon }}
+              isBusy={isBusy}
+              onReset={() => void resetBranding()}
+              onSave={(nextBranding) => void saveBranding(nextBranding)}
             />
           ) : null}
 
-          {activeTabId !== "settings" ? (
+          {activeTabId === "logs" ? (
+            <LogsView
+              auditLogs={auditLogs}
+              isBusy={isBusy}
+              onRefresh={() => void refreshData(false, true, ["logs"])}
+            />
+          ) : null}
+
+          {activeTabId !== "logs" && activeTabId !== "settings" ? (
             <NumberWorkspace
               account={activeAccount}
               activeChat={activeChat}
@@ -1183,54 +1263,142 @@ function FailuresView({
 }
 
 function SettingsView({
-  apiToken,
-  apiUrl,
-  defaultApiUrl,
-  onApiTokenChange,
-  onApiUrlChange,
-  onResetApiUrl,
+  branding,
+  defaultBranding,
+  isBusy,
+  onReset,
+  onSave,
 }: {
-  apiToken: string;
-  apiUrl: string;
-  defaultApiUrl: string;
-  onApiTokenChange: (value: string) => void;
-  onApiUrlChange: (value: string) => void;
-  onResetApiUrl: () => void;
+  branding: BrandingSettings;
+  defaultBranding: BrandingSettings;
+  isBusy: boolean;
+  onReset: () => void;
+  onSave: (branding: BrandingSettings) => void;
 }) {
+  const [draftTitle, setDraftTitle] = useState(branding.title);
+  const [draftIconSrc, setDraftIconSrc] = useState(branding.iconSrc);
+
+  useEffect(() => {
+    setDraftTitle(branding.title);
+    setDraftIconSrc(branding.iconSrc);
+  }, [branding]);
+
+  function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    onSave({
+      title: draftTitle,
+      iconSrc: draftIconSrc,
+    });
+  }
+
+  function uploadIcon(file: File | undefined) {
+    if (!file) {
+      return;
+    }
+
+    const reader = new FileReader();
+    reader.onload = () => {
+      if (typeof reader.result === "string") {
+        setDraftIconSrc(reader.result);
+      }
+    };
+    reader.readAsDataURL(file);
+  }
+
   return (
     <>
       <div className="section-heading">
         <div>
           <span className="panel-kicker">Settings</span>
-          <h2>API connection</h2>
+          <h2>Branding</h2>
         </div>
       </div>
 
-      <div className="settings-grid">
+      <form className="branding-form" onSubmit={submit}>
+        <div className="branding-preview">
+          <img src={draftIconSrc || defaultBranding.iconSrc} alt="" aria-hidden="true" />
+          <strong>{draftTitle.trim() || defaultBranding.title}</strong>
+        </div>
+
         <label className="field">
-          <span>API base URL override</span>
+          <span>App title</span>
           <input
-            value={apiUrl}
-            onChange={(event) => onApiUrlChange(event.target.value)}
-            placeholder="Same origin"
+            value={draftTitle}
+            onChange={(event) => setDraftTitle(event.target.value)}
+            placeholder={defaultBranding.title}
           />
         </label>
+
         <label className="field">
-          <span>API token</span>
+          <span>Icon URL</span>
           <input
-            type="password"
-            value={apiToken}
-            onChange={(event) => onApiTokenChange(event.target.value)}
-            placeholder="local-dev-token"
+            value={draftIconSrc}
+            onChange={(event) => setDraftIconSrc(event.target.value)}
+            placeholder={defaultBranding.iconSrc}
           />
         </label>
-        <div className="settings-note">
-          <span className="panel-kicker">Default</span>
-          <p>{defaultApiUrl || "Same origin through the UI server"}</p>
-          <button className="secondary-button" onClick={onResetApiUrl}>
-            Use same origin
+
+        <label className="field">
+          <span>Upload icon</span>
+          <input
+            accept="image/*"
+            type="file"
+            onChange={(event) => uploadIcon(event.target.files?.[0])}
+          />
+        </label>
+
+        <div className="settings-actions">
+          <button type="submit" disabled={isBusy || !draftTitle.trim()}>
+            Save branding
+          </button>
+          <button type="button" className="secondary-button" onClick={onReset} disabled={isBusy}>
+            Reset
           </button>
         </div>
+      </form>
+    </>
+  );
+}
+
+function LogsView({
+  auditLogs,
+  isBusy,
+  onRefresh,
+}: {
+  auditLogs: AuditLogRecord[];
+  isBusy: boolean;
+  onRefresh: () => void;
+}) {
+  return (
+    <>
+      <div className="section-heading">
+        <div>
+          <span className="panel-kicker">Audit</span>
+          <h2>App logs</h2>
+        </div>
+        <button className="secondary-button" onClick={onRefresh} disabled={isBusy}>
+          Refresh
+        </button>
+      </div>
+
+      <div className="audit-log-list">
+        {auditLogs.length === 0 ? (
+          <EmptyState title="No audit events" description="Changes will appear here after actions are recorded." />
+        ) : (
+          auditLogs.map((entry) => (
+            <article key={entry.id} className="audit-log-row">
+              <div className="audit-log-main">
+                <span className={`badge badge-audit-${entry.outcome}`}>{entry.outcome}</span>
+                <span>
+                  <strong>{entry.action}</strong>
+                  <small>{entry.resourceType ? `${entry.resourceType} / ${entry.resourceId ?? "unknown"}` : entry.actor}</small>
+                </span>
+              </div>
+              <time>{formatTimestamp(entry.createdAt)}</time>
+              {entry.details ? <pre>{JSON.stringify(entry.details, null, 2)}</pre> : null}
+            </article>
+          ))
+        )}
       </div>
     </>
   );
@@ -1370,38 +1538,35 @@ function getRuleDisplayValue(rule: NumberRule) {
   return `${rule.matchType === "exact" ? "Full match" : "Regex"} ${rule.pattern}`;
 }
 
-function buildEventUrl(apiUrl: string, apiToken: string) {
-  const baseUrl = apiUrl.trim() || window.location.origin;
-  const url = new URL("/events", baseUrl);
-  url.searchParams.set("token", apiToken);
-  return apiUrl.trim() ? url.toString() : `${url.pathname}${url.search}`;
+function buildEventUrl() {
+  const url = new URL("/events", window.location.origin);
+  url.searchParams.set("token", defaultApiToken);
+  return `${url.pathname}${url.search}`;
 }
 
-function getInitialApiUrl() {
-  const fallback = getDefaultApiUrl();
-  if (explicitApiUrl) {
-    return explicitApiUrl;
-  }
-
-  const stored = localStorage.getItem(storageKeys.apiUrl);
-  if (!stored) {
-    return fallback;
-  }
-
-  try {
-    const storedUrl = new URL(stored);
-    if (storedUrl.hostname === window.location.hostname) {
-      return stored;
-    }
-  } catch {
-    return fallback;
-  }
-
-  return fallback;
+function getInitialBranding(): BrandingSettings {
+  return normalizeBranding({
+    title: localStorage.getItem(brandingStorageKeys.title) || defaultAppTitle,
+    iconSrc: localStorage.getItem(brandingStorageKeys.iconSrc) || defaultAppIcon,
+  });
 }
 
-function getDefaultApiUrl() {
-  return "";
+function normalizeBranding(branding: BrandingSettings): BrandingSettings {
+  return {
+    title: branding.title.trim() || defaultAppTitle,
+    iconSrc: branding.iconSrc.trim() || defaultAppIcon,
+  };
+}
+
+function setFavicon(iconSrc: string) {
+  const existingIcon = document.querySelector<HTMLLinkElement>("link[rel='icon']");
+  const icon = existingIcon ?? document.createElement("link");
+  icon.rel = "icon";
+  icon.type = iconSrc.startsWith("data:image/svg") || iconSrc.endsWith(".svg") ? "image/svg+xml" : "image/png";
+  icon.href = iconSrc;
+  if (!existingIcon) {
+    document.head.appendChild(icon);
+  }
 }
 
 function maxTimestamp(left: string | undefined, right: string) {
@@ -1410,16 +1575,6 @@ function maxTimestamp(left: string | undefined, right: string) {
   }
 
   return Date.parse(left) > Date.parse(right) ? left : right;
-}
-
-function upsertAccount(accounts: WhatsAppAccount[], nextAccount: WhatsAppAccount) {
-  const accountIndex = accounts.findIndex((account) => account.accountId === nextAccount.accountId);
-
-  if (accountIndex === -1) {
-    return [nextAccount, ...accounts];
-  }
-
-  return accounts.map((account, index) => (index === accountIndex ? nextAccount : account));
 }
 
 function findCompletedLinkedAccount(

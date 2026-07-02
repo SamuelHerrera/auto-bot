@@ -70,6 +70,18 @@ button:disabled {
   width: 34px;
 }
 
+.topbar-actions {
+  align-items: center;
+  display: flex;
+  flex: 0 0 auto;
+  gap: 10px;
+}
+
+.topbar-actions .secondary-button {
+  min-height: 36px;
+  padding: 7px 12px;
+}
+
 .topbar h1,
 .section-heading h2,
 .section-heading h3,
@@ -420,31 +432,17 @@ button:disabled {
   padding: 7px 12px;
 }
 
-.accounts-grid,
-.settings-grid {
+.accounts-grid {
   display: grid;
   gap: 16px;
   grid-template-columns: minmax(280px, 0.72fr) minmax(320px, 1fr);
   padding: 16px;
 }
 
-.registration-panel,
-.settings-note {
+.registration-panel {
   border: 1px solid #e5ebe6;
   min-width: 0;
   padding: 16px;
-}
-
-.settings-note {
-  align-content: start;
-  display: grid;
-  gap: 10px;
-  grid-column: 1 / -1;
-}
-
-.settings-note p {
-  margin: 0;
-  overflow-wrap: anywhere;
 }
 
 .select-field {
@@ -627,6 +625,16 @@ button {
 .badge-disconnected {
   background: #edf0ed;
   color: #607068;
+}
+
+.badge-audit-success {
+  background: #dff6e8;
+  color: #09643f;
+}
+
+.badge-audit-failure {
+  background: #fff3f1;
+  color: #a33b2f;
 }
 
 .account-list {
@@ -1016,6 +1024,98 @@ button {
   color: #a33b2f;
 }
 
+.branding-form {
+  display: grid;
+  gap: 16px;
+  max-width: 720px;
+  padding: 16px;
+}
+
+.branding-preview {
+  align-items: center;
+  border: 1px solid #e5ebe6;
+  display: flex;
+  gap: 12px;
+  min-height: 72px;
+  padding: 14px;
+}
+
+.branding-preview img {
+  display: block;
+  flex: 0 0 auto;
+  height: 40px;
+  object-fit: contain;
+  width: 40px;
+}
+
+.branding-preview strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.settings-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.audit-log-list {
+  display: grid;
+}
+
+.audit-log-row {
+  border-bottom: 1px solid #e5ebe6;
+  display: grid;
+  gap: 10px;
+  grid-template-columns: minmax(0, 1fr) auto;
+  padding: 14px 16px;
+}
+
+.audit-log-row:last-child {
+  border-bottom: 0;
+}
+
+.audit-log-main {
+  align-items: center;
+  display: flex;
+  gap: 10px;
+  min-width: 0;
+}
+
+.audit-log-main span:last-child {
+  display: grid;
+  min-width: 0;
+}
+
+.audit-log-main strong,
+.audit-log-main small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.audit-log-main small,
+.audit-log-row time {
+  color: #66746c;
+  font-size: 0.8rem;
+}
+
+.audit-log-row pre {
+  background: #f8faf8;
+  border: 1px solid #e5ebe6;
+  color: #2c3832;
+  font-family: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.78rem;
+  grid-column: 1 / -1;
+  margin: 0;
+  max-height: 220px;
+  overflow: auto;
+  padding: 10px;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
 .table-list,
 .compact-list,
 .policy-list {
@@ -1224,7 +1324,6 @@ button {
   .workspace,
   .admin-layout,
   .accounts-grid,
-  .settings-grid,
   .operation-grid,
   .chat-workspace,
   .summary-strip,
@@ -1273,6 +1372,8 @@ button {
   .account-row,
   .chat-row,
   .rule-row,
+  .audit-log-row,
+  .branding-preview,
   .table-row,
   .detail-list div,
   .select-field {
@@ -1280,8 +1381,13 @@ button {
   }
 
   .brand-lockup,
+  .topbar-actions,
   .header-status-badge {
     width: 100%;
+  }
+
+  .topbar-actions {
+    justify-content: space-between;
   }
 
   .header-status-badge {

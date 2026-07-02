@@ -7,6 +7,7 @@ export type DeliveryFailureStage = "hermes" | "whatsapp";
 export type MediaType = "image" | "video" | "audio" | "document";
 export type NumberRuleAction = "allow" | "deny";
 export type NumberRuleMatchType = "all" | "exact" | "regex";
+export type AuditLogOutcome = "success" | "failure";
 
 export interface WhatsAppMediaAttachment {
   type: MediaType;
@@ -135,6 +136,26 @@ export interface NumberRuleInput {
   pattern?: string;
   label?: string;
   enabled?: boolean;
+}
+
+export interface AuditLogRecord {
+  id: string;
+  action: string;
+  actor: string;
+  outcome: AuditLogOutcome;
+  resourceType?: string;
+  resourceId?: string;
+  details?: Record<string, unknown>;
+  createdAt: string;
+}
+
+export interface AuditLogInput {
+  action: string;
+  actor?: string;
+  outcome?: AuditLogOutcome;
+  resourceType?: string;
+  resourceId?: string;
+  details?: Record<string, unknown>;
 }
 
 export function getWhatsAppChatType(chatJid: string): WhatsAppChatType {

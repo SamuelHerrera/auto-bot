@@ -21,6 +21,7 @@ function buildApiProxy() {
     "/whatsapp": { target, changeOrigin: true },
     "/sessions": { target, changeOrigin: true },
     "/deliveries": { target, changeOrigin: true },
+    "/audit-logs": { target, changeOrigin: true },
     "/number-rules": { target, changeOrigin: true },
     "/chats": { target, changeOrigin: true },
     "/messages": { target, changeOrigin: true },

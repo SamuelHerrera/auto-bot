@@ -3,6 +3,8 @@ import path from "node:path";
 import { randomUUID } from "node:crypto";
 import { DatabaseSync } from "node:sqlite";
 import type {
+  AuditLogInput,
+  AuditLogRecord,
   ChatSessionMapping,
   DeliveryRecord,
   GroupRoutingPolicyRecord,
@@ -12,6 +14,7 @@ import type {
   WhatsAppGroupRoutingPolicy,
 } from "../domain/types.js";
 import type {
+  AuditLogStore,
   BridgeDeliveryStore,
   ChatSessionRouterSnapshot,
   ChatSessionRouterStore,
@@ -20,7 +23,7 @@ import type {
 } from "./chat-session-router.js";
 
 export class SqliteBridgeStateStore
-  implements ChatSessionRouterStore, BridgeDeliveryStore, GroupRoutingPolicyStore, NumberRuleStore
+  implements ChatSessionRouterStore, BridgeDeliveryStore, GroupRoutingPolicyStore, NumberRuleStore, AuditLogStore
 {
   private readonly db: DatabaseSync;
 
@@ -298,6 +301,46 @@ export class SqliteBridgeStateStore
     return result.changes > 0;
   }
 
+  listAuditLogs(limit = 200): AuditLogRecord[] {
+    const safeLimit = Math.min(Math.max(Math.trunc(limit), 1), 500);
+    return this.db
+      .prepare("SELECT * FROM audit_logs ORDER BY created_at DESC LIMIT ?")
+      .all(safeLimit)
+      .map(rowToAuditLog);
+  }
+
+  recordAuditLog(input: AuditLogInput): AuditLogRecord {
+    const record: AuditLogRecord = {
+      id: randomUUID(),
+      action: input.action,
+      actor: input.actor?.trim() || "system",
+      outcome: input.outcome ?? "success",
+      ...(input.resourceType ? { resourceType: input.resourceType } : {}),
+      ...(input.resourceId ? { resourceId: input.resourceId } : {}),
+      ...(input.details ? { details: input.details } : {}),
+      createdAt: new Date().toISOString(),
+    };
+
+    this.db
+      .prepare(`
+        INSERT INTO audit_logs
+          (id, action, actor, outcome, resource_type, resource_id, details_json, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      `)
+      .run(
+        record.id,
+        record.action,
+        record.actor,
+        record.outcome,
+        record.resourceType ?? null,
+        record.resourceId ?? null,
+        record.details ? JSON.stringify(record.details) : null,
+        record.createdAt,
+      );
+
+    return record;
+  }
+
   private migrate() {
     this.db.exec(`
       CREATE TABLE IF NOT EXISTS hermes_sessions (
@@ -368,6 +411,20 @@ export class SqliteBridgeStateStore
 
       CREATE INDEX IF NOT EXISTS number_rules_account_idx
         ON number_rules(account_id, enabled);
+
+      CREATE TABLE IF NOT EXISTS audit_logs (
+        id TEXT PRIMARY KEY,
+        action TEXT NOT NULL,
+        actor TEXT NOT NULL,
+        outcome TEXT NOT NULL,
+        resource_type TEXT,
+        resource_id TEXT,
+        details_json TEXT,
+        created_at TEXT NOT NULL
+      );
+
+      CREATE INDEX IF NOT EXISTS audit_logs_created_at_idx
+        ON audit_logs(created_at DESC);
     `);
     this.ensureColumn("delivery_records", "inbound_text", "TEXT");
     this.ensureColumn("delivery_records", "failure_stage", "TEXT");
@@ -455,6 +512,30 @@ function rowToNumberRule(row: unknown): NumberRuleRecord {
     createdAt: String(value.created_at),
     updatedAt: String(value.updated_at),
   };
+}
+
+function rowToAuditLog(row: unknown): AuditLogRecord {
+  const value = row as Record<string, string | null>;
+  const detailsJson = value.details_json;
+  return {
+    id: String(value.id),
+    action: String(value.action),
+    actor: String(value.actor),
+    outcome: String(value.outcome) as AuditLogRecord["outcome"],
+    ...(value.resource_type ? { resourceType: String(value.resource_type) } : {}),
+    ...(value.resource_id ? { resourceId: String(value.resource_id) } : {}),
+    ...(detailsJson ? { details: parseDetailsJson(detailsJson) } : {}),
+    createdAt: String(value.created_at),
+  };
+}
+
+function parseDetailsJson(value: string): Record<string, unknown> {
+  try {
+    const parsed = JSON.parse(value);
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : {};
+  } catch {
+    return {};
+  }
 }
 
 function requiredString(row: Record<string, unknown>, key: string): string {

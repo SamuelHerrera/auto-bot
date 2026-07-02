@@ -765,6 +765,78 @@ describe("whatsapp-manager-api", () => {
     }
   });
 
+  it("records and lists audit logs for app mutations", async () => {
+    const dir = mkdtempSync(path.join(tmpdir(), "auto-bot-audit-logs-"));
+    const auditConfig = loadConfig({
+      ...process.env,
+      API_TOKEN: "test-token",
+      BRIDGE_DATABASE_FILE: path.join(dir, "bridge-state.sqlite"),
+      BRIDGE_STATE_FILE: "",
+      DATABASE_URL: "postgres://postgres:postgres@127.0.0.1:5432/auto_bot",
+      NODE_ENV: "test",
+      PORT: "3000",
+    });
+
+    try {
+      const services = createTestServices(auditConfig);
+      app = createApp({ config: auditConfig, services });
+
+      await app.inject({
+        method: "POST",
+        url: "/whatsapp/connect",
+        headers: {
+          authorization: "Bearer test-token",
+        },
+        payload: {
+          accountId: "ops-main",
+        },
+      });
+
+      const created = await app.inject({
+        method: "POST",
+        url: "/number-rules",
+        headers: {
+          authorization: "Bearer test-token",
+        },
+        payload: {
+          accountId: "ops-main",
+          action: "allow",
+          matchType: "exact",
+          pattern: "12345",
+        },
+      });
+
+      expect(created.statusCode).toBe(200);
+
+      const logs = await app.inject({
+        method: "GET",
+        url: "/audit-logs?limit=10",
+        headers: {
+          authorization: "Bearer test-token",
+        },
+      });
+
+      expect(logs.statusCode).toBe(200);
+      expect(logs.json().items).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            action: "whatsapp.connect",
+            resourceType: "whatsapp-account",
+            resourceId: "ops-main",
+            outcome: "success",
+          }),
+          expect.objectContaining({
+            action: "number-rule.create",
+            resourceType: "number-rule",
+            outcome: "success",
+          }),
+        ]),
+      );
+    } finally {
+      rmSync(dir, { force: true, recursive: true });
+    }
+  });
+
   it("blocks denied gateway numbers before creating Hermes sessions", async () => {
     const dir = mkdtempSync(path.join(tmpdir(), "auto-bot-number-rules-deny-"));
     const rulesConfig = loadConfig({
@@ -1183,6 +1255,7 @@ function createTestServices(config: AppConfig): AppServices {
     eventBus,
     ...(bridgeStore instanceof SqliteBridgeStateStore ? { deliveryStore: bridgeStore } : {}),
     ...(bridgeStore instanceof SqliteBridgeStateStore ? { numberRuleStore: bridgeStore } : {}),
+    ...(bridgeStore instanceof SqliteBridgeStateStore ? { auditLogStore: bridgeStore } : {}),
   };
 }
 

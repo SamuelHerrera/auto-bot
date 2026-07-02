@@ -1,4 +1,6 @@
 import type {
+  AuditLogInput,
+  AuditLogRecord,
   ChatSessionMapping,
   DeliveryRecord,
   GroupRoutingPolicyRecord,
@@ -312,6 +314,11 @@ export interface NumberRuleStore {
   createNumberRule(input: NumberRuleInput): NumberRuleRecord;
   updateNumberRule(id: string, input: Partial<NumberRuleInput>): NumberRuleRecord | null;
   deleteNumberRule(id: string): boolean;
+}
+
+export interface AuditLogStore {
+  listAuditLogs(limit?: number): AuditLogRecord[];
+  recordAuditLog(input: AuditLogInput): AuditLogRecord;
 }
 
 export interface RoutingInput {

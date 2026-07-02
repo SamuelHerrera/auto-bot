@@ -8,7 +8,7 @@ import {
   sendReplyWithDeliveryRecord,
   type AppServices,
 } from "./build-services.js";
-import type { NumberRuleInput } from "./domain/types.js";
+import type { AuditLogInput, NumberRuleInput } from "./domain/types.js";
 import { evaluateNumberRules, recordBlockedNumberDelivery } from "./services/number-rules.js";
 import type { RoutingInput } from "./services/chat-session-router.js";
 
@@ -21,6 +21,18 @@ export function createApp({ config, services = buildServices(config) }: CreateAp
   const app = Fastify({
     logger: config.NODE_ENV === "test" ? false : { level: config.LOG_LEVEL },
   });
+
+  function audit(input: AuditLogInput) {
+    const record = services.auditLogStore?.recordAuditLog(input) ?? {
+      id: "ephemeral",
+      actor: input.actor?.trim() || "system",
+      outcome: input.outcome ?? "success",
+      createdAt: new Date().toISOString(),
+      ...input,
+    };
+    app.log.info({ audit: record }, "audit event");
+    return record;
+  }
 
   void app.register(cors, {
     origin: parseCorsOrigin(config.CORS_ORIGIN),
@@ -84,6 +96,16 @@ export function createApp({ config, services = buildServices(config) }: CreateAp
     if (createdDefaultRule) {
       services.eventBus.publish("rules");
     }
+    audit({
+      action: "whatsapp.connect",
+      resourceType: "whatsapp-account",
+      resourceId: status.accountId,
+      details: {
+        requestedAccountId: request.body?.accountId ?? null,
+        status: status.status,
+        createdDefaultRule,
+      },
+    });
     return status;
   });
 
@@ -96,6 +118,15 @@ export function createApp({ config, services = buildServices(config) }: CreateAp
     async (request) => {
       const status = await services.whatsappGateway.disconnectAccount(request.params.accountId);
       services.eventBus.publish("accounts");
+      audit({
+        action: "whatsapp.disconnect",
+        resourceType: "whatsapp-account",
+        resourceId: status.accountId,
+        details: {
+          status: status.status,
+          hadError: Boolean(status.lastError),
+        },
+      });
       return status;
     },
   );
@@ -122,14 +153,36 @@ export function createApp({ config, services = buildServices(config) }: CreateAp
   app.post<{ Params: { chatId: string }; Body: Partial<RoutingInput> }>(
     "/chats/:chatId/session",
     async (request) => {
-      return services.router.getOrCreateSession(getRouteFromRequest(request.params.chatId, request.body));
+      const session = await services.router.getOrCreateSession(getRouteFromRequest(request.params.chatId, request.body));
+      audit({
+        action: "session.create",
+        resourceType: "hermes-session",
+        resourceId: session.id,
+        details: {
+          accountId: session.accountId,
+          chatJid: session.chatJid,
+          sessionKey: session.sessionKey,
+        },
+      });
+      return session;
     },
   );
 
   app.post<{ Params: { chatId: string }; Body: Partial<RoutingInput> }>(
     "/chats/:chatId/session/reset",
     async (request) => {
-      return services.router.resetSession(getRouteFromRequest(request.params.chatId, request.body));
+      const session = await services.router.resetSession(getRouteFromRequest(request.params.chatId, request.body));
+      audit({
+        action: "session.reset",
+        resourceType: "hermes-session",
+        resourceId: session.id,
+        details: {
+          accountId: session.accountId,
+          chatJid: session.chatJid,
+          sessionKey: session.sessionKey,
+        },
+      });
+      return session;
     },
   );
 
@@ -137,10 +190,21 @@ export function createApp({ config, services = buildServices(config) }: CreateAp
     Params: { chatId: string };
     Body: { hermesSessionId: string } & Partial<RoutingInput>;
   }>("/chats/:chatId/session/remap", async (request) => {
-    return services.router.remapSession(
+    const mapping = await services.router.remapSession(
       getRouteFromRequest(request.params.chatId, request.body),
       request.body.hermesSessionId,
     );
+    audit({
+      action: "session.remap",
+      resourceType: "chat-session",
+      resourceId: mapping.sessionKey,
+      details: {
+        accountId: mapping.accountId,
+        chatJid: mapping.chatJid,
+        hermesSessionId: mapping.hermesSessionId,
+      },
+    });
+    return mapping;
   });
 
   app.get("/sessions", async () => ({
@@ -150,6 +214,15 @@ export function createApp({ config, services = buildServices(config) }: CreateAp
   app.get("/deliveries", async () => ({
     items: services.deliveryStore?.listDeliveries() ?? [],
   }));
+
+  app.get<{ Querystring: { limit?: string } }>("/audit-logs", async (request) => ({
+    items: services.auditLogStore?.listAuditLogs(readLimit(request.query.limit)) ?? [],
+  }));
+
+  app.post<{ Body: unknown }>("/audit-logs", async (request) => {
+    const input = parseAuditLogInput(request.body);
+    return audit(input);
+  });
 
   app.get<{ Querystring: { accountId?: string } }>("/number-rules", async (request) => ({
     items: services.numberRuleStore?.listNumberRules(request.query.accountId) ?? [],
@@ -163,6 +236,18 @@ export function createApp({ config, services = buildServices(config) }: CreateAp
     const input = parseNumberRuleInput(request.body);
     const rule = services.numberRuleStore.createNumberRule(input);
     services.eventBus.publish("rules");
+    audit({
+      action: "number-rule.create",
+      resourceType: "number-rule",
+      resourceId: rule.id,
+      details: {
+        accountId: rule.accountId,
+        action: rule.action,
+        matchType: rule.matchType,
+        pattern: rule.pattern,
+        enabled: rule.enabled,
+      },
+    });
     return rule;
   });
 
@@ -179,6 +264,15 @@ export function createApp({ config, services = buildServices(config) }: CreateAp
     const input = parseNumberRuleInput(request.body, existing);
     const rule = services.numberRuleStore.updateNumberRule(existing.id, input);
     services.eventBus.publish("rules");
+    audit({
+      action: "number-rule.update",
+      resourceType: "number-rule",
+      resourceId: existing.id,
+      details: {
+        before: existing,
+        after: rule,
+      },
+    });
     return rule;
   });
 
@@ -187,12 +281,29 @@ export function createApp({ config, services = buildServices(config) }: CreateAp
       return reply.code(503).send({ error: "Number rule storage is not configured" });
     }
 
-    const deleted = services.numberRuleStore.deleteNumberRule(decodeURIComponent(request.params.ruleId));
+    const ruleId = decodeURIComponent(request.params.ruleId);
+    const existing = services.numberRuleStore.getNumberRule(ruleId);
+    if (!existing) {
+      return reply.code(404).send({ error: "Number rule not found" });
+    }
+
+    const deleted = services.numberRuleStore.deleteNumberRule(ruleId);
     if (!deleted) {
       return reply.code(404).send({ error: "Number rule not found" });
     }
 
     services.eventBus.publish("rules");
+    audit({
+      action: "number-rule.delete",
+      resourceType: "number-rule",
+      resourceId: existing.id,
+      details: {
+        accountId: existing.accountId,
+        action: existing.action,
+        matchType: existing.matchType,
+        pattern: existing.pattern,
+      },
+    });
     return reply.code(204).send();
   });
 
@@ -223,6 +334,17 @@ export function createApp({ config, services = buildServices(config) }: CreateAp
       if (!decision.allowed) {
         recordBlockedNumberDelivery(services.deliveryStore, retryEvent, decision.reason ?? "Blocked by number rule");
         services.eventBus.publish("activity");
+        audit({
+          action: "delivery.retry",
+          outcome: "failure",
+          resourceType: "delivery",
+          resourceId: record.id,
+          details: {
+            accountId: record.accountId,
+            chatJid: record.chatJid,
+            reason: decision.reason ?? "Blocked by number rule",
+          },
+        });
         return reply.code(409).send({ error: decision.reason ?? "Blocked by number rule" });
       }
 
@@ -255,6 +377,17 @@ export function createApp({ config, services = buildServices(config) }: CreateAp
       });
 
       services.eventBus.publish("activity");
+      audit({
+        action: "delivery.retry",
+        resourceType: "delivery",
+        resourceId: record.id,
+        details: {
+          accountId: record.accountId,
+          chatJid: record.chatJid,
+          failureStage: record.failureStage,
+          attempts: record.attempts + 1,
+        },
+      });
       return services.deliveryStore?.getDelivery(record.id) ?? record;
     }
 
@@ -277,6 +410,17 @@ export function createApp({ config, services = buildServices(config) }: CreateAp
     });
 
     services.eventBus.publish("activity");
+    audit({
+      action: "delivery.retry",
+      resourceType: "delivery",
+      resourceId: record.id,
+      details: {
+        accountId: record.accountId,
+        chatJid: record.chatJid,
+        failureStage: record.failureStage ?? "whatsapp",
+        attempts: record.attempts + 1,
+      },
+    });
     return services.deliveryStore?.getDelivery(record.id) ?? record;
   });
 
@@ -290,6 +434,16 @@ export function createApp({ config, services = buildServices(config) }: CreateAp
       });
 
       services.eventBus.publish("activity");
+      audit({
+        action: "message.outbound",
+        resourceType: "whatsapp-message",
+        resourceId: request.body.chatId,
+        details: {
+          accountId: request.body.accountId ?? null,
+          chatId: request.body.chatId,
+          textLength: request.body.text.length,
+        },
+      });
       return { status: "queued" };
     },
   );
@@ -300,6 +454,14 @@ export function createApp({ config, services = buildServices(config) }: CreateAp
       event = await services.whatsappGateway.normalizeInboundEvent(request.body);
     } catch (error) {
       if (isUnsupportedGroupChatError(error)) {
+        audit({
+          action: "message.inbound",
+          outcome: "failure",
+          resourceType: "whatsapp-message",
+          details: {
+            reason: "group-chat",
+          },
+        });
         return { ignored: true, reason: "group-chat" };
       }
 
@@ -310,11 +472,33 @@ export function createApp({ config, services = buildServices(config) }: CreateAp
     if (!decision.allowed) {
       recordBlockedNumberDelivery(services.deliveryStore, event, decision.reason ?? "Blocked by number rule");
       services.eventBus.publish("activity");
+      audit({
+        action: "message.inbound",
+        outcome: "failure",
+        resourceType: "whatsapp-message",
+        resourceId: event.messageId,
+        details: {
+          accountId: event.accountId,
+          chatJid: event.chatJid,
+          reason: decision.reason ?? "Blocked by number rule",
+        },
+      });
       return { ignored: true, reason: "number-rule" };
     }
 
     const result = await services.router.handleInboundMessage(event);
     services.eventBus.publish("activity");
+    audit({
+      action: "message.inbound",
+      resourceType: "whatsapp-message",
+      resourceId: event.messageId,
+      details: {
+        accountId: event.accountId,
+        chatJid: event.chatJid,
+        duplicate: result.duplicate,
+        hermesSessionId: result.session?.id ?? null,
+      },
+    });
     return result;
   });
 
@@ -378,8 +562,43 @@ function parseNumberRuleInput(body: unknown, existing?: NumberRuleInput): Number
   };
 }
 
+function parseAuditLogInput(body: unknown): AuditLogInput {
+  if (!body || typeof body !== "object") {
+    throw badRequest("Audit log payload must be an object");
+  }
+
+  const value = body as Record<string, unknown>;
+  const action = readString(value.action, "").trim();
+  if (!action) {
+    throw badRequest("action is required");
+  }
+
+  const outcome = readString(value.outcome, "success");
+  if (outcome !== "success" && outcome !== "failure") {
+    throw badRequest("outcome must be success or failure");
+  }
+
+  const details = value.details && typeof value.details === "object" && !Array.isArray(value.details)
+    ? value.details as Record<string, unknown>
+    : undefined;
+
+  return {
+    action,
+    outcome,
+    ...(readString(value.actor, "").trim() ? { actor: readString(value.actor, "").trim() } : {}),
+    ...(readString(value.resourceType, "").trim() ? { resourceType: readString(value.resourceType, "").trim() } : {}),
+    ...(readString(value.resourceId, "").trim() ? { resourceId: readString(value.resourceId, "").trim() } : {}),
+    ...(details ? { details } : {}),
+  };
+}
+
 function readString(value: unknown, fallback: string) {
   return typeof value === "string" ? value : fallback;
+}
+
+function readLimit(value: string | undefined) {
+  const parsed = Number.parseInt(value ?? "", 10);
+  return Number.isFinite(parsed) ? parsed : 200;
 }
 
 function badRequest(message: string) {

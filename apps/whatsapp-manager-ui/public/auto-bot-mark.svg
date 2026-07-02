@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-labelledby="title">
+  <title id="title">Auto Bot WhatsApp Bridge</title>
+  <rect width="64" height="64" rx="14" fill="#12352a"/>
+  <path d="M18 31.5c0-7.46 6.04-13.5 13.5-13.5H35c7.18 0 13 5.82 13 13s-5.82 13-13 13h-1.5L24 49v-7.86a13.48 13.48 0 0 1-6-9.64Z" fill="#dff6e8"/>
+  <path d="M24 29.5h16M24 35.5h10" stroke="#12352a" stroke-width="4" stroke-linecap="round"/>
+  <circle cx="24" cy="20" r="3" fill="#15a66d"/>
+  <circle cx="42" cy="20" r="3" fill="#15a66d"/>
+  <path d="M32 10v7" stroke="#15a66d" stroke-width="4" stroke-linecap="round"/>
+</svg>
