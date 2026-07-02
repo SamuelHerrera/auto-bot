@@ -27,7 +27,9 @@ export function createApp({ config, services = buildServices(config) }: CreateAp
     }
 
     const authorization = request.headers.authorization;
-    if (authorization !== `Bearer ${config.API_TOKEN}`) {
+    const isAuthorizedEventStream =
+      request.url.startsWith("/events") && getQueryToken(request.url) === config.API_TOKEN;
+    if (authorization !== `Bearer ${config.API_TOKEN}` && !isAuthorizedEventStream) {
       return reply.code(401).send({ error: "Unauthorized" });
     }
   });
@@ -43,8 +45,37 @@ export function createApp({ config, services = buildServices(config) }: CreateAp
     },
   }));
 
+  app.get("/events", (request, reply) => {
+    reply.hijack();
+    reply.raw.writeHead(200, {
+      "cache-control": "no-cache, no-transform",
+      "connection": "keep-alive",
+      "content-type": "text/event-stream",
+      "x-accel-buffering": "no",
+    });
+    reply.raw.write(": connected\n\n");
+
+    const heartbeat = setInterval(() => {
+      reply.raw.write(": heartbeat\n\n");
+    }, 25000);
+    const unsubscribe = services.eventBus.subscribe((event) => {
+      reply.raw.write(`event: ${event.type}\n`);
+      reply.raw.write(`data: ${JSON.stringify(event)}\n\n`);
+    });
+
+    request.raw.on("close", () => {
+      clearInterval(heartbeat);
+      unsubscribe();
+      reply.raw.end();
+    });
+
+    return;
+  });
+
   app.post<{ Body?: { accountId?: string } }>("/whatsapp/connect", async (request) => {
-    return services.whatsappGateway.initializeAccount(request.body?.accountId);
+    const status = await services.whatsappGateway.initializeAccount(request.body?.accountId);
+    services.eventBus.publish("accounts");
+    return status;
   });
 
   app.get("/whatsapp/accounts", async () => ({
@@ -54,7 +85,9 @@ export function createApp({ config, services = buildServices(config) }: CreateAp
   app.post<{ Params: { accountId: string } }>(
     "/whatsapp/accounts/:accountId/disconnect",
     async (request) => {
-      return services.whatsappGateway.disconnectAccount(request.params.accountId);
+      const status = await services.whatsappGateway.disconnectAccount(request.params.accountId);
+      services.eventBus.publish("accounts");
+      return status;
     },
   );
 
@@ -119,7 +152,9 @@ export function createApp({ config, services = buildServices(config) }: CreateAp
     }
 
     const input = parseNumberRuleInput(request.body);
-    return services.numberRuleStore.createNumberRule(input);
+    const rule = services.numberRuleStore.createNumberRule(input);
+    services.eventBus.publish("rules");
+    return rule;
   });
 
   app.put<{ Params: { ruleId: string }; Body: unknown }>("/number-rules/:ruleId", async (request, reply) => {
@@ -133,7 +168,9 @@ export function createApp({ config, services = buildServices(config) }: CreateAp
     }
 
     const input = parseNumberRuleInput(request.body, existing);
-    return services.numberRuleStore.updateNumberRule(existing.id, input);
+    const rule = services.numberRuleStore.updateNumberRule(existing.id, input);
+    services.eventBus.publish("rules");
+    return rule;
   });
 
   app.delete<{ Params: { ruleId: string } }>("/number-rules/:ruleId", async (request, reply) => {
@@ -146,6 +183,7 @@ export function createApp({ config, services = buildServices(config) }: CreateAp
       return reply.code(404).send({ error: "Number rule not found" });
     }
 
+    services.eventBus.publish("rules");
     return reply.code(204).send();
   });
 
@@ -175,6 +213,7 @@ export function createApp({ config, services = buildServices(config) }: CreateAp
       const decision = evaluateNumberRules(services.numberRuleStore, retryEvent);
       if (!decision.allowed) {
         recordBlockedNumberDelivery(services.deliveryStore, retryEvent, decision.reason ?? "Blocked by number rule");
+        services.eventBus.publish("activity");
         return reply.code(409).send({ error: decision.reason ?? "Blocked by number rule" });
       }
 
@@ -206,6 +245,7 @@ export function createApp({ config, services = buildServices(config) }: CreateAp
         updatedAt: new Date().toISOString(),
       });
 
+      services.eventBus.publish("activity");
       return services.deliveryStore?.getDelivery(record.id) ?? record;
     }
 
@@ -227,6 +267,7 @@ export function createApp({ config, services = buildServices(config) }: CreateAp
       whatsappGateway: services.whatsappGateway,
     });
 
+    services.eventBus.publish("activity");
     return services.deliveryStore?.getDelivery(record.id) ?? record;
   });
 
@@ -239,6 +280,7 @@ export function createApp({ config, services = buildServices(config) }: CreateAp
         text: request.body.text,
       });
 
+      services.eventBus.publish("activity");
       return { status: "queued" };
     },
   );
@@ -258,10 +300,13 @@ export function createApp({ config, services = buildServices(config) }: CreateAp
     const decision = evaluateNumberRules(services.numberRuleStore, event);
     if (!decision.allowed) {
       recordBlockedNumberDelivery(services.deliveryStore, event, decision.reason ?? "Blocked by number rule");
+      services.eventBus.publish("activity");
       return { ignored: true, reason: "number-rule" };
     }
 
-    return services.router.handleInboundMessage(event);
+    const result = await services.router.handleInboundMessage(event);
+    services.eventBus.publish("activity");
+    return result;
   });
 
   app.setErrorHandler((error, _request, reply) => {
@@ -337,6 +382,14 @@ function badRequest(message: string) {
 function requestLog(error: Error) {
   if (process.env.NODE_ENV !== "test") {
     console.error(error);
+  }
+}
+
+function getQueryToken(url: string) {
+  try {
+    return new URL(url, "http://localhost").searchParams.get("token");
+  } catch {
+    return null;
   }
 }
 

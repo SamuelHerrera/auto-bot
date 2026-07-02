@@ -11,6 +11,7 @@ import {
 import { BaileysWhatsAppGateway } from "./services/baileys-whatsapp-gateway.js";
 import { FileBridgeStateStore } from "./services/bridge-state-store.js";
 import { SqliteBridgeStateStore } from "./services/sqlite-bridge-state-store.js";
+import { AppEventBus } from "./services/event-bus.js";
 import { evaluateNumberRules, recordBlockedNumberDelivery } from "./services/number-rules.js";
 import type { WhatsAppGateway } from "./services/whatsapp-service.js";
 
@@ -20,10 +21,12 @@ export interface AppServices {
   whatsappGateway: WhatsAppGateway;
   deliveryStore?: BridgeDeliveryStore;
   numberRuleStore?: NumberRuleStore;
+  eventBus: AppEventBus;
 }
 
 export function buildServices(config: AppConfig): AppServices {
   const hermesAdapter = buildHermesAdapter(config);
+  const eventBus = new AppEventBus();
   const whatsappGateway = new BaileysWhatsAppGateway(config.BAILEYS_STATE_DIR);
   const bridgeStore = config.BRIDGE_DATABASE_FILE
     ? new SqliteBridgeStateStore(config.BRIDGE_DATABASE_FILE)
@@ -36,12 +39,17 @@ export function buildServices(config: AppConfig): AppServices {
     bridgeStore instanceof SqliteBridgeStateStore ? bridgeStore : undefined,
   );
 
+  whatsappGateway.onStatusChange?.(() => {
+    eventBus.publish("accounts");
+  });
+
   whatsappGateway.onInboundMessage(async (event) => {
     const deliveryStore = bridgeStore instanceof SqliteBridgeStateStore ? bridgeStore : undefined;
     const numberRuleStore = bridgeStore instanceof SqliteBridgeStateStore ? bridgeStore : undefined;
     const decision = evaluateNumberRules(numberRuleStore, event);
     if (!decision.allowed) {
       recordBlockedNumberDelivery(deliveryStore, event, decision.reason ?? "Blocked by number rule");
+      eventBus.publish("activity");
       return;
     }
 
@@ -69,6 +77,7 @@ export function buildServices(config: AppConfig): AppServices {
         });
       }
       console.error("Hermes inbound turn failed", error);
+      eventBus.publish("activity");
       return;
     }
 
@@ -84,12 +93,14 @@ export function buildServices(config: AppConfig): AppServices {
     }).catch((error: unknown) => {
       console.error("WhatsApp reply delivery failed", error);
     });
+    eventBus.publish("activity");
   });
 
   return {
     hermesAdapter,
     router,
     whatsappGateway,
+    eventBus,
     ...(bridgeStore instanceof SqliteBridgeStateStore ? { deliveryStore: bridgeStore } : {}),
     ...(bridgeStore instanceof SqliteBridgeStateStore ? { numberRuleStore: bridgeStore } : {}),
   };

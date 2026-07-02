@@ -24,6 +24,7 @@ function buildApiProxy() {
     "/number-rules": { target, changeOrigin: true },
     "/chats": { target, changeOrigin: true },
     "/messages": { target, changeOrigin: true },
+    "/events": { target, changeOrigin: true },
     "/health": { target, changeOrigin: true },
   };
 }

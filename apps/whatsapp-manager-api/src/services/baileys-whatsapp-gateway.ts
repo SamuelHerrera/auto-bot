@@ -28,10 +28,12 @@ interface BaileysAccountRuntime {
 }
 
 type InboundHandler = (event: WhatsAppMessageEvent) => Promise<void>;
+type StatusHandler = (status: WhatsAppAccountStatus) => void;
 
 export class BaileysWhatsAppGateway implements WhatsAppGateway {
   private readonly accounts = new Map<string, BaileysAccountRuntime>();
   private inboundHandler: InboundHandler | null = null;
+  private statusHandler: StatusHandler | null = null;
   private lastActiveAccountId: string | null = null;
 
   constructor(private readonly stateDir: string) {
@@ -40,6 +42,10 @@ export class BaileysWhatsAppGateway implements WhatsAppGateway {
 
   onInboundMessage(handler: InboundHandler): void {
     this.inboundHandler = handler;
+  }
+
+  onStatusChange(handler: StatusHandler): void {
+    this.statusHandler = handler;
   }
 
   async getStatus(): Promise<WhatsAppAccountStatus> {
@@ -102,6 +108,7 @@ export class BaileysWhatsAppGateway implements WhatsAppGateway {
 
     this.accounts.set(accountId, runtime);
     this.lastActiveAccountId = accountId;
+    this.statusHandler?.(runtime.status);
 
     socket.ev.on("creds.update", saveCreds);
     socket.ev.on("connection.update", (update) => {
@@ -143,6 +150,7 @@ export class BaileysWhatsAppGateway implements WhatsAppGateway {
     };
     runtime.status = status;
     this.accounts.delete(accountId);
+    this.statusHandler?.(status);
 
     if (this.lastActiveAccountId === accountId) {
       this.lastActiveAccountId = null;
@@ -313,6 +321,7 @@ export class BaileysWhatsAppGateway implements WhatsAppGateway {
         status: "connecting",
         qrCode: update.qr,
       };
+      this.statusHandler?.(runtime.status);
     }
 
     if (update.connection === "connecting") {
@@ -321,6 +330,7 @@ export class BaileysWhatsAppGateway implements WhatsAppGateway {
         accountId,
         status: "connecting",
       };
+      this.statusHandler?.(runtime.status);
     }
 
     if (update.connection === "open") {
@@ -339,6 +349,7 @@ export class BaileysWhatsAppGateway implements WhatsAppGateway {
       };
       runtime.transient = false;
       this.lastActiveAccountId = runtime.accountId;
+      this.statusHandler?.(runtime.status);
     }
 
     if (update.connection === "close") {
@@ -353,6 +364,7 @@ export class BaileysWhatsAppGateway implements WhatsAppGateway {
           ? { lastError: update.lastDisconnect.error.message }
           : {}),
       };
+      this.statusHandler?.(runtime.status);
 
       if (shouldReconnect) {
         runtime.reconnecting = true;
@@ -365,6 +377,7 @@ export class BaileysWhatsAppGateway implements WhatsAppGateway {
             disconnectedAt: new Date().toISOString(),
             lastError: error instanceof Error ? error.message : "Reconnect failed.",
           };
+          this.statusHandler?.(runtime.status);
         });
       }
     }

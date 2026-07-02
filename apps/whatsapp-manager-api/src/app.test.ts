@@ -6,6 +6,7 @@ import { createApp } from "./app.js";
 import { sendReplyWithDeliveryRecord, type AppServices } from "./build-services.js";
 import { loadConfig } from "./config.js";
 import { evaluateNumberRules, recordBlockedNumberDelivery } from "./services/number-rules.js";
+import { AppEventBus } from "./services/event-bus.js";
 import { HermesApiAdapter, type HermesAdapter } from "./services/hermes-adapter.js";
 import { FileBridgeStateStore } from "./services/bridge-state-store.js";
 import { InMemoryChatSessionRouter } from "./services/chat-session-router.js";
@@ -949,6 +950,7 @@ describe("whatsapp-manager-api", () => {
 
 function createTestServices(config: AppConfig): AppServices {
   const hermesAdapter = new TestHermesAdapter();
+  const eventBus = new AppEventBus();
   const whatsappGateway = new TestWhatsAppGateway();
   const bridgeStore = config.BRIDGE_DATABASE_FILE
     ? new SqliteBridgeStateStore(config.BRIDGE_DATABASE_FILE)
@@ -961,12 +963,17 @@ function createTestServices(config: AppConfig): AppServices {
     bridgeStore instanceof SqliteBridgeStateStore ? bridgeStore : undefined,
   );
 
+  whatsappGateway.onStatusChange(() => {
+    eventBus.publish("accounts");
+  });
+
   whatsappGateway.onInboundMessage(async (event) => {
     const deliveryStore = bridgeStore instanceof SqliteBridgeStateStore ? bridgeStore : undefined;
     const numberRuleStore = bridgeStore instanceof SqliteBridgeStateStore ? bridgeStore : undefined;
     const decision = evaluateNumberRules(numberRuleStore, event);
     if (!decision.allowed) {
       recordBlockedNumberDelivery(deliveryStore, event, decision.reason ?? "Blocked by number rule");
+      eventBus.publish("activity");
       return;
     }
 
@@ -993,6 +1000,7 @@ function createTestServices(config: AppConfig): AppServices {
           updatedAt: now,
         });
       }
+      eventBus.publish("activity");
       return;
     }
 
@@ -1006,12 +1014,14 @@ function createTestServices(config: AppConfig): AppServices {
       text: result.reply.outputText,
       whatsappGateway,
     }).catch(() => undefined);
+    eventBus.publish("activity");
   });
 
   return {
     hermesAdapter,
     router,
     whatsappGateway,
+    eventBus,
     ...(bridgeStore instanceof SqliteBridgeStateStore ? { deliveryStore: bridgeStore } : {}),
     ...(bridgeStore instanceof SqliteBridgeStateStore ? { numberRuleStore: bridgeStore } : {}),
   };
@@ -1048,9 +1058,14 @@ class TestWhatsAppGateway implements WhatsAppGateway {
   private readonly sentMessages: OutboundWhatsAppMessage[] = [];
   private lastConnectedAccountId: string | null = null;
   private inboundHandler: ((event: WhatsAppMessageEvent) => Promise<void>) | null = null;
+  private statusHandler: ((status: WhatsAppAccountStatus) => void) | null = null;
 
   onInboundMessage(handler: (event: WhatsAppMessageEvent) => Promise<void>): void {
     this.inboundHandler = handler;
+  }
+
+  onStatusChange(handler: (status: WhatsAppAccountStatus) => void): void {
+    this.statusHandler = handler;
   }
 
   async getStatus(): Promise<WhatsAppAccountStatus> {
@@ -1083,6 +1098,7 @@ class TestWhatsAppGateway implements WhatsAppGateway {
 
     this.accounts.set(resolvedAccountId, account);
     this.lastConnectedAccountId = resolvedAccountId;
+    this.statusHandler?.(account);
     return account;
   }
 
@@ -1094,6 +1110,7 @@ class TestWhatsAppGateway implements WhatsAppGateway {
     };
 
     this.accounts.set(accountId, account);
+    this.statusHandler?.(account);
 
     if (this.lastConnectedAccountId === accountId) {
       this.lastConnectedAccountId = null;
