@@ -1,4 +1,5 @@
-import { FormEvent, useEffect, useRef, useState } from "react";
+import { ButtonHTMLAttributes, FormEvent, useEffect, useRef, useState } from "react";
+import { Icon } from "@iconify/react";
 import { QRCodeSVG } from "qrcode.react";
 
 type AccountStatus = "disconnected" | "connecting" | "connected";
@@ -102,6 +103,22 @@ const brandingStorageKeys = {
   iconSrc: "whatsapp-manager-ui.branding-icon-src",
 };
 
+const workspaceStorageKeys = {
+  activeAccountId: "whatsapp-manager-ui.workspace-active-account-id",
+  activeTabId: "whatsapp-manager-ui.workspace-active-tab-id",
+  isLogsTabOpen: "whatsapp-manager-ui.workspace-logs-open",
+  isSettingsTabOpen: "whatsapp-manager-ui.workspace-settings-open",
+  openAccountTabs: "whatsapp-manager-ui.workspace-account-tabs",
+};
+
+interface WorkspaceState {
+  activeAccountId: string;
+  activeTabId: string;
+  isLogsTabOpen: boolean;
+  isSettingsTabOpen: boolean;
+  openAccountTabs: string[];
+}
+
 const defaultApiToken =
   import.meta.env.VITE_WHATSAPP_MANAGER_API_TOKEN?.trim() || "local-dev-token";
 const defaultAppTitle =
@@ -109,18 +126,22 @@ const defaultAppTitle =
 const defaultAppIcon = "/auto-bot-mark.svg";
 
 export function App() {
+  const [initialWorkspace] = useState(getInitialWorkspaceState);
   const [branding, setBranding] = useState<BrandingSettings>(getInitialBranding);
   const [accounts, setAccounts] = useState<WhatsAppAccount[]>([]);
+  const [hasLoadedAccounts, setHasLoadedAccounts] = useState(false);
   const [mappings, setMappings] = useState<SessionMapping[]>([]);
   const [deliveries, setDeliveries] = useState<DeliveryRecord[]>([]);
   const [numberRules, setNumberRules] = useState<NumberRule[]>([]);
   const [auditLogs, setAuditLogs] = useState<AuditLogRecord[]>([]);
   const [activeNumberView, setActiveNumberView] = useState<NumberSubview>("messages");
   const [accountSearch, setAccountSearch] = useState("");
-  const [openAccountTabs, setOpenAccountTabs] = useState<string[]>([]);
-  const [isLogsTabOpen, setIsLogsTabOpen] = useState(false);
-  const [activeTabId, setActiveTabId] = useState("settings");
-  const [activeAccountId, setActiveAccountId] = useState("");
+  const [openAccountTabs, setOpenAccountTabs] = useState<string[]>(initialWorkspace.openAccountTabs);
+  const [isNumberPanelOpen, setIsNumberPanelOpen] = useState(false);
+  const [isSettingsTabOpen, setIsSettingsTabOpen] = useState(initialWorkspace.isSettingsTabOpen);
+  const [isLogsTabOpen, setIsLogsTabOpen] = useState(initialWorkspace.isLogsTabOpen);
+  const [activeTabId, setActiveTabId] = useState(initialWorkspace.activeTabId);
+  const [activeAccountId, setActiveAccountId] = useState(initialWorkspace.activeAccountId);
   const [activeChatJid, setActiveChatJid] = useState("");
   const [isLinkDialogOpen, setIsLinkDialogOpen] = useState(false);
   const [linkingStatus, setLinkingStatus] = useState<WhatsAppAccount | null>(null);
@@ -188,11 +209,61 @@ export function App() {
   }, []);
 
   useEffect(() => {
-    const firstAccount = accounts[0];
-    if (!activeAccountId && firstAccount) {
-      setActiveAccountId(firstAccount.accountId);
+    persistWorkspaceState({
+      activeAccountId,
+      activeTabId,
+      isLogsTabOpen,
+      isSettingsTabOpen,
+      openAccountTabs,
+    });
+  }, [activeAccountId, activeTabId, isLogsTabOpen, isSettingsTabOpen, openAccountTabs]);
+
+  useEffect(() => {
+    if (!hasLoadedAccounts) {
+      return;
     }
-  }, [accounts, activeAccountId]);
+
+    const availableAccountIds = new Set(accounts.map((account) => account.accountId));
+    const validOpenTabs = openAccountTabs.filter((accountId) => availableAccountIds.has(accountId));
+
+    if (!areStringArraysEqual(openAccountTabs, validOpenTabs)) {
+      setOpenAccountTabs(validOpenTabs);
+    }
+
+    const isActiveAccountTab = activeTabId && activeTabId !== "settings" && activeTabId !== "logs";
+    const isActiveTabAvailable =
+      !activeTabId ||
+      (activeTabId === "settings" && isSettingsTabOpen) ||
+      (activeTabId === "logs" && isLogsTabOpen) ||
+      (isActiveAccountTab && availableAccountIds.has(activeTabId));
+
+    if (!isActiveTabAvailable) {
+      const nextTabId = getFallbackTabId(validOpenTabs, isSettingsTabOpen, isLogsTabOpen);
+      setActiveTabId(nextTabId);
+      setActiveAccountId(nextTabId && nextTabId !== "settings" && nextTabId !== "logs" ? nextTabId : validOpenTabs[0] ?? "");
+      setActiveChatJid("");
+      return;
+    }
+
+    if (isActiveAccountTab && availableAccountIds.has(activeTabId) && activeAccountId !== activeTabId) {
+      setActiveAccountId(activeTabId);
+      setActiveChatJid("");
+      return;
+    }
+
+    if (activeAccountId && !availableAccountIds.has(activeAccountId)) {
+      setActiveAccountId(validOpenTabs[0] ?? "");
+      setActiveChatJid("");
+    }
+  }, [
+    accounts,
+    activeAccountId,
+    activeTabId,
+    hasLoadedAccounts,
+    isLogsTabOpen,
+    isSettingsTabOpen,
+    openAccountTabs,
+  ]);
 
   async function request<T>(path: string, init?: RequestInit): Promise<T> {
     const headers = new Headers(init?.headers);
@@ -252,6 +323,7 @@ export function App() {
 
       if (accountResponse) {
         setAccounts(accountResponse.items);
+        setHasLoadedAccounts(true);
       }
       if (mappingResponse) {
         setMappings(mappingResponse.items.filter((mapping) => mapping.chatType === "direct"));
@@ -507,6 +579,7 @@ export function App() {
     setActiveAccountId(accountId);
     setActiveChatJid("");
     setActiveNumberView("messages");
+    setIsNumberPanelOpen(false);
     setStatusMessage(`Opened ${accountId}.`);
   }
 
@@ -523,7 +596,23 @@ export function App() {
   function closeLogsTab() {
     setIsLogsTabOpen(false);
     if (activeTabId === "logs") {
-      setActiveTabId(openAccountTabs[0] ?? "settings");
+      const nextTabId = getFallbackTabId(openAccountTabs, isSettingsTabOpen, false);
+      setActiveTabId(nextTabId);
+      setActiveAccountId(nextTabId && nextTabId !== "settings" ? nextTabId : activeAccountId);
+    }
+  }
+
+  function openSettingsTab() {
+    setIsSettingsTabOpen(true);
+    setActiveTabId("settings");
+  }
+
+  function closeSettingsTab() {
+    setIsSettingsTabOpen(false);
+    if (activeTabId === "settings") {
+      const nextTabId = getFallbackTabId(openAccountTabs, false, isLogsTabOpen);
+      setActiveTabId(nextTabId);
+      setActiveAccountId(nextTabId && nextTabId !== "logs" ? nextTabId : activeAccountId);
     }
   }
 
@@ -531,7 +620,7 @@ export function App() {
     setOpenAccountTabs((currentTabs) => currentTabs.filter((tabAccountId) => tabAccountId !== accountId));
     if (activeTabId === accountId) {
       const nextAccountId = openAccountTabs.find((tabAccountId) => tabAccountId !== accountId);
-      setActiveTabId(nextAccountId ?? "settings");
+      setActiveTabId(nextAccountId ?? getFallbackTabId([], isSettingsTabOpen, isLogsTabOpen));
       setActiveAccountId(nextAccountId ?? "");
       setActiveChatJid("");
     }
@@ -570,63 +659,19 @@ export function App() {
           <h1>{branding.title}</h1>
         </div>
         <div className="topbar-actions">
-          <button className="secondary-button" onClick={openLogsTab}>
-            Logs
-          </button>
+          <IconButton icon="mdi:phone-multiple" label="Numbers" variant="secondary" onClick={() => setIsNumberPanelOpen(true)}>
+            <span className="button-count">{connectedAccounts}/{accounts.length}</span>
+          </IconButton>
+          <form className="header-link-form" onSubmit={connectAccount}>
+            <IconButton icon="mdi:link-plus" label="Link number" type="submit" disabled={isBusy} />
+          </form>
+          <IconButton icon="mdi:cog-outline" label="Settings" variant="secondary" onClick={openSettingsTab} />
+          <IconButton icon="mdi:clipboard-text-clock-outline" label="Logs" variant="secondary" onClick={openLogsTab} />
           <StatusIndicator detail={errorMessage || statusMessage} tone={statusTone} />
         </div>
       </header>
 
       <main className="admin-layout">
-        <aside className="account-sidebar">
-          <div className="sidebar-action-row">
-            <div>
-              <span className="panel-kicker">Numbers</span>
-              <strong>{connectedAccounts}/{accounts.length} online</strong>
-            </div>
-            <form onSubmit={connectAccount}>
-              <button type="submit" disabled={isBusy}>
-                + Link
-              </button>
-            </form>
-          </div>
-
-          <label className="compact-field sidebar-search">
-            <span>Search</span>
-            <input
-              value={accountSearch}
-              onChange={(event) => setAccountSearch(event.target.value)}
-              placeholder="Find number"
-            />
-          </label>
-
-          <div className="account-list sidebar-account-list">
-            {filteredAccounts.length === 0 ? (
-              <EmptyState
-                title={accounts.length === 0 ? "No numbers" : "No matches"}
-                description={accounts.length === 0 ? "Use Link to pair a WhatsApp number." : "Adjust the search."}
-              />
-            ) : (
-              filteredAccounts.map((account) => (
-                <button
-                  key={account.accountId}
-                  className={`account-open sidebar-account-button${
-                    account.accountId === selectedTabAccountId ? " account-row-active" : ""
-                  }`}
-                  onClick={() => openAccount(account.accountId)}
-                  title={getAccountStatusDetail(account)}
-                >
-                  <span className={`status-dot status-dot-${account.status}`} />
-                  <span>
-                    <strong>{getAccountDisplayName(account)}</strong>
-                    <small>{account.status}</small>
-                  </span>
-                </button>
-              ))
-            )}
-          </div>
-        </aside>
-
         <section className="admin-panel">
           <div className="workspace-tabs" role="tablist" aria-label="Open workspaces">
             {tabAccounts.map((account) => (
@@ -646,17 +691,25 @@ export function App() {
                   <span className={`status-dot status-dot-${account.status}`} />
                   <span>{getAccountDisplayName(account)}</span>
                 </button>
-                <button className="tab-close" aria-label={`Close ${account.accountId}`} onClick={() => closeAccountTab(account.accountId)}>
-                  x
-                </button>
+                <IconButton icon="mdi:close" label={`Close ${account.accountId}`} className="tab-close" variant="text" onClick={() => closeAccountTab(account.accountId)} />
               </div>
             ))}
-            <button
-              className={`workspace-tab${activeTabId === "settings" ? " workspace-tab-active" : ""}`}
-              onClick={() => setActiveTabId("settings")}
-            >
-              Settings
-            </button>
+            {isSettingsTabOpen ? (
+              <div className={`workspace-tab${activeTabId === "settings" ? " workspace-tab-active" : ""}`}>
+                <button
+                  className="workspace-tab-main"
+                  onClick={() => {
+                    setActiveTabId("settings");
+                  }}
+                  aria-label="Settings"
+                  title="Settings"
+                >
+                  <Icon icon="mdi:cog-outline" aria-hidden="true" />
+                  <span>Settings</span>
+                </button>
+                <IconButton icon="mdi:close" label="Close settings" className="tab-close" variant="text" onClick={closeSettingsTab} />
+              </div>
+            ) : null}
             {isLogsTabOpen ? (
               <div className={`workspace-tab${activeTabId === "logs" ? " workspace-tab-active" : ""}`}>
                 <button
@@ -664,17 +717,18 @@ export function App() {
                   onClick={() => {
                     setActiveTabId("logs");
                   }}
+                  aria-label="Logs"
+                  title="Logs"
                 >
+                  <Icon icon="mdi:clipboard-text-clock-outline" aria-hidden="true" />
                   <span>Logs</span>
                 </button>
-                <button className="tab-close" aria-label="Close logs" onClick={closeLogsTab}>
-                  x
-                </button>
+                <IconButton icon="mdi:close" label="Close logs" className="tab-close" variant="text" onClick={closeLogsTab} />
               </div>
             ) : null}
           </div>
 
-          {activeTabId === "settings" ? (
+          {activeTabId === "settings" && isSettingsTabOpen ? (
             <SettingsView
               branding={branding}
               defaultBranding={{ title: defaultAppTitle, iconSrc: defaultAppIcon }}
@@ -684,13 +738,13 @@ export function App() {
             />
           ) : null}
 
-          {activeTabId === "logs" ? (
+          {activeTabId === "logs" && isLogsTabOpen ? (
             <LogsView
               auditLogs={auditLogs}
             />
           ) : null}
 
-          {activeTabId !== "logs" && activeTabId !== "settings" ? (
+          {activeTabId !== "logs" && activeTabId !== "settings" && activeTabId ? (
             <NumberWorkspace
               account={activeAccount}
               activeChat={activeChat}
@@ -718,8 +772,25 @@ export function App() {
               rules={numberRules.filter((rule) => rule.accountId === activeAccountId)}
             />
           ) : null}
+
+          {!activeTabId ? (
+            <EmptyState title="No workspace open" description="Open Settings, Logs, or choose a number from the header." />
+          ) : null}
         </section>
       </main>
+
+      {isNumberPanelOpen ? (
+        <NumberChooserPanel
+          accounts={filteredAccounts}
+          allAccountCount={accounts.length}
+          connectedAccounts={connectedAccounts}
+          onClose={() => setIsNumberPanelOpen(false)}
+          onOpenAccount={openAccount}
+          search={accountSearch}
+          selectedAccountId={selectedTabAccountId}
+          setSearch={setAccountSearch}
+        />
+      ) : null}
 
       {isLinkDialogOpen ? (
         <LinkAccountDialog
@@ -729,81 +800,6 @@ export function App() {
         />
       ) : null}
     </div>
-  );
-}
-
-function AccountsView({
-  accounts,
-  connectedAccounts,
-  isBusy,
-  isLinkDialogOpen,
-  onConnect,
-  onDisconnect,
-  onDismissLinkDialog,
-  onOpenAccount,
-  pendingQrAccount,
-}: {
-  accounts: WhatsAppAccount[];
-  connectedAccounts: number;
-  isBusy: boolean;
-  isLinkDialogOpen: boolean;
-  onConnect: (event: FormEvent<HTMLFormElement>) => void;
-  onDisconnect: (accountId: string) => void;
-  onDismissLinkDialog: () => void;
-  onOpenAccount: (accountId: string) => void;
-  pendingQrAccount: WhatsAppAccount | null;
-}) {
-  return (
-    <>
-      <div className="section-heading">
-        <div>
-          <span className="panel-kicker">Accounts</span>
-          <h2>Pair and monitor numbers</h2>
-        </div>
-        <div className="account-heading-actions">
-          <span className="count-pill">{connectedAccounts}/{accounts.length} online</span>
-          <form onSubmit={onConnect}>
-            <button type="submit" disabled={isBusy}>
-              + Link
-            </button>
-          </form>
-        </div>
-      </div>
-
-      <div className="account-list account-list-table">
-        {accounts.length === 0 ? (
-          <EmptyState title="No accounts" description="Use + Link to create a WhatsApp pairing session." />
-        ) : (
-          accounts.map((account) => (
-            <div key={account.accountId} className="account-row">
-              <button className="account-open" onClick={() => onOpenAccount(account.accountId)}>
-                <span className={`status-dot status-dot-${account.status}`} />
-                <span>
-                  <strong>{getAccountDisplayName(account)}</strong>
-                  <small>{getAccountActivity(account)}</small>
-                </span>
-              </button>
-              <span className={`badge badge-${account.status}`}>{account.status}</span>
-              <button
-                className="text-button danger-button"
-                onClick={() => onDisconnect(account.accountId)}
-                disabled={isBusy || account.status === "disconnected"}
-              >
-                Disconnect
-              </button>
-            </div>
-          ))
-        )}
-      </div>
-
-      {isLinkDialogOpen ? (
-        <LinkAccountDialog
-          account={pendingQrAccount}
-          isBusy={isBusy}
-          onClose={onDismissLinkDialog}
-        />
-      ) : null}
-    </>
   );
 }
 
@@ -874,24 +870,24 @@ function NumberWorkspace({
           <span className={`badge badge-${account.status}`} title={getAccountStatusDetail(account)}>
             {account.status}
           </span>
-          <button
-            className="text-button danger-button"
+          <IconButton
+            icon="mdi:link-off"
+            label="Disconnect number"
+            variant="danger"
             onClick={() => onDisconnect(account.accountId)}
             disabled={isBusy || account.status === "disconnected"}
-          >
-            Disconnect
-          </button>
+          />
         </div>
       </div>
 
       <div className="subnav" aria-label="Number sections">
-        <TabButton active={activeView === "messages"} onClick={() => onViewChange("messages")}>
+        <TabButton active={activeView === "messages"} icon="mdi:message-text-outline" onClick={() => onViewChange("messages")}>
           Messages
         </TabButton>
-        <TabButton active={activeView === "rules"} onClick={() => onViewChange("rules")}>
+        <TabButton active={activeView === "rules"} icon="mdi:shield-check-outline" onClick={() => onViewChange("rules")}>
           Rules
         </TabButton>
-        <TabButton active={activeView === "failures"} onClick={() => onViewChange("failures")}>
+        <TabButton active={activeView === "failures"} icon="mdi:alert-circle-outline" onClick={() => onViewChange("failures")}>
           Failures
         </TabButton>
       </div>
@@ -934,6 +930,78 @@ function NumberWorkspace({
   );
 }
 
+function NumberChooserPanel({
+  accounts,
+  allAccountCount,
+  connectedAccounts,
+  onClose,
+  onOpenAccount,
+  search,
+  selectedAccountId,
+  setSearch,
+}: {
+  accounts: WhatsAppAccount[];
+  allAccountCount: number;
+  connectedAccounts: number;
+  onClose: () => void;
+  onOpenAccount: (accountId: string) => void;
+  search: string;
+  selectedAccountId: string;
+  setSearch: (value: string) => void;
+}) {
+  return (
+    <div className="dialog-backdrop" role="presentation">
+      <section className="number-panel" role="dialog" aria-modal="true" aria-labelledby="number-panel-title">
+        <div className="dialog-header">
+          <div>
+            <span className="panel-kicker">Numbers</span>
+            <h3 id="number-panel-title">Open a managed number</h3>
+            <p className="dialog-subtitle">{connectedAccounts}/{allAccountCount} online</p>
+          </div>
+          <IconButton icon="mdi:close" label="Close numbers panel" variant="text" onClick={onClose} />
+        </div>
+
+        <div className="number-panel-body">
+          <label className="field number-panel-search">
+            <span>Search</span>
+            <input
+              autoFocus
+              value={search}
+              onChange={(event) => setSearch(event.target.value)}
+              placeholder="Find number"
+            />
+          </label>
+
+          <div className="number-choice-list">
+            {accounts.length === 0 ? (
+              <EmptyState
+                title={allAccountCount === 0 ? "No numbers" : "No matches"}
+                description={allAccountCount === 0 ? "Use Link to pair a WhatsApp number." : "Adjust the search."}
+              />
+            ) : (
+              accounts.map((account) => (
+                <button
+                  key={account.accountId}
+                  className={`number-choice${account.accountId === selectedAccountId ? " number-choice-active" : ""}`}
+                  onClick={() => onOpenAccount(account.accountId)}
+                  title={getAccountStatusDetail(account)}
+                >
+                  <span className={`status-dot status-dot-${account.status}`} />
+                  <span>
+                    <strong>{getAccountDisplayName(account)}</strong>
+                    <small>{getAccountActivity(account)}</small>
+                  </span>
+                  <span className={`badge badge-${account.status}`}>{account.status}</span>
+                </button>
+              ))
+            )}
+          </div>
+        </div>
+      </section>
+    </div>
+  );
+}
+
 function LinkAccountDialog({
   account,
   isBusy,
@@ -954,9 +1022,7 @@ function LinkAccountDialog({
               <p className="dialog-subtitle">{account.accountId}</p>
             ) : null}
           </div>
-          <button className="text-button" onClick={onClose} aria-label="Close link dialog">
-            Close
-          </button>
+          <IconButton icon="mdi:close" label="Close link dialog" variant="text" onClick={onClose} />
         </div>
 
         <div className="dialog-body">
@@ -1172,9 +1238,12 @@ function RulesView({
           <span>Label</span>
           <input value={ruleLabel} onChange={(event) => onLabelChange(event.target.value)} placeholder="Ops allowlist" />
         </label>
-        <button type="submit" disabled={isBusy || !activeAccountId || (matchType !== "all" && !pattern.trim())}>
-          Add rule
-        </button>
+        <IconButton
+          icon="mdi:plus"
+          label="Add rule"
+          type="submit"
+          disabled={isBusy || !activeAccountId || (matchType !== "all" && !pattern.trim())}
+        />
       </form>
 
       <div className="rule-list">
@@ -1201,9 +1270,7 @@ function RulesView({
                 />
                 <span>Enabled</span>
               </label>
-              <button className="text-button danger-button" onClick={() => onDelete(rule.id)} disabled={isBusy}>
-                Delete
-              </button>
+              <IconButton icon="mdi:trash-can-outline" label="Delete rule" variant="danger" onClick={() => onDelete(rule.id)} disabled={isBusy} />
             </article>
           ))
         )}
@@ -1239,9 +1306,7 @@ function FailuresView({
             <article key={delivery.id} className="retry-row">
               <div className="retry-row-header">
                 <strong>{delivery.chatJid}</strong>
-                <button onClick={() => onRetry(delivery.id)} disabled={isBusy}>
-                  Retry
-                </button>
+                <IconButton icon="mdi:refresh" label="Retry delivery" onClick={() => onRetry(delivery.id)} disabled={isBusy} />
               </div>
               <p>{delivery.error ?? "Delivery failed."}</p>
               <span className="mono">{delivery.failureStage ?? "unknown"} / {delivery.id}</span>
@@ -1339,12 +1404,8 @@ function SettingsView({
         </label>
 
         <div className="settings-actions">
-          <button type="submit" disabled={isBusy || !draftTitle.trim()}>
-            Save branding
-          </button>
-          <button type="button" className="secondary-button" onClick={onReset} disabled={isBusy}>
-            Reset
-          </button>
+          <IconButton icon="mdi:content-save-outline" label="Save branding" type="submit" disabled={isBusy || !draftTitle.trim()} />
+          <IconButton icon="mdi:restore" label="Reset branding" type="button" variant="secondary" onClick={onReset} disabled={isBusy} />
         </div>
       </form>
     </>
@@ -1391,15 +1452,46 @@ function LogsView({
 function TabButton({
   active,
   children,
+  icon,
   onClick,
 }: {
   active: boolean;
+  icon: string;
   children: string;
   onClick: () => void;
 }) {
   return (
-    <button className={`nav-button${active ? " nav-button-active" : ""}`} onClick={onClick}>
-      {children}
+    <button className={`nav-button icon-tab-button${active ? " nav-button-active" : ""}`} onClick={onClick} aria-label={children} title={children}>
+      <Icon icon={icon} aria-hidden="true" />
+      <span>{children}</span>
+    </button>
+  );
+}
+
+function IconButton({
+  icon,
+  label,
+  title = label,
+  variant = "primary",
+  ...buttonProps
+}: ButtonHTMLAttributes<HTMLButtonElement> & {
+  icon: string;
+  label: string;
+  title?: string;
+  variant?: "primary" | "secondary" | "text" | "danger";
+}) {
+  const className = [
+    "icon-button",
+    variant === "secondary" ? "secondary-button" : "",
+    variant === "text" || variant === "danger" ? "text-button" : "",
+    variant === "danger" ? "danger-button" : "",
+    buttonProps.className ?? "",
+  ].filter(Boolean).join(" ");
+
+  return (
+    <button {...buttonProps} className={className} aria-label={label} title={title}>
+      <Icon icon={icon} aria-hidden="true" />
+      {buttonProps.children}
     </button>
   );
 }
@@ -1533,6 +1625,60 @@ function getInitialBranding(): BrandingSettings {
     title: localStorage.getItem(brandingStorageKeys.title) || defaultAppTitle,
     iconSrc: localStorage.getItem(brandingStorageKeys.iconSrc) || defaultAppIcon,
   });
+}
+
+function getInitialWorkspaceState(): WorkspaceState {
+  const isSettingsTabOpen = localStorage.getItem(workspaceStorageKeys.isSettingsTabOpen) === "true";
+  const isLogsTabOpen = localStorage.getItem(workspaceStorageKeys.isLogsTabOpen) === "true";
+  const openAccountTabs = parseStoredStringArray(localStorage.getItem(workspaceStorageKeys.openAccountTabs));
+  const storedActiveTabId = localStorage.getItem(workspaceStorageKeys.activeTabId) ?? "";
+  const storedActiveAccountId = localStorage.getItem(workspaceStorageKeys.activeAccountId) ?? "";
+  const canRestoreActiveTab =
+    !storedActiveTabId ||
+    openAccountTabs.includes(storedActiveTabId) ||
+    (storedActiveTabId === "settings" && isSettingsTabOpen) ||
+    (storedActiveTabId === "logs" && isLogsTabOpen);
+
+  const activeTabId = canRestoreActiveTab
+    ? storedActiveTabId
+    : getFallbackTabId(openAccountTabs, isSettingsTabOpen, isLogsTabOpen);
+
+  return {
+    activeAccountId: openAccountTabs.includes(storedActiveAccountId) ? storedActiveAccountId : openAccountTabs[0] ?? "",
+    activeTabId,
+    isLogsTabOpen,
+    isSettingsTabOpen,
+    openAccountTabs,
+  };
+}
+
+function persistWorkspaceState(workspace: WorkspaceState) {
+  localStorage.setItem(workspaceStorageKeys.activeAccountId, workspace.activeAccountId);
+  localStorage.setItem(workspaceStorageKeys.activeTabId, workspace.activeTabId);
+  localStorage.setItem(workspaceStorageKeys.isLogsTabOpen, String(workspace.isLogsTabOpen));
+  localStorage.setItem(workspaceStorageKeys.isSettingsTabOpen, String(workspace.isSettingsTabOpen));
+  localStorage.setItem(workspaceStorageKeys.openAccountTabs, JSON.stringify(workspace.openAccountTabs));
+}
+
+function parseStoredStringArray(value: string | null) {
+  if (!value) {
+    return [];
+  }
+
+  try {
+    const parsed = JSON.parse(value);
+    return Array.isArray(parsed) ? parsed.filter((item): item is string => typeof item === "string") : [];
+  } catch {
+    return [];
+  }
+}
+
+function getFallbackTabId(openAccountTabs: string[], isSettingsTabOpen: boolean, isLogsTabOpen: boolean) {
+  return openAccountTabs[0] ?? (isSettingsTabOpen ? "settings" : isLogsTabOpen ? "logs" : "");
+}
+
+function areStringArraysEqual(left: string[], right: string[]) {
+  return left.length === right.length && left.every((item, index) => item === right[index]);
 }
 
 function normalizeBranding(branding: BrandingSettings): BrandingSettings {

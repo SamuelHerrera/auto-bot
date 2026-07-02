@@ -77,9 +77,43 @@ button:disabled {
   gap: 10px;
 }
 
-.topbar-actions .secondary-button {
+.topbar-actions .secondary-button,
+.topbar-actions button {
   min-height: 36px;
-  padding: 7px 12px;
+}
+
+.header-link-form {
+  display: flex;
+}
+
+.icon-button {
+  gap: 0;
+  min-width: 40px;
+  padding: 9px;
+}
+
+.icon-button > svg,
+.workspace-tab-main > svg,
+.icon-tab-button > svg {
+  display: block;
+  flex: 0 0 auto;
+  height: 1.2rem;
+  width: 1.2rem;
+}
+
+.topbar-actions .icon-button {
+  min-height: 38px;
+  min-width: 38px;
+}
+
+.button-count {
+  background: #eef1ee;
+  border-radius: 999px;
+  color: #526058;
+  font-size: 0.74rem;
+  line-height: 1;
+  margin-left: 7px;
+  padding: 4px 7px;
 }
 
 .topbar h1,
@@ -225,7 +259,7 @@ button:disabled {
   align-items: start;
   display: grid;
   gap: 18px;
-  grid-template-columns: 260px minmax(0, 1fr);
+  grid-template-columns: minmax(0, 1fr);
 }
 
 .admin-nav,
@@ -383,6 +417,11 @@ button:disabled {
   width: 18px;
 }
 
+.tab-close svg {
+  height: 0.95rem;
+  width: 0.95rem;
+}
+
 .tab-close:hover,
 .tab-close:focus {
   background: #edf0ed;
@@ -428,8 +467,14 @@ button:disabled {
 }
 
 .subnav .nav-button {
+  justify-content: center;
   min-height: 36px;
-  padding: 7px 12px;
+  min-width: 42px;
+  padding: 7px 10px;
+}
+
+.icon-tab-button {
+  gap: 7px;
 }
 
 .accounts-grid {
@@ -594,6 +639,30 @@ button {
 
 .danger-button {
   color: #a33b2f;
+}
+
+.icon-button {
+  gap: 0;
+  min-width: 40px;
+  padding: 9px;
+}
+
+.text-button.icon-button {
+  padding: 6px;
+}
+
+.topbar-actions .icon-button {
+  min-height: 38px;
+  min-width: 38px;
+}
+
+.icon-button > svg,
+.workspace-tab-main > svg,
+.icon-tab-button > svg {
+  display: block;
+  flex: 0 0 auto;
+  height: 1.2rem;
+  width: 1.2rem;
 }
 
 .count-pill,
@@ -810,6 +879,15 @@ button {
   width: min(100%, 420px);
 }
 
+.number-panel {
+  background: #ffffff;
+  border: 1px solid #ccd7cf;
+  box-shadow: 0 24px 60px rgba(23, 33, 29, 0.22);
+  max-height: min(760px, calc(100vh - 40px));
+  max-width: 900px;
+  width: min(100%, 900px);
+}
+
 .dialog-header {
   align-items: center;
   border-bottom: 1px solid #e5ebe6;
@@ -830,6 +908,61 @@ button {
 
 .dialog-body {
   padding: 20px;
+}
+
+.number-panel-body {
+  display: grid;
+  gap: 18px;
+  max-height: calc(min(760px, 100vh - 40px) - 86px);
+  overflow: auto;
+  padding: 20px;
+}
+
+.number-panel-search input {
+  min-height: 46px;
+}
+
+.number-choice-list {
+  border: 1px solid #e5ebe6;
+  display: grid;
+}
+
+.number-choice {
+  background: #ffffff;
+  border: 0;
+  border-bottom: 1px solid #e5ebe6;
+  border-radius: 0;
+  color: inherit;
+  display: grid;
+  gap: 14px;
+  grid-template-columns: 12px minmax(0, 1fr) auto;
+  justify-content: stretch;
+  min-height: 76px;
+  padding: 14px 16px;
+  text-align: left;
+}
+
+.number-choice:last-child {
+  border-bottom: 0;
+}
+
+.number-choice-active {
+  background: #f0f7f3;
+  box-shadow: inset 3px 0 0 #167f5b;
+}
+
+.number-choice strong,
+.number-choice small {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.number-choice small {
+  color: #66746c;
+  font-size: 0.84rem;
+  margin-top: 3px;
 }
 
 .dialog-qr-only {
@@ -1382,12 +1515,19 @@ button {
 
   .brand-lockup,
   .topbar-actions,
-  .header-status-badge {
+  .header-status-badge,
+  .header-link-form {
     width: 100%;
   }
 
   .topbar-actions {
-    justify-content: space-between;
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .topbar-actions button,
+  .header-link-form button {
+    width: 100%;
   }
 
   .header-status-badge {
@@ -1410,5 +1550,13 @@ button {
     border-right: 0;
     margin-left: -14px;
     margin-right: -14px;
+  }
+
+  .number-choice {
+    grid-template-columns: 12px minmax(0, 1fr);
+  }
+
+  .number-choice .badge {
+    justify-self: start;
   }
 }
