@@ -61,10 +61,10 @@ ssh/
 
 The WhatsApp manager now has two apps:
 
-- `apps/whatsapp-manager-api`: Fastify service that owns WhatsApp transport, routes chats into Hermes sessions through an adapter boundary, and persists bridge operations in SQLite by default.
-- `apps/whatsapp-manager-ui`: browser dashboard for operators to connect or disconnect WhatsApp accounts, review chat-to-session mappings, remap or reset sessions, retry failed deliveries, configure group routing, and send outbound test messages.
+- `apps/whatsapp-manager-api`: Fastify service that owns live Baileys WhatsApp transport, routes chats into Hermes sessions through an adapter boundary, and persists bridge operations in SQLite by default.
+- `apps/whatsapp-manager-ui`: browser dashboard for operators to connect or disconnect WhatsApp accounts, review direct chat activity, and retry failed deliveries.
 
-The WhatsApp manager can run with the mock gateway/adapter for local tests, the Baileys gateway for real WhatsApp connectivity, and the Hermes API adapter against Hermes' native API server session endpoints.
+The WhatsApp manager runs the Baileys gateway for live WhatsApp connectivity and can use the Hermes API adapter against Hermes' native API server session endpoints.
 
 ## Notes
 
@@ -74,8 +74,8 @@ The WhatsApp manager can run with the mock gateway/adapter for local tests, the 
 - The only provider env vars left are `OPENAI_API_KEY` and `ANTHROPIC_API_KEY`.
 - SSH listens on `SSH_PORT` and allows only key-based login for user `hermes`.
 - Docker exposes the WhatsApp API on `3000` and the UI dev server on `4173` by default.
-- The WhatsApp manager defaults to mock transport. Set `WHATSAPP_GATEWAY_MODE=baileys` to run the real Baileys gateway and persist its auth state under `/opt/data/whatsapp-manager/baileys`.
-- Bridge mappings, processed WhatsApp message IDs, delivery records, and group routing policies persist in SQLite at `/opt/data/whatsapp-manager/bridge-state.sqlite` by default.
+- The WhatsApp manager always uses live Baileys transport and persists auth state under `/opt/data/whatsapp-manager/baileys`.
+- Bridge mappings, processed WhatsApp message IDs, and delivery records persist in SQLite at `/opt/data/whatsapp-manager/bridge-state.sqlite` by default.
 - Set `HERMES_ADAPTER_MODE=api`, `HERMES_API_KEY`, and run `hermes gateway run --force --accept-hooks` to use Hermes' native `/api/sessions/{id}/chat` session API. The compose environment also exports `API_SERVER_KEY=${HERMES_API_KEY}` because Hermes refuses to start the API server without it.
 - `zerotier-one` is installed, but actual ZeroTier networking inside the container requires `/dev/net/tun` plus extra capabilities; Docker Desktop on this Mac does not provide that.
 - Keep secrets in a local `.env` file, not committed to git.
@@ -95,10 +95,9 @@ SSH_PORT=2222
 WHATSAPP_MANAGER_API_PORT=3000
 WHATSAPP_MANAGER_API_TOKEN=local-dev-token
 WHATSAPP_MANAGER_UI_PORT=4173
-WHATSAPP_MANAGER_UI_CORS_ORIGIN=http://127.0.0.1:4173,http://localhost:4173
-VITE_WHATSAPP_MANAGER_API_URL=http://127.0.0.1:3000
+WHATSAPP_MANAGER_UI_CORS_ORIGIN=*
+VITE_WHATSAPP_MANAGER_API_URL=
 VITE_WHATSAPP_MANAGER_UI_TITLE=WhatsApp Account Console
-WHATSAPP_GATEWAY_MODE=mock
 HERMES_ADAPTER_MODE=mock
 HERMES_API_BASE_URL=http://127.0.0.1:8642
 HERMES_API_KEY=

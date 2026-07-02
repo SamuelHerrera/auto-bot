@@ -40,12 +40,8 @@ export function createApp({ config, services = buildServices(config) }: CreateAp
     },
   }));
 
-  app.post<{ Body: { accountId: string } }>("/whatsapp/connect", async (request, reply) => {
-    if (!request.body.accountId?.trim()) {
-      return reply.code(400).send({ error: "accountId is required" });
-    }
-
-    return services.whatsappGateway.initializeAccount(request.body.accountId);
+  app.post<{ Body?: { accountId?: string } }>("/whatsapp/connect", async (request) => {
+    return services.whatsappGateway.initializeAccount(request.body?.accountId);
   });
 
   app.get("/whatsapp/accounts", async () => ({
@@ -184,20 +180,6 @@ export function createApp({ config, services = buildServices(config) }: CreateAp
     return services.deliveryStore?.getDelivery(record.id) ?? record;
   });
 
-  app.get("/group-policies", async () => ({
-    items: await services.router.listGroupPolicies(),
-  }));
-
-  app.put<{
-    Body: { accountId: string; groupJid: string; policy: "group" | "participant" };
-  }>("/group-policies", async (request, reply) => {
-    if (!request.body.accountId || !request.body.groupJid) {
-      return reply.code(400).send({ error: "accountId and groupJid are required" });
-    }
-
-    return services.router.setGroupPolicy(request.body);
-  });
-
   app.post<{ Body: { accountId?: string; chatId: string; text: string } }>(
     "/messages/outbound",
     async (request) => {
@@ -212,7 +194,17 @@ export function createApp({ config, services = buildServices(config) }: CreateAp
   );
 
   app.post<{ Body: unknown }>("/messages/inbound", async (request) => {
-    const event = await services.whatsappGateway.normalizeInboundEvent(request.body);
+    let event;
+    try {
+      event = await services.whatsappGateway.normalizeInboundEvent(request.body);
+    } catch (error) {
+      if (isUnsupportedGroupChatError(error)) {
+        return { ignored: true, reason: "group-chat" };
+      }
+
+      throw error;
+    }
+
     return services.router.handleInboundMessage(event);
   });
 
@@ -223,7 +215,7 @@ export function createApp({ config, services = buildServices(config) }: CreateAp
 
     const normalizedError = error instanceof Error ? error : new Error("Internal Server Error");
     requestLog(normalizedError);
-    return reply.code(500).send({ error: normalizedError.message });
+    return reply.code(getErrorStatusCode(error)).send({ error: normalizedError.message });
   });
 
   return app;
@@ -233,6 +225,23 @@ function requestLog(error: Error) {
   if (process.env.NODE_ENV !== "test") {
     console.error(error);
   }
+}
+
+function getErrorStatusCode(error: unknown) {
+  if (!error || typeof error !== "object") {
+    return 500;
+  }
+
+  const statusCode = (error as { statusCode?: unknown }).statusCode;
+  if (typeof statusCode === "number" && statusCode >= 400 && statusCode < 600) {
+    return statusCode;
+  }
+
+  return 500;
+}
+
+function isUnsupportedGroupChatError(error: unknown) {
+  return error instanceof Error && error.message === "Group chats are not supported by this WhatsApp manager.";
 }
 
 function parseCorsOrigin(value: string) {

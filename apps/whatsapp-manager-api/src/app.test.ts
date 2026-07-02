@@ -3,10 +3,16 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { createApp } from "./app.js";
-import { buildServices } from "./build-services.js";
+import { sendReplyWithDeliveryRecord, type AppServices } from "./build-services.js";
 import { loadConfig } from "./config.js";
-import { HermesApiAdapter } from "./services/hermes-adapter.js";
-import { MockWhatsAppGateway } from "./services/whatsapp-service.js";
+import { HermesApiAdapter, MockHermesAdapter } from "./services/hermes-adapter.js";
+import { FileBridgeStateStore } from "./services/bridge-state-store.js";
+import { InMemoryChatSessionRouter } from "./services/chat-session-router.js";
+import { SqliteBridgeStateStore } from "./services/sqlite-bridge-state-store.js";
+import type { WhatsAppGateway } from "./services/whatsapp-service.js";
+import type { AppConfig } from "./config.js";
+import type { OutboundWhatsAppMessage, WhatsAppAccountStatus, WhatsAppMessageEvent } from "./domain/types.js";
+import { getWhatsAppChatType, getWhatsAppSessionKey } from "./domain/types.js";
 
 describe("whatsapp-manager-api", () => {
   let app: ReturnType<typeof createApp>;
@@ -22,6 +28,7 @@ describe("whatsapp-manager-api", () => {
   beforeEach(() => {
     app = createApp({
       config,
+      services: createTestServices(config),
     });
   });
 
@@ -173,6 +180,42 @@ describe("whatsapp-manager-api", () => {
     });
   });
 
+  it("uses the linked WhatsApp phone number when no account name is provided", async () => {
+    const connectResponse = await app.inject({
+      method: "POST",
+      url: "/whatsapp/connect",
+      headers: {
+        authorization: "Bearer test-token",
+      },
+      payload: {},
+    });
+
+    expect(connectResponse.statusCode).toBe(200);
+    expect(connectResponse.json()).toEqual(
+      expect.objectContaining({
+        accountId: "15551234567",
+        status: "connected",
+      }),
+    );
+
+    const response = await app.inject({
+      method: "GET",
+      url: "/whatsapp/accounts",
+      headers: {
+        authorization: "Bearer test-token",
+      },
+    });
+
+    expect(response.json()).toEqual({
+      items: [
+        expect.objectContaining({
+          accountId: "15551234567",
+          status: "connected",
+        }),
+      ],
+    });
+  });
+
   it("disconnects WhatsApp accounts", async () => {
     await app.inject({
       method: "POST",
@@ -202,8 +245,24 @@ describe("whatsapp-manager-api", () => {
     );
   });
 
+  it("returns parser errors with their original HTTP status", async () => {
+    const response = await app.inject({
+      method: "POST",
+      url: "/whatsapp/accounts/ops-main/disconnect",
+      headers: {
+        authorization: "Bearer test-token",
+        "content-type": "application/json",
+      },
+    });
+
+    expect(response.statusCode).toBe(400);
+    expect(response.json()).toEqual({
+      error: "Body cannot be empty when content-type is set to 'application/json'",
+    });
+  });
+
   it("passes optional account IDs to outbound WhatsApp messages", async () => {
-    const services = buildServices(config);
+    const services = createTestServices(config);
     app = createApp({ config, services });
 
     const response = await app.inject({
@@ -220,7 +279,7 @@ describe("whatsapp-manager-api", () => {
     });
 
     expect(response.statusCode).toBe(200);
-    expect((services.whatsappGateway as MockWhatsAppGateway).getSentMessages()).toEqual([
+    expect((services.whatsappGateway as TestWhatsAppGateway).getSentMessages()).toEqual([
       {
         accountId: "ops-main",
         chatId: "12345@s.whatsapp.net",
@@ -230,8 +289,8 @@ describe("whatsapp-manager-api", () => {
   });
 
   it("routes gateway inbound messages to Hermes and sends replies back to WhatsApp", async () => {
-    const services = buildServices(config);
-    const gateway = services.whatsappGateway as MockWhatsAppGateway;
+    const services = createTestServices(config);
+    const gateway = services.whatsappGateway as TestWhatsAppGateway;
 
     await gateway.injectInboundMessage({
       accountId: "ops-main",
@@ -263,8 +322,8 @@ describe("whatsapp-manager-api", () => {
   });
 
   it("deduplicates repeated WhatsApp messages before routing to Hermes", async () => {
-    const services = buildServices(config);
-    const gateway = services.whatsappGateway as MockWhatsAppGateway;
+    const services = createTestServices(config);
+    const gateway = services.whatsappGateway as TestWhatsAppGateway;
 
     const payload = {
       accountId: "ops-main",
@@ -302,8 +361,8 @@ describe("whatsapp-manager-api", () => {
     });
 
     try {
-      const firstServices = buildServices(persistedConfig);
-      const firstGateway = firstServices.whatsappGateway as MockWhatsAppGateway;
+      const firstServices = createTestServices(persistedConfig);
+      const firstGateway = firstServices.whatsappGateway as TestWhatsAppGateway;
       const payload = {
         accountId: "ops-main",
         chatId: "12345@s.whatsapp.net",
@@ -315,8 +374,8 @@ describe("whatsapp-manager-api", () => {
 
       await firstGateway.injectInboundMessage(payload);
 
-      const secondServices = buildServices(persistedConfig);
-      const secondGateway = secondServices.whatsappGateway as MockWhatsAppGateway;
+      const secondServices = createTestServices(persistedConfig);
+      const secondGateway = secondServices.whatsappGateway as TestWhatsAppGateway;
 
       expect(await secondServices.router.getMappings()).toEqual([
         expect.objectContaining({
@@ -347,8 +406,8 @@ describe("whatsapp-manager-api", () => {
     });
 
     try {
-      const firstServices = buildServices(persistedConfig);
-      const firstGateway = firstServices.whatsappGateway as MockWhatsAppGateway;
+      const firstServices = createTestServices(persistedConfig);
+      const firstGateway = firstServices.whatsappGateway as TestWhatsAppGateway;
       await firstGateway.injectInboundMessage({
         accountId: "ops-main",
         chatId: "12345@s.whatsapp.net",
@@ -358,7 +417,7 @@ describe("whatsapp-manager-api", () => {
         timestamp: "2026-06-29T00:00:00.000Z",
       });
 
-      const secondServices = buildServices(persistedConfig);
+      const secondServices = createTestServices(persistedConfig);
 
       expect(await secondServices.router.getMappings()).toEqual([
         expect.objectContaining({
@@ -379,46 +438,40 @@ describe("whatsapp-manager-api", () => {
     }
   });
 
-  it("routes group messages by participant when the group policy requires it", async () => {
-    const dir = mkdtempSync(path.join(tmpdir(), "auto-bot-group-policy-"));
-    const services = buildServices(
-      loadConfig({
-        ...process.env,
-        API_TOKEN: "test-token",
-        BRIDGE_DATABASE_FILE: path.join(dir, "bridge-state.sqlite"),
-        BRIDGE_STATE_FILE: "",
-        DATABASE_URL: "postgres://postgres:postgres@127.0.0.1:5432/auto_bot",
-        NODE_ENV: "test",
-        PORT: "3000",
-      }),
-    );
+  it("ignores group messages before routing them to Hermes", async () => {
+    const services = createTestServices(config);
+    const gateway = services.whatsappGateway as TestWhatsAppGateway;
 
-    try {
-      await services.router.setGroupPolicy({
-        accountId: "ops-main",
-        groupJid: "120363000000000000@g.us",
-        policy: "participant",
-      });
+    await gateway.injectInboundMessage({
+      accountId: "ops-main",
+      chatId: "120363000000000000@g.us",
+      chatType: "group",
+      participantJid: "15550000001@s.whatsapp.net",
+      messageId: "wamid.group.1",
+      text: "group participant hello",
+    });
 
-      const gateway = services.whatsappGateway as MockWhatsAppGateway;
-      await gateway.injectInboundMessage({
+    expect(await services.router.getMappings()).toEqual([]);
+  });
+
+  it("returns ignored for manual group inbound payloads", async () => {
+    const response = await app.inject({
+      method: "POST",
+      url: "/messages/inbound",
+      headers: {
+        authorization: "Bearer test-token",
+      },
+      payload: {
         accountId: "ops-main",
         chatId: "120363000000000000@g.us",
         chatType: "group",
-        participantJid: "15550000001@s.whatsapp.net",
-        messageId: "wamid.group.1",
-        text: "group participant hello",
-      });
+        messageId: "wamid.group.manual",
+        text: "manual group hello",
+      },
+    });
 
-      expect(await services.router.getMappings()).toEqual([
-        expect.objectContaining({
-          sessionKey:
-            "whatsapp:ops-main:group:120363000000000000@g.us:user:15550000001@s.whatsapp.net",
-        }),
-      ]);
-    } finally {
-      rmSync(dir, { force: true, recursive: true });
-    }
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toEqual({ ignored: true, reason: "group-chat" });
   });
 
   it("lists failed deliveries and retries them through the API", async () => {
@@ -434,8 +487,8 @@ describe("whatsapp-manager-api", () => {
     });
 
     try {
-      const services = buildServices(retryConfig);
-      const gateway = services.whatsappGateway as MockWhatsAppGateway;
+      const services = createTestServices(retryConfig);
+      const gateway = services.whatsappGateway as TestWhatsAppGateway;
       app = createApp({ config: retryConfig, services });
 
       await gateway.injectInboundMessage({
@@ -494,8 +547,8 @@ describe("whatsapp-manager-api", () => {
     });
 
     try {
-      const services = buildServices(retryConfig);
-      const gateway = services.whatsappGateway as MockWhatsAppGateway;
+      const services = createTestServices(retryConfig);
+      const gateway = services.whatsappGateway as TestWhatsAppGateway;
       app = createApp({ config: retryConfig, services });
 
       vi.spyOn(services.hermesAdapter, "sendMessage")
@@ -625,7 +678,7 @@ describe("whatsapp-manager-api", () => {
   });
 
   it("updates mappings when Hermes API rotates the effective session ID", async () => {
-    const services = buildServices(config);
+    const services = createTestServices(config);
     const router = services.router;
     const session = await router.getOrCreateSession({
       accountId: "ops-main",
@@ -685,3 +738,206 @@ describe("whatsapp-manager-api", () => {
     ).rejects.toThrow("HERMES_API_KEY");
   });
 });
+
+function createTestServices(config: AppConfig): AppServices {
+  const hermesAdapter = new MockHermesAdapter();
+  const whatsappGateway = new TestWhatsAppGateway();
+  const bridgeStore = config.BRIDGE_DATABASE_FILE
+    ? new SqliteBridgeStateStore(config.BRIDGE_DATABASE_FILE)
+    : config.BRIDGE_STATE_FILE
+      ? new FileBridgeStateStore(config.BRIDGE_STATE_FILE)
+      : undefined;
+  const router = new InMemoryChatSessionRouter(
+    hermesAdapter,
+    bridgeStore,
+    bridgeStore instanceof SqliteBridgeStateStore ? bridgeStore : undefined,
+  );
+
+  whatsappGateway.onInboundMessage(async (event) => {
+    try {
+      const result = await router.handleInboundMessage(event);
+      if (result.duplicate || !result.reply) {
+        return;
+      }
+
+      await sendReplyWithDeliveryRecord({
+        ...(bridgeStore instanceof SqliteBridgeStateStore ? { deliveryStore: bridgeStore } : {}),
+        event: result.event ?? event,
+        text: result.reply.outputText,
+        whatsappGateway,
+      });
+    } catch (error) {
+      if (bridgeStore instanceof SqliteBridgeStateStore) {
+        const now = new Date().toISOString();
+        bridgeStore.saveDelivery({
+          id: `${event.accountId}:${event.chatJid}:${event.messageId}`,
+          accountId: event.accountId,
+          chatJid: event.chatJid,
+          chatType: event.chatType,
+          sessionKey: event.sessionKey,
+          inboundMessageId: event.messageId,
+          inboundText: event.text,
+          outboundText: "",
+          status: "failed",
+          attempts: 0,
+          failureStage: "hermes",
+          error: error instanceof Error ? error.message : "Hermes turn failed",
+          createdAt: now,
+          updatedAt: now,
+        });
+      }
+      throw error;
+    }
+  });
+
+  return {
+    hermesAdapter,
+    router,
+    whatsappGateway,
+    ...(bridgeStore instanceof SqliteBridgeStateStore ? { deliveryStore: bridgeStore } : {}),
+  };
+}
+
+class TestWhatsAppGateway implements WhatsAppGateway {
+  private readonly accounts = new Map<string, WhatsAppAccountStatus>();
+  private readonly sentMessages: OutboundWhatsAppMessage[] = [];
+  private lastConnectedAccountId: string | null = null;
+  private inboundHandler: ((event: WhatsAppMessageEvent) => Promise<void>) | null = null;
+
+  onInboundMessage(handler: (event: WhatsAppMessageEvent) => Promise<void>): void {
+    this.inboundHandler = handler;
+  }
+
+  async getStatus(): Promise<WhatsAppAccountStatus> {
+    const accountId =
+      this.lastConnectedAccountId && this.accounts.has(this.lastConnectedAccountId)
+        ? this.lastConnectedAccountId
+        : [...this.accounts.keys()][0];
+
+    if (!accountId) {
+      return {
+        accountId: "unassigned",
+        status: "disconnected",
+      };
+    }
+
+    return this.accounts.get(accountId)!;
+  }
+
+  async listAccounts(): Promise<WhatsAppAccountStatus[]> {
+    return [...this.accounts.values()];
+  }
+
+  async initializeAccount(accountId?: string): Promise<WhatsAppAccountStatus> {
+    const resolvedAccountId = accountId?.trim() || "15551234567";
+    const account: WhatsAppAccountStatus = {
+      accountId: resolvedAccountId,
+      status: "connected",
+      connectedAt: new Date().toISOString(),
+    };
+
+    this.accounts.set(resolvedAccountId, account);
+    this.lastConnectedAccountId = resolvedAccountId;
+    return account;
+  }
+
+  async disconnectAccount(accountId: string): Promise<WhatsAppAccountStatus> {
+    const account: WhatsAppAccountStatus = {
+      accountId,
+      status: "disconnected",
+      disconnectedAt: new Date().toISOString(),
+    };
+
+    this.accounts.set(accountId, account);
+
+    if (this.lastConnectedAccountId === accountId) {
+      this.lastConnectedAccountId = null;
+    }
+
+    return account;
+  }
+
+  async sendMessage(message: OutboundWhatsAppMessage): Promise<void> {
+    this.sentMessages.push(message);
+  }
+
+  getSentMessages(): OutboundWhatsAppMessage[] {
+    return [...this.sentMessages];
+  }
+
+  async normalizeInboundEvent(payload: unknown): Promise<WhatsAppMessageEvent> {
+    if (!payload || typeof payload !== "object") {
+      throw new Error("Invalid inbound payload.");
+    }
+
+    const candidate = payload as Record<string, unknown>;
+    const text = typeof candidate.text === "string" ? candidate.text : "";
+    const chatJid =
+      typeof candidate.chatJid === "string"
+        ? candidate.chatJid
+        : typeof candidate.chatId === "string"
+          ? candidate.chatId
+          : "";
+    const accountId = typeof candidate.accountId === "string" ? candidate.accountId : "manual";
+    const chatType =
+      candidate.chatType === "group" || candidate.chatType === "direct"
+        ? candidate.chatType
+        : getWhatsAppChatType(chatJid);
+    const participantJid =
+      typeof candidate.participantJid === "string" ? candidate.participantJid : undefined;
+
+    if (!chatJid || !text) {
+      throw new Error("Inbound payload must contain chatJid/chatId and text.");
+    }
+
+    if (chatType === "group") {
+      throw new Error("Group chats are not supported by this WhatsApp manager.");
+    }
+
+    const sessionKey = getWhatsAppSessionKey({
+      accountId,
+      chatJid,
+      chatType,
+      ...(participantJid ? { participantJid } : {}),
+    });
+
+    return {
+      accountId,
+      chatJid,
+      chatType,
+      senderJid: typeof candidate.senderJid === "string" ? candidate.senderJid : chatJid,
+      ...(participantJid ? { participantJid } : {}),
+      sessionKey,
+      chatId: chatJid,
+      text,
+      messageId:
+        typeof candidate.messageId === "string" ? candidate.messageId : `msg_${Date.now()}`,
+      senderId:
+        typeof candidate.senderId === "string"
+          ? candidate.senderId
+          : typeof candidate.senderJid === "string"
+            ? candidate.senderJid
+            : chatJid,
+      timestamp:
+        typeof candidate.timestamp === "string"
+          ? candidate.timestamp
+          : new Date().toISOString(),
+    };
+  }
+
+  async injectInboundMessage(payload: unknown): Promise<void> {
+    if (!this.inboundHandler) {
+      return;
+    }
+
+    try {
+      await this.inboundHandler(await this.normalizeInboundEvent(payload));
+    } catch (error) {
+      if (error instanceof Error && error.message === "Group chats are not supported by this WhatsApp manager.") {
+        return;
+      }
+
+      throw error;
+    }
+  }
+}

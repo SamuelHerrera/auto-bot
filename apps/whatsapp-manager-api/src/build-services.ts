@@ -12,7 +12,7 @@ import {
 import { BaileysWhatsAppGateway } from "./services/baileys-whatsapp-gateway.js";
 import { FileBridgeStateStore } from "./services/bridge-state-store.js";
 import { SqliteBridgeStateStore } from "./services/sqlite-bridge-state-store.js";
-import { MockWhatsAppGateway, type WhatsAppGateway } from "./services/whatsapp-service.js";
+import type { WhatsAppGateway } from "./services/whatsapp-service.js";
 
 export interface AppServices {
   hermesAdapter: HermesAdapter;
@@ -23,10 +23,7 @@ export interface AppServices {
 
 export function buildServices(config: AppConfig): AppServices {
   const hermesAdapter = buildHermesAdapter(config);
-  const whatsappGateway =
-    config.WHATSAPP_GATEWAY_MODE === "baileys"
-      ? new BaileysWhatsAppGateway(config.BAILEYS_STATE_DIR)
-      : new MockWhatsAppGateway();
+  const whatsappGateway = new BaileysWhatsAppGateway(config.BAILEYS_STATE_DIR);
   const bridgeStore = config.BRIDGE_DATABASE_FILE
     ? new SqliteBridgeStateStore(config.BRIDGE_DATABASE_FILE)
     : config.BRIDGE_STATE_FILE

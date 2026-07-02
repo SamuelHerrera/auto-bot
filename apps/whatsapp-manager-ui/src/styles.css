@@ -55,6 +55,12 @@ button:disabled {
   padding-bottom: 20px;
 }
 
+.topbar-actions {
+  align-items: center;
+  display: flex;
+  gap: 10px;
+}
+
 .topbar h1,
 .section-heading h2,
 .section-heading h3,
@@ -87,6 +93,104 @@ button:disabled {
   grid-template-columns: minmax(220px, 0.9fr) minmax(220px, 0.9fr) minmax(280px, 1.4fr);
   margin-bottom: 18px;
   padding: 16px;
+}
+
+.notice-strip {
+  align-items: center;
+  background: #eef7f1;
+  border: 1px solid #cfe6d8;
+  display: grid;
+  gap: 8px;
+  grid-template-columns: auto minmax(0, 1fr);
+  margin-bottom: 18px;
+  min-height: 52px;
+  padding: 12px 16px;
+}
+
+.notice-strip-error {
+  background: #fff3f1;
+  border-color: #f2c4bd;
+}
+
+.notice-strip p {
+  margin: 0;
+}
+
+.admin-layout {
+  align-items: start;
+  display: grid;
+  gap: 18px;
+  grid-template-columns: 210px minmax(0, 1fr);
+}
+
+.admin-nav {
+  background: #ffffff;
+  border: 1px solid #dce3dd;
+  display: grid;
+  gap: 4px;
+  padding: 8px;
+  position: sticky;
+  top: 24px;
+}
+
+.nav-button {
+  background: transparent;
+  border-color: transparent;
+  color: #526058;
+  justify-content: start;
+  min-height: 44px;
+}
+
+.nav-button-active {
+  background: #eef7f1;
+  border-color: #cfe6d8;
+  color: #09643f;
+}
+
+.admin-panel {
+  background: #ffffff;
+  border: 1px solid #dce3dd;
+  min-width: 0;
+}
+
+.accounts-grid,
+.settings-grid {
+  display: grid;
+  gap: 16px;
+  grid-template-columns: minmax(280px, 0.72fr) minmax(320px, 1fr);
+  padding: 16px;
+}
+
+.registration-panel,
+.settings-note {
+  border: 1px solid #e5ebe6;
+  min-width: 0;
+  padding: 16px;
+}
+
+.settings-note {
+  align-content: start;
+  display: grid;
+  gap: 10px;
+  grid-column: 1 / -1;
+}
+
+.settings-note p {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.select-field {
+  align-items: center;
+  display: grid;
+  gap: 8px;
+  grid-template-columns: auto minmax(180px, 260px);
+}
+
+.select-field span {
+  color: #526058;
+  font-size: 0.82rem;
+  font-weight: 750;
 }
 
 .workspace {
@@ -130,6 +234,14 @@ button:disabled {
   font-size: 1rem;
 }
 
+.account-heading-actions {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  justify-content: end;
+}
+
 .register-form {
   border-bottom: 1px solid #e5ebe6;
   display: grid;
@@ -155,6 +267,11 @@ button:disabled {
 
 .compact-field span {
   font-size: 0.78rem;
+}
+
+.compact-field {
+  display: grid;
+  gap: 5px;
 }
 
 input,
@@ -273,9 +390,13 @@ button {
   border-bottom: 1px solid #e5ebe6;
   display: grid;
   gap: 8px;
-  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-columns: minmax(0, 1fr) auto auto;
   min-height: 66px;
   padding: 8px 8px 8px 0;
+}
+
+.account-list-table {
+  border-top: 1px solid #e5ebe6;
 }
 
 .account-row:last-child {
@@ -408,6 +529,57 @@ button {
 
 .qr-panel svg {
   display: block;
+}
+
+.qr-panel-large {
+  padding: 14px;
+}
+
+.dialog-backdrop {
+  align-items: center;
+  background: rgba(23, 33, 29, 0.52);
+  display: grid;
+  inset: 0;
+  justify-items: center;
+  padding: 20px;
+  position: fixed;
+  z-index: 20;
+}
+
+.link-dialog {
+  background: #ffffff;
+  border: 1px solid #ccd7cf;
+  box-shadow: 0 24px 60px rgba(23, 33, 29, 0.22);
+  max-width: 420px;
+  width: min(100%, 420px);
+}
+
+.dialog-header {
+  align-items: center;
+  border-bottom: 1px solid #e5ebe6;
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+  padding: 16px;
+}
+
+.dialog-header h3 {
+  margin: 0;
+}
+
+.dialog-body {
+  padding: 20px;
+}
+
+.dialog-qr-only {
+  display: grid;
+  gap: 14px;
+  justify-items: center;
+}
+
+.dialog-qr-only p {
+  color: #526058;
+  margin: 0;
 }
 
 .registration-band {
@@ -675,6 +847,13 @@ button {
   padding: 12px;
 }
 
+.retry-row-header {
+  align-items: center;
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+}
+
 .retry-row:last-child {
   border-bottom: 0;
 }
@@ -718,14 +897,26 @@ button {
 @media (max-width: 1080px) {
   .connection-strip,
   .workspace,
+  .admin-layout,
+  .accounts-grid,
+  .settings-grid,
   .operation-grid,
   .chat-workspace,
   .summary-strip {
     grid-template-columns: 1fr;
   }
 
-  .account-rail {
+  .account-rail,
+  .admin-nav {
     position: static;
+  }
+
+  .admin-nav {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+
+  .nav-button {
+    justify-content: center;
   }
 
   .operation-section,
@@ -746,7 +937,10 @@ button {
 
   .topbar,
   .account-summary,
-  .qr-layout {
+  .account-heading-actions,
+  .dialog-header,
+  .qr-layout,
+  .retry-row-header {
     align-items: stretch;
     flex-direction: column;
   }
@@ -755,7 +949,9 @@ button {
   .account-row,
   .chat-row,
   .table-row,
-  .detail-list div {
+  .detail-list div,
+  .select-field,
+  .notice-strip {
     grid-template-columns: 1fr;
   }
 
@@ -765,7 +961,9 @@ button {
 
   .connection-strip,
   .account-rail,
-  .account-workspace {
+  .account-workspace,
+  .admin-nav,
+  .admin-panel {
     border-left: 0;
     border-right: 0;
     margin-left: -14px;

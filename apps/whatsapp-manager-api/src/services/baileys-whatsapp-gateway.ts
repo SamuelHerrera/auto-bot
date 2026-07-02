@@ -6,7 +6,7 @@ import makeWASocket, {
   type WAMessageContent,
   useMultiFileAuthState,
 } from "@whiskeysockets/baileys";
-import { mkdir, rm } from "node:fs/promises";
+import { mkdir, readdir, rm } from "node:fs/promises";
 import path from "node:path";
 import pino from "pino";
 import type {
@@ -20,8 +20,10 @@ import type { WhatsAppGateway } from "./whatsapp-service.js";
 
 interface BaileysAccountRuntime {
   accountId: string;
-  socket: WASocket;
+  statePath: string;
+  socket?: WASocket;
   status: WhatsAppAccountStatus;
+  transient: boolean;
   reconnecting: boolean;
 }
 
@@ -32,7 +34,9 @@ export class BaileysWhatsAppGateway implements WhatsAppGateway {
   private inboundHandler: InboundHandler | null = null;
   private lastActiveAccountId: string | null = null;
 
-  constructor(private readonly stateDir: string) {}
+  constructor(private readonly stateDir: string) {
+    void this.initializePersistedAccounts();
+  }
 
   onInboundMessage(handler: InboundHandler): void {
     this.inboundHandler = handler;
@@ -55,10 +59,19 @@ export class BaileysWhatsAppGateway implements WhatsAppGateway {
   }
 
   async listAccounts(): Promise<WhatsAppAccountStatus[]> {
-    return [...this.accounts.values()].map((account) => account.status);
+    return [...this.accounts.values()]
+      .filter((account) => !account.transient)
+      .map((account) => account.status);
   }
 
-  async initializeAccount(accountId: string): Promise<WhatsAppAccountStatus> {
+  async initializeAccount(accountId?: string): Promise<WhatsAppAccountStatus> {
+    const requestedAccountId = accountId?.trim();
+    const isTransient = !requestedAccountId;
+    const normalizedAccountId = requestedAccountId || createPendingAccountId();
+    return this.initializeAccountRuntime(normalizedAccountId, isTransient);
+  }
+
+  private async initializeAccountRuntime(accountId: string, transient: boolean): Promise<WhatsAppAccountStatus> {
     const existing = this.accounts.get(accountId);
     if (existing && existing.status.status !== "disconnected") {
       return existing.status;
@@ -77,7 +90,9 @@ export class BaileysWhatsAppGateway implements WhatsAppGateway {
 
     const runtime: BaileysAccountRuntime = {
       accountId,
+      statePath: accountPath,
       socket,
+      transient,
       reconnecting: false,
       status: {
         accountId,
@@ -90,10 +105,10 @@ export class BaileysWhatsAppGateway implements WhatsAppGateway {
 
     socket.ev.on("creds.update", saveCreds);
     socket.ev.on("connection.update", (update) => {
-      void this.handleConnectionUpdate(accountId, update);
+      void this.handleConnectionUpdate(runtime.accountId, update);
     });
     socket.ev.on("messages.upsert", (event) => {
-      void this.handleMessageUpsert(accountId, event);
+      void this.handleMessageUpsert(runtime.accountId, event);
     });
 
     return runtime.status;
@@ -114,9 +129,9 @@ export class BaileysWhatsAppGateway implements WhatsAppGateway {
 
     runtime.reconnecting = false;
     let logoutError: string | undefined;
-    await runtime.socket.logout().catch((error: unknown) => {
+    await runtime.socket?.logout().catch((error: unknown) => {
       logoutError = error instanceof Error ? error.message : "WhatsApp logout failed.";
-      runtime.socket.end(undefined);
+      runtime.socket?.end(undefined);
     });
     await rm(accountPath, { recursive: true, force: true });
 
@@ -144,6 +159,10 @@ export class BaileysWhatsAppGateway implements WhatsAppGateway {
 
     if (runtime.status.status !== "connected") {
       throw new Error(`WhatsApp account ${runtime.accountId} is not connected.`);
+    }
+
+    if (!runtime.socket) {
+      throw new Error(`WhatsApp account ${runtime.accountId} has no active socket.`);
     }
 
     const chatJid = message.chatJid ?? message.chatId;
@@ -209,6 +228,10 @@ export class BaileysWhatsAppGateway implements WhatsAppGateway {
         throw new Error("Baileys message does not contain a routable text payload.");
       }
 
+      if (event.chatType === "group") {
+        throw new Error("Group chats are not supported by this WhatsApp manager.");
+      }
+
       return event;
     }
 
@@ -235,6 +258,10 @@ export class BaileysWhatsAppGateway implements WhatsAppGateway {
 
     if (!chatJid || (!text && media.length === 0)) {
       throw new Error("Inbound payload must contain chatJid/chatId and text or media.");
+    }
+
+    if (chatType === "group") {
+      throw new Error("Group chats are not supported by this WhatsApp manager.");
     }
 
     const sessionKey = getWhatsAppSessionKey({
@@ -297,13 +324,21 @@ export class BaileysWhatsAppGateway implements WhatsAppGateway {
     }
 
     if (update.connection === "open") {
+      const linkedAccountId = runtime.transient
+        ? getLinkedAccountId(runtime.socket) ?? accountId
+        : accountId;
+      if (linkedAccountId !== accountId) {
+        this.renameRuntimeAccount(runtime, linkedAccountId);
+      }
+
       runtime.reconnecting = false;
       runtime.status = {
-        accountId,
+        accountId: runtime.accountId,
         status: "connected",
         connectedAt: new Date().toISOString(),
       };
-      this.lastActiveAccountId = accountId;
+      runtime.transient = false;
+      this.lastActiveAccountId = runtime.accountId;
     }
 
     if (update.connection === "close") {
@@ -322,7 +357,7 @@ export class BaileysWhatsAppGateway implements WhatsAppGateway {
       if (shouldReconnect) {
         runtime.reconnecting = true;
         this.accounts.delete(accountId);
-        await this.initializeAccount(accountId).catch((error: unknown) => {
+        await this.initializeAccountRuntime(accountId, runtime.transient).catch((error: unknown) => {
           this.accounts.set(accountId, runtime);
           runtime.status = {
             accountId,
@@ -344,7 +379,11 @@ export class BaileysWhatsAppGateway implements WhatsAppGateway {
     }
 
     for (const message of event.messages) {
-      if (message.key.fromMe || message.key.remoteJid === "status@broadcast") {
+      if (
+        message.key.fromMe ||
+        message.key.remoteJid === "status@broadcast" ||
+        message.key.remoteJid?.endsWith("@g.us")
+      ) {
         continue;
       }
 
@@ -373,6 +412,39 @@ export class BaileysWhatsAppGateway implements WhatsAppGateway {
 
   private getAccountPath(accountId: string) {
     return path.join(this.stateDir, sanitizePathSegment(accountId));
+  }
+
+  private renameRuntimeAccount(runtime: BaileysAccountRuntime, nextAccountId: string) {
+    const previousAccountId = runtime.accountId;
+
+    this.accounts.delete(previousAccountId);
+    runtime.accountId = nextAccountId;
+    this.accounts.set(nextAccountId, runtime);
+  }
+
+  private async initializePersistedAccounts() {
+    await mkdir(this.stateDir, { recursive: true });
+    const entries = await readdir(this.stateDir, { withFileTypes: true }).catch(() => []);
+    for (const entry of entries) {
+      if (!entry.isDirectory() || this.accounts.has(entry.name)) {
+        continue;
+      }
+
+      await this.initializeAccountRuntime(entry.name, entry.name.startsWith("pending-")).catch((error: unknown) => {
+        this.accounts.set(entry.name, {
+          accountId: entry.name,
+          statePath: this.getAccountPath(entry.name),
+          transient: entry.name.startsWith("pending-"),
+          reconnecting: false,
+          status: {
+            accountId: entry.name,
+            status: "disconnected",
+            disconnectedAt: new Date().toISOString(),
+            lastError: error instanceof Error ? error.message : "Persisted WhatsApp account initialization failed.",
+          },
+        });
+      });
+    }
   }
 }
 
@@ -541,6 +613,20 @@ function isBaileysMessage(payload: unknown): payload is WAMessage {
       "key" in payload &&
       typeof (payload as { key?: unknown }).key === "object",
   );
+}
+
+function createPendingAccountId(): string {
+  return `pending-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+function getLinkedAccountId(socket?: WASocket): string | null {
+  const userId = socket?.user?.id;
+  if (!userId) {
+    return null;
+  }
+
+  const bareId = userId.split("@")[0]?.split(":")[0]?.trim();
+  return bareId || null;
 }
 
 function sanitizePathSegment(value: string): string {
