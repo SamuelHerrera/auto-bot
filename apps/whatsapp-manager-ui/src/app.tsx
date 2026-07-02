@@ -223,6 +223,8 @@ export function App() {
         shouldRefreshAccounts ? request<WhatsAppAccount>("/whatsapp/status") : Promise.resolve(null),
       ]);
 
+      const refreshedAccounts = accountResponse?.items;
+
       if (accountResponse) {
         setAccounts(accountResponse.items);
       }
@@ -235,7 +237,14 @@ export function App() {
       if (ruleResponse) {
         setNumberRules(ruleResponse.items);
       }
-      if (linkStatus?.qrCode || linkStatus?.status === "connecting") {
+      const completedLinkedAccount = findCompletedLinkedAccount(refreshedAccounts ?? accounts, linkStatus, linkingStatus);
+      if (completedLinkedAccount && (linkingStatus || isLinkDialogOpen)) {
+        setLinkingStatus(null);
+        setIsLinkDialogOpen(false);
+        setActiveAccountId(completedLinkedAccount.accountId);
+        openAccountTab(completedLinkedAccount.accountId);
+        setStatusMessage(`Account ${completedLinkedAccount.accountId} linked.`);
+      } else if (linkStatus?.qrCode || linkStatus?.status === "connecting") {
         setLinkingStatus(linkStatus);
       } else if (linkStatus && (linkingStatus || isLinkDialogOpen)) {
         setLinkingStatus(null);
@@ -480,7 +489,7 @@ export function App() {
                 >
                   <span className={`status-dot status-dot-${account.status}`} />
                   <span>
-                    <strong>{account.accountId}</strong>
+                    <strong>{getAccountDisplayName(account)}</strong>
                     <small>{account.status}</small>
                   </span>
                 </button>
@@ -506,7 +515,7 @@ export function App() {
                   }}
                 >
                   <span className={`status-dot status-dot-${account.status}`} />
-                  <span>{account.accountId}</span>
+                  <span>{getAccountDisplayName(account)}</span>
                 </button>
                 <button className="tab-close" aria-label={`Close ${account.accountId}`} onClick={() => closeAccountTab(account.accountId)}>
                   x
@@ -621,7 +630,7 @@ function AccountsView({
               <button className="account-open" onClick={() => onOpenAccount(account.accountId)}>
                 <span className={`status-dot status-dot-${account.status}`} />
                 <span>
-                  <strong>{account.accountId}</strong>
+                  <strong>{getAccountDisplayName(account)}</strong>
                   <small>{getAccountActivity(account)}</small>
                 </span>
               </button>
@@ -709,7 +718,7 @@ function NumberWorkspace({
       <div className="number-header">
         <div>
           <span className="panel-kicker">Number</span>
-          <h2>{account.accountId}</h2>
+          <h2>{getAccountDisplayName(account)}</h2>
           <p>{getAccountActivity(account)}</p>
         </div>
         <div className="number-header-actions">
@@ -791,7 +800,10 @@ function LinkAccountDialog({
         <div className="dialog-header">
           <div>
             <span className="panel-kicker">Link account</span>
-            <h3 id="link-dialog-title">{account?.accountId ?? "WhatsApp QR"}</h3>
+            <h3 id="link-dialog-title">{account?.qrCode ? "Scan QR code" : "Preparing link"}</h3>
+            {account && !isPendingAccountId(account.accountId) ? (
+              <p className="dialog-subtitle">{account.accountId}</p>
+            ) : null}
           </div>
           <button className="text-button" onClick={onClose} aria-label="Close link dialog">
             Close
@@ -801,7 +813,7 @@ function LinkAccountDialog({
         <div className="dialog-body">
           {account?.qrCode ? (
             <div className="dialog-qr-only">
-              <div className="qr-panel qr-panel-large" aria-label={`Pairing QR for ${account.accountId}`}>
+              <div className="qr-panel qr-panel-large" aria-label="WhatsApp pairing QR">
                 <QRCodeSVG value={account.qrCode} size={264} marginSize={2} />
               </div>
               <p>Scan from WhatsApp linked devices.</p>
@@ -1332,7 +1344,45 @@ function upsertAccount(accounts: WhatsAppAccount[], nextAccount: WhatsAppAccount
   return accounts.map((account, index) => (index === accountIndex ? nextAccount : account));
 }
 
+function findCompletedLinkedAccount(
+  accounts: WhatsAppAccount[],
+  linkStatus: WhatsAppAccount | null,
+  linkingStatus: WhatsAppAccount | null,
+) {
+  if (linkStatus?.status === "connected" && !isPendingAccountId(linkStatus.accountId)) {
+    return linkStatus;
+  }
+
+  const transientAccountId = linkStatus?.accountId ?? linkingStatus?.accountId;
+  if (!transientAccountId || !isPendingAccountId(transientAccountId)) {
+    return null;
+  }
+
+  if (!linkingStatus?.qrCode) {
+    return null;
+  }
+
+  const transientAccountStillListed = accounts.some((account) => account.accountId === transientAccountId);
+  if (transientAccountStillListed) {
+    return null;
+  }
+
+  return accounts.find((account) => account.status === "connected" && !isPendingAccountId(account.accountId)) ?? null;
+}
+
+function getAccountDisplayName(account: WhatsAppAccount) {
+  return isPendingAccountId(account.accountId) ? "Linking number" : account.accountId;
+}
+
+function isPendingAccountId(accountId: string) {
+  return accountId.startsWith("pending-");
+}
+
 function getAccountActivity(account: WhatsAppAccount) {
+  if (isPendingAccountId(account.accountId)) {
+    return account.qrCode ? "Waiting for QR scan." : "Opening pairing session.";
+  }
+
   if (account.connectedAt) {
     return `Connected ${formatTimestamp(account.connectedAt)}`;
   }

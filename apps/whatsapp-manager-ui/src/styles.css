@@ -815,6 +815,11 @@ button {
   margin: 0;
 }
 
+.dialog-subtitle {
+  color: #526058;
+  margin: 4px 0 0;
+}
+
 .dialog-body {
   padding: 20px;
 }

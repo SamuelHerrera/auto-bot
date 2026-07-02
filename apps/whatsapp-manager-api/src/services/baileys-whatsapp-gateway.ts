@@ -25,6 +25,7 @@ interface BaileysAccountRuntime {
   status: WhatsAppAccountStatus;
   transient: boolean;
   reconnecting: boolean;
+  disconnecting: boolean;
 }
 
 type InboundHandler = (event: WhatsAppMessageEvent) => Promise<void>;
@@ -100,6 +101,7 @@ export class BaileysWhatsAppGateway implements WhatsAppGateway {
       socket,
       transient,
       reconnecting: false,
+      disconnecting: false,
       status: {
         accountId,
         status: "connecting",
@@ -135,6 +137,7 @@ export class BaileysWhatsAppGateway implements WhatsAppGateway {
     }
 
     runtime.reconnecting = false;
+    runtime.disconnecting = true;
     let logoutError: string | undefined;
     await runtime.socket?.logout().catch((error: unknown) => {
       logoutError = error instanceof Error ? error.message : "WhatsApp logout failed.";
@@ -354,7 +357,8 @@ export class BaileysWhatsAppGateway implements WhatsAppGateway {
 
     if (update.connection === "close") {
       const statusCode = getDisconnectStatusCode(update.lastDisconnect?.error);
-      const shouldReconnect = statusCode !== DisconnectReason.loggedOut && !runtime.reconnecting;
+      const isIntentionalDisconnect = runtime.disconnecting || statusCode === DisconnectReason.loggedOut;
+      const shouldReconnect = !isIntentionalDisconnect && !runtime.reconnecting;
 
       runtime.status = {
         accountId,
@@ -365,6 +369,13 @@ export class BaileysWhatsAppGateway implements WhatsAppGateway {
           : {}),
       };
       this.statusHandler?.(runtime.status);
+
+      if (isIntentionalDisconnect) {
+        this.accounts.delete(accountId);
+        if (this.lastActiveAccountId === accountId) {
+          this.lastActiveAccountId = null;
+        }
+      }
 
       if (shouldReconnect) {
         runtime.reconnecting = true;
@@ -449,6 +460,7 @@ export class BaileysWhatsAppGateway implements WhatsAppGateway {
           statePath: this.getAccountPath(entry.name),
           transient: entry.name.startsWith("pending-"),
           reconnecting: false,
+          disconnecting: false,
           status: {
             accountId: entry.name,
             status: "disconnected",
