@@ -2,7 +2,12 @@ import cors from "@fastify/cors";
 import Fastify from "fastify";
 import { ZodError } from "zod";
 import type { AppConfig } from "./config.js";
-import { buildServices, sendReplyWithDeliveryRecord, type AppServices } from "./build-services.js";
+import {
+  buildServices,
+  ensureDefaultDenyAllNumberRule,
+  sendReplyWithDeliveryRecord,
+  type AppServices,
+} from "./build-services.js";
 import type { NumberRuleInput } from "./domain/types.js";
 import { evaluateNumberRules, recordBlockedNumberDelivery } from "./services/number-rules.js";
 import type { RoutingInput } from "./services/chat-session-router.js";
@@ -74,7 +79,11 @@ export function createApp({ config, services = buildServices(config) }: CreateAp
 
   app.post<{ Body?: { accountId?: string } }>("/whatsapp/connect", async (request) => {
     const status = await services.whatsappGateway.initializeAccount(request.body?.accountId);
+    const createdDefaultRule = ensureDefaultDenyAllNumberRule(services.numberRuleStore, status);
     services.eventBus.publish("accounts");
+    if (createdDefaultRule) {
+      services.eventBus.publish("rules");
+    }
     return status;
   });
 

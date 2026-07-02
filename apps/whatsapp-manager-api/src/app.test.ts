@@ -3,7 +3,11 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { createApp } from "./app.js";
-import { sendReplyWithDeliveryRecord, type AppServices } from "./build-services.js";
+import {
+  ensureDefaultDenyAllNumberRule,
+  sendReplyWithDeliveryRecord,
+  type AppServices,
+} from "./build-services.js";
 import { loadConfig } from "./config.js";
 import { evaluateNumberRules, recordBlockedNumberDelivery } from "./services/number-rules.js";
 import { AppEventBus } from "./services/event-bus.js";
@@ -222,6 +226,81 @@ describe("whatsapp-manager-api", () => {
         }),
       ],
     });
+  });
+
+  it("starts newly connected WhatsApp accounts with a default deny-all rule", async () => {
+    const dir = mkdtempSync(path.join(tmpdir(), "auto-bot-default-deny-rule-"));
+    const rulesConfig = loadConfig({
+      ...process.env,
+      API_TOKEN: "test-token",
+      BRIDGE_DATABASE_FILE: path.join(dir, "bridge-state.sqlite"),
+      BRIDGE_STATE_FILE: "",
+      DATABASE_URL: "postgres://postgres:postgres@127.0.0.1:5432/auto_bot",
+      NODE_ENV: "test",
+      PORT: "3000",
+    });
+
+    try {
+      const services = createTestServices(rulesConfig);
+      const gateway = services.whatsappGateway as TestWhatsAppGateway;
+      app = createApp({ config: rulesConfig, services });
+
+      const connectResponse = await app.inject({
+        method: "POST",
+        url: "/whatsapp/connect",
+        headers: {
+          authorization: "Bearer test-token",
+        },
+        payload: {
+          accountId: "ops-main",
+        },
+      });
+
+      expect(connectResponse.statusCode).toBe(200);
+      expect(services.numberRuleStore?.listNumberRules("ops-main")).toEqual([
+        expect.objectContaining({
+          accountId: "ops-main",
+          action: "deny",
+          matchType: "all",
+          pattern: "",
+          label: "Default deny all",
+          enabled: true,
+        }),
+      ]);
+
+      await app.inject({
+        method: "POST",
+        url: "/whatsapp/connect",
+        headers: {
+          authorization: "Bearer test-token",
+        },
+        payload: {
+          accountId: "ops-main",
+        },
+      });
+      expect(services.numberRuleStore?.listNumberRules("ops-main")).toHaveLength(1);
+
+      await gateway.injectInboundMessage({
+        accountId: "ops-main",
+        chatId: "12345@s.whatsapp.net",
+        messageId: "wamid.default-deny",
+        senderId: "12345@s.whatsapp.net",
+        text: "should not answer yet",
+      });
+
+      expect(await services.router.getMappings()).toEqual([]);
+      expect(gateway.getSentMessages()).toEqual([]);
+      expect(services.deliveryStore?.listDeliveries()).toEqual([
+        expect.objectContaining({
+          accountId: "ops-main",
+          inboundMessageId: "wamid.default-deny",
+          status: "failed",
+          error: expect.stringContaining("Default deny all"),
+        }),
+      ]);
+    } finally {
+      rmSync(dir, { force: true, recursive: true });
+    }
   });
 
   it("disconnects WhatsApp accounts", async () => {
@@ -808,6 +887,79 @@ describe("whatsapp-manager-api", () => {
     }
   });
 
+  it("lets a specific allow rule override the default deny-all fallback", async () => {
+    const dir = mkdtempSync(path.join(tmpdir(), "auto-bot-number-rules-default-allow-"));
+    const rulesConfig = loadConfig({
+      ...process.env,
+      API_TOKEN: "test-token",
+      BRIDGE_DATABASE_FILE: path.join(dir, "bridge-state.sqlite"),
+      BRIDGE_STATE_FILE: "",
+      DATABASE_URL: "postgres://postgres:postgres@127.0.0.1:5432/auto_bot",
+      NODE_ENV: "test",
+      PORT: "3000",
+    });
+
+    try {
+      const services = createTestServices(rulesConfig);
+      const gateway = services.whatsappGateway as TestWhatsAppGateway;
+      app = createApp({ config: rulesConfig, services });
+
+      services.numberRuleStore?.createNumberRule({
+        accountId: "ops-main",
+        action: "deny",
+        matchType: "all",
+        label: "Default deny all",
+      });
+      services.numberRuleStore?.createNumberRule({
+        accountId: "ops-main",
+        action: "allow",
+        matchType: "exact",
+        pattern: "12345",
+      });
+
+      await gateway.injectInboundMessage({
+        accountId: "ops-main",
+        chatId: "99999@s.whatsapp.net",
+        messageId: "wamid.default-deny-not-allowed",
+        senderId: "99999@s.whatsapp.net",
+        text: "blocked by default deny",
+      });
+      await gateway.injectInboundMessage({
+        accountId: "ops-main",
+        chatId: "12345@s.whatsapp.net",
+        messageId: "wamid.default-deny-allowed",
+        senderId: "12345@s.whatsapp.net",
+        text: "allowed by first allow",
+      });
+
+      expect(await services.router.getMappings()).toEqual([
+        expect.objectContaining({
+          chatJid: "12345@s.whatsapp.net",
+        }),
+      ]);
+      expect(gateway.getSentMessages()).toEqual([
+        expect.objectContaining({
+          chatJid: "12345@s.whatsapp.net",
+          text: "test-hermes-response: allowed by first allow",
+        }),
+      ]);
+      expect(services.deliveryStore?.listDeliveries()).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            inboundMessageId: "wamid.default-deny-not-allowed",
+            status: "failed",
+          }),
+          expect.objectContaining({
+            inboundMessageId: "wamid.default-deny-allowed",
+            status: "sent",
+          }),
+        ]),
+      );
+    } finally {
+      rmSync(dir, { force: true, recursive: true });
+    }
+  });
+
   it("creates persisted Hermes API sessions and sends turns through session chat", async () => {
     const fetchMock = vi
       .fn()
@@ -963,7 +1115,14 @@ function createTestServices(config: AppConfig): AppServices {
     bridgeStore instanceof SqliteBridgeStateStore ? bridgeStore : undefined,
   );
 
-  whatsappGateway.onStatusChange(() => {
+  whatsappGateway.onStatusChange((status) => {
+    const createdDefaultRule = ensureDefaultDenyAllNumberRule(
+      bridgeStore instanceof SqliteBridgeStateStore ? bridgeStore : undefined,
+      status,
+    );
+    if (createdDefaultRule) {
+      eventBus.publish("rules");
+    }
     eventBus.publish("accounts");
   });
 

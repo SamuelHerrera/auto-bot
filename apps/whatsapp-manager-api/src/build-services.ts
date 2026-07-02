@@ -14,6 +14,7 @@ import { SqliteBridgeStateStore } from "./services/sqlite-bridge-state-store.js"
 import { AppEventBus } from "./services/event-bus.js";
 import { evaluateNumberRules, recordBlockedNumberDelivery } from "./services/number-rules.js";
 import type { WhatsAppGateway } from "./services/whatsapp-service.js";
+import type { WhatsAppAccountStatus } from "./domain/types.js";
 
 export interface AppServices {
   hermesAdapter: HermesAdapter;
@@ -39,7 +40,14 @@ export function buildServices(config: AppConfig): AppServices {
     bridgeStore instanceof SqliteBridgeStateStore ? bridgeStore : undefined,
   );
 
-  whatsappGateway.onStatusChange?.(() => {
+  whatsappGateway.onStatusChange?.((status) => {
+    const createdDefaultRule = ensureDefaultDenyAllNumberRule(
+      bridgeStore instanceof SqliteBridgeStateStore ? bridgeStore : undefined,
+      status,
+    );
+    if (createdDefaultRule) {
+      eventBus.publish("rules");
+    }
     eventBus.publish("accounts");
   });
 
@@ -104,6 +112,29 @@ export function buildServices(config: AppConfig): AppServices {
     ...(bridgeStore instanceof SqliteBridgeStateStore ? { deliveryStore: bridgeStore } : {}),
     ...(bridgeStore instanceof SqliteBridgeStateStore ? { numberRuleStore: bridgeStore } : {}),
   };
+}
+
+export function ensureDefaultDenyAllNumberRule(
+  numberRuleStore: NumberRuleStore | undefined,
+  status: WhatsAppAccountStatus,
+): boolean {
+  const accountId = status.accountId.trim();
+  if (!numberRuleStore || status.status !== "connected" || !accountId) {
+    return false;
+  }
+
+  if (numberRuleStore.listNumberRules(accountId).length > 0) {
+    return false;
+  }
+
+  numberRuleStore.createNumberRule({
+    accountId,
+    action: "deny",
+    matchType: "all",
+    label: "Default deny all",
+    enabled: true,
+  });
+  return true;
 }
 
 export async function sendReplyWithDeliveryRecord(input: {

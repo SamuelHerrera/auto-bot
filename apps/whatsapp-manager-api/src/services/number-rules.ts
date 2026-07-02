@@ -17,7 +17,14 @@ export function evaluateNumberRules(
   }
 
   const candidates = getNumberCandidates(event);
-  const deniedBy = rules.find((rule) => rule.action === "deny" && matchesRule(rule, candidates));
+  const allowRules = rules.filter((rule) => rule.action === "allow");
+  const allowedBy = allowRules.find((rule) => matchesRule(rule, candidates));
+  const deniedBy = rules.find(
+    (rule) =>
+      rule.action === "deny" &&
+      matchesRule(rule, candidates) &&
+      !(rule.matchType === "all" && allowedBy),
+  );
   if (deniedBy) {
     return {
       allowed: false,
@@ -26,8 +33,7 @@ export function evaluateNumberRules(
     };
   }
 
-  const allowRules = rules.filter((rule) => rule.action === "allow");
-  if (allowRules.length > 0 && !allowRules.some((rule) => matchesRule(rule, candidates))) {
+  if (allowRules.length > 0 && !allowedBy) {
     return {
       allowed: false,
       reason: "Blocked by number rules: no allow rule matched",
