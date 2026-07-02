@@ -1,5 +1,6 @@
 import type { AppConfig } from "./config.js";
 import {
+  type AccountMetadataStore,
   type AuditLogStore,
   type BridgeDeliveryStore,
   InMemoryChatSessionRouter,
@@ -24,6 +25,7 @@ export interface AppServices {
   deliveryStore?: BridgeDeliveryStore;
   numberRuleStore?: NumberRuleStore;
   auditLogStore?: AuditLogStore;
+  accountMetadataStore?: AccountMetadataStore;
   eventBus: AppEventBus;
 }
 
@@ -178,6 +180,7 @@ export function buildServices(config: AppConfig): AppServices {
     ...(bridgeStore instanceof SqliteBridgeStateStore ? { deliveryStore: bridgeStore } : {}),
     ...(bridgeStore instanceof SqliteBridgeStateStore ? { numberRuleStore: bridgeStore } : {}),
     ...(bridgeStore instanceof SqliteBridgeStateStore ? { auditLogStore: bridgeStore } : {}),
+    ...(bridgeStore instanceof SqliteBridgeStateStore ? { accountMetadataStore: bridgeStore } : {}),
   };
 }
 

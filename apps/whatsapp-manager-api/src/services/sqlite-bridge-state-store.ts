@@ -11,9 +11,11 @@ import type {
   HermesSession,
   NumberRuleInput,
   NumberRuleRecord,
+  WhatsAppAccountMetadata,
   WhatsAppGroupRoutingPolicy,
 } from "../domain/types.js";
 import type {
+  AccountMetadataStore,
   AuditLogStore,
   BridgeDeliveryStore,
   ChatSessionRouterSnapshot,
@@ -23,7 +25,7 @@ import type {
 } from "./chat-session-router.js";
 
 export class SqliteBridgeStateStore
-  implements ChatSessionRouterStore, BridgeDeliveryStore, GroupRoutingPolicyStore, NumberRuleStore, AuditLogStore
+  implements ChatSessionRouterStore, BridgeDeliveryStore, GroupRoutingPolicyStore, NumberRuleStore, AuditLogStore, AccountMetadataStore
 {
   private readonly db: DatabaseSync;
 
@@ -301,6 +303,39 @@ export class SqliteBridgeStateStore
     return result.changes > 0;
   }
 
+  listAccountMetadata(): WhatsAppAccountMetadata[] {
+    return this.db
+      .prepare("SELECT * FROM whatsapp_account_metadata ORDER BY updated_at DESC")
+      .all()
+      .map(rowToAccountMetadata);
+  }
+
+  setAccountAlias(accountId: string, alias: string): WhatsAppAccountMetadata {
+    const now = new Date().toISOString();
+    const existing = this.db
+      .prepare("SELECT created_at FROM whatsapp_account_metadata WHERE account_id = ?")
+      .get(accountId) as { created_at?: string } | undefined;
+    const record: WhatsAppAccountMetadata = {
+      accountId,
+      ...(alias.trim() ? { alias: alias.trim() } : {}),
+      createdAt: existing?.created_at ?? now,
+      updatedAt: now,
+    };
+
+    this.db
+      .prepare(`
+        INSERT INTO whatsapp_account_metadata
+          (account_id, alias, created_at, updated_at)
+        VALUES (?, ?, ?, ?)
+        ON CONFLICT(account_id) DO UPDATE SET
+          alias = excluded.alias,
+          updated_at = excluded.updated_at
+      `)
+      .run(record.accountId, record.alias ?? null, record.createdAt, record.updatedAt);
+
+    return record;
+  }
+
   listAuditLogs(limit = 200): AuditLogRecord[] {
     const safeLimit = Math.min(Math.max(Math.trunc(limit), 1), 500);
     return this.db
@@ -412,6 +447,13 @@ export class SqliteBridgeStateStore
       CREATE INDEX IF NOT EXISTS number_rules_account_idx
         ON number_rules(account_id, enabled);
 
+      CREATE TABLE IF NOT EXISTS whatsapp_account_metadata (
+        account_id TEXT PRIMARY KEY,
+        alias TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      );
+
       CREATE TABLE IF NOT EXISTS audit_logs (
         id TEXT PRIMARY KEY,
         action TEXT NOT NULL,
@@ -509,6 +551,16 @@ function rowToNumberRule(row: unknown): NumberRuleRecord {
     pattern: String(value.pattern ?? ""),
     ...(value.label ? { label: String(value.label) } : {}),
     enabled: Boolean(value.enabled),
+    createdAt: String(value.created_at),
+    updatedAt: String(value.updated_at),
+  };
+}
+
+function rowToAccountMetadata(row: unknown): WhatsAppAccountMetadata {
+  const value = row as Record<string, string | null>;
+  return {
+    accountId: String(value.account_id),
+    ...(value.alias ? { alias: String(value.alias) } : {}),
     createdAt: String(value.created_at),
     updatedAt: String(value.updated_at),
   };

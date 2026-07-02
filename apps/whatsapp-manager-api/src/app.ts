@@ -111,8 +111,32 @@ export function createApp({ config, services = buildServices(config) }: CreateAp
   });
 
   app.get("/whatsapp/accounts", async () => ({
-    items: await services.whatsappGateway.listAccounts(),
+    items: mergeAccountMetadata(await services.whatsappGateway.listAccounts(), services.accountMetadataStore?.listAccountMetadata() ?? []),
   }));
+
+  app.patch<{ Params: { accountId: string }; Body: unknown }>("/whatsapp/accounts/:accountId", async (request, reply) => {
+    if (!services.accountMetadataStore) {
+      return reply.code(503).send({ error: "Account metadata storage is not configured" });
+    }
+
+    const accountId = decodeURIComponent(request.params.accountId).trim();
+    if (!accountId) {
+      return reply.code(400).send({ error: "accountId is required" });
+    }
+
+    const alias = parseAccountAliasInput(request.body);
+    const metadata = services.accountMetadataStore.setAccountAlias(accountId, alias);
+    services.eventBus.publish("accounts");
+    audit({
+      action: "whatsapp-account.alias-update",
+      resourceType: "whatsapp-account",
+      resourceId: accountId,
+      details: {
+        alias: metadata.alias ?? null,
+      },
+    });
+    return metadata;
+  });
 
   app.post<{ Params: { accountId: string } }>(
     "/whatsapp/accounts/:accountId/disconnect",
@@ -132,7 +156,10 @@ export function createApp({ config, services = buildServices(config) }: CreateAp
     },
   );
 
-  app.get("/whatsapp/status", async () => services.whatsappGateway.getStatus());
+  app.get("/whatsapp/status", async () => {
+    const status = await services.whatsappGateway.getStatus();
+    return mergeAccountMetadata([status], services.accountMetadataStore?.listAccountMetadata() ?? [])[0] ?? status;
+  });
 
   app.get("/chats", async () => ({
     items: await services.router.getMappings(),
@@ -561,6 +588,30 @@ function parseNumberRuleInput(body: unknown, existing?: NumberRuleInput): Number
     ...(label ? { label } : {}),
     enabled,
   };
+}
+
+function parseAccountAliasInput(body: unknown) {
+  if (!body || typeof body !== "object") {
+    throw badRequest("Account payload must be an object");
+  }
+
+  const alias = readString((body as Record<string, unknown>).alias, "").trim();
+  if (alias.length > 80) {
+    throw badRequest("alias must be 80 characters or fewer");
+  }
+
+  return alias;
+}
+
+function mergeAccountMetadata<T extends { accountId: string }>(
+  accounts: T[],
+  metadata: Array<{ accountId: string; alias?: string }>,
+): Array<T & { alias?: string }> {
+  const metadataByAccountId = new Map(metadata.map((item) => [item.accountId, item]));
+  return accounts.map((account) => {
+    const alias = metadataByAccountId.get(account.accountId)?.alias?.trim();
+    return alias ? { ...account, alias } : account;
+  });
 }
 
 function parseAuditLogInput(body: unknown): AuditLogInput {

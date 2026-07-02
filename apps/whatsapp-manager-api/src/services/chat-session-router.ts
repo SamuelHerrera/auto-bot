@@ -8,6 +8,7 @@ import type {
   InboundMessageResult,
   NumberRuleInput,
   NumberRuleRecord,
+  WhatsAppAccountMetadata,
   WhatsAppChatId,
   WhatsAppChatType,
   WhatsAppGroupRoutingPolicy,
@@ -319,6 +320,11 @@ export interface NumberRuleStore {
 export interface AuditLogStore {
   listAuditLogs(limit?: number): AuditLogRecord[];
   recordAuditLog(input: AuditLogInput): AuditLogRecord;
+}
+
+export interface AccountMetadataStore {
+  listAccountMetadata(): WhatsAppAccountMetadata[];
+  setAccountAlias(accountId: string, alias: string): WhatsAppAccountMetadata;
 }
 
 export interface RoutingInput {

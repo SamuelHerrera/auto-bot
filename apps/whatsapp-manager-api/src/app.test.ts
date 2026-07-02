@@ -192,6 +192,76 @@ describe("whatsapp-manager-api", () => {
     });
   });
 
+  it("persists account aliases and merges them into account listings", async () => {
+    const dir = mkdtempSync(path.join(tmpdir(), "auto-bot-account-alias-"));
+    const aliasConfig = loadConfig({
+      ...process.env,
+      API_TOKEN: "test-token",
+      BRIDGE_DATABASE_FILE: path.join(dir, "bridge-state.sqlite"),
+      BRIDGE_STATE_FILE: "",
+      DATABASE_URL: "postgres://postgres:postgres@127.0.0.1:5432/auto_bot",
+      NODE_ENV: "test",
+      PORT: "3000",
+    });
+    const aliasApp = createApp({
+      config: aliasConfig,
+      services: createTestServices(aliasConfig),
+    });
+
+    try {
+      await aliasApp.inject({
+        method: "POST",
+        url: "/whatsapp/connect",
+        headers: {
+          authorization: "Bearer test-token",
+        },
+        payload: {
+          accountId: "15551234567",
+        },
+      });
+
+      const updateResponse = await aliasApp.inject({
+        method: "PATCH",
+        url: "/whatsapp/accounts/15551234567",
+        headers: {
+          authorization: "Bearer test-token",
+        },
+        payload: {
+          alias: "Sales line",
+        },
+      });
+
+      expect(updateResponse.statusCode).toBe(200);
+      expect(updateResponse.json()).toEqual(
+        expect.objectContaining({
+          accountId: "15551234567",
+          alias: "Sales line",
+        }),
+      );
+
+      const listResponse = await aliasApp.inject({
+        method: "GET",
+        url: "/whatsapp/accounts",
+        headers: {
+          authorization: "Bearer test-token",
+        },
+      });
+
+      expect(listResponse.json()).toEqual({
+        items: [
+          expect.objectContaining({
+            accountId: "15551234567",
+            alias: "Sales line",
+            status: "connected",
+          }),
+        ],
+      });
+    } finally {
+      await aliasApp.close();
+      rmSync(dir, { force: true, recursive: true });
+    }
+  });
+
   it("uses the linked WhatsApp phone number when no account name is provided", async () => {
     const connectResponse = await app.inject({
       method: "POST",
@@ -1265,6 +1335,7 @@ function createTestServices(config: AppConfig): AppServices {
     ...(bridgeStore instanceof SqliteBridgeStateStore ? { deliveryStore: bridgeStore } : {}),
     ...(bridgeStore instanceof SqliteBridgeStateStore ? { numberRuleStore: bridgeStore } : {}),
     ...(bridgeStore instanceof SqliteBridgeStateStore ? { auditLogStore: bridgeStore } : {}),
+    ...(bridgeStore instanceof SqliteBridgeStateStore ? { accountMetadataStore: bridgeStore } : {}),
   };
 }
 

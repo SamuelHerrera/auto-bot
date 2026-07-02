@@ -77,11 +77,19 @@ export interface OutboundWhatsAppMessage {
 
 export interface WhatsAppAccountStatus {
   accountId: string;
+  alias?: string;
   status: "disconnected" | "connecting" | "connected";
   connectedAt?: string;
   disconnectedAt?: string;
   qrCode?: string;
   lastError?: string;
+}
+
+export interface WhatsAppAccountMetadata {
+  accountId: string;
+  alias?: string;
+  createdAt: string;
+  updatedAt: string;
 }
 
 export interface InboundMessageResult {

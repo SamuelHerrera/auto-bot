@@ -10,6 +10,7 @@ type RefreshScope = "accounts" | "activity" | "rules" | "logs";
 
 interface WhatsAppAccount {
   accountId: string;
+  alias?: string;
   status: AccountStatus;
   connectedAt?: string;
   disconnectedAt?: string;
@@ -153,6 +154,7 @@ export function App() {
   const [ruleMatchType, setRuleMatchType] = useState<NumberRuleMatchType>("exact");
   const [rulePattern, setRulePattern] = useState("");
   const [ruleLabel, setRuleLabel] = useState("");
+  const [accountAliasDrafts, setAccountAliasDrafts] = useState<Record<string, string>>({});
   const accountsRef = useRef(accounts);
   const isLinkDialogOpenRef = useRef(isLinkDialogOpen);
   const linkingStatusRef = useRef(linkingStatus);
@@ -521,6 +523,27 @@ export function App() {
     });
   }
 
+  async function saveAccountAlias(accountId: string, alias: string) {
+    await runAction(async () => {
+      const metadata = await request<{ accountId: string; alias?: string }>(`/whatsapp/accounts/${encodeURIComponent(accountId)}`, {
+        method: "PATCH",
+        body: JSON.stringify({ alias }),
+      });
+      setAccounts((currentAccounts) =>
+        currentAccounts.map((account) => {
+          if (account.accountId !== accountId) {
+            return account;
+          }
+
+          const { alias: _alias, ...accountWithoutAlias } = account;
+          return metadata.alias ? { ...accountWithoutAlias, alias: metadata.alias } : accountWithoutAlias;
+        }),
+      );
+      setAccountAliasDrafts((drafts) => ({ ...drafts, [accountId]: metadata.alias ?? "" }));
+      setStatusMessage(metadata.alias ? `Alias saved for ${accountId}.` : `Alias cleared for ${accountId}.`);
+    });
+  }
+
   async function saveBranding(nextBranding: BrandingSettings) {
     await runAction(async () => {
       const normalizedBranding = normalizeBranding(nextBranding);
@@ -627,9 +650,7 @@ export function App() {
   }
 
   const connectedAccounts = accounts.filter((account) => account.status === "connected").length;
-  const filteredAccounts = accounts.filter((account) =>
-    account.accountId.toLowerCase().includes(accountSearch.trim().toLowerCase()),
-  );
+  const filteredAccounts = accounts.filter((account) => accountMatchesSearch(account, accountSearch));
   const selectedTabAccountId = activeTabId === "logs" || activeTabId === "settings" ? activeAccountId : activeTabId;
   const tabAccounts = openAccountTabs
     .map((accountId) => accounts.find((account) => account.accountId === accountId))
@@ -659,7 +680,7 @@ export function App() {
           <h1>{branding.title}</h1>
         </div>
         <div className="topbar-actions">
-          <IconButton icon="mdi:phone-multiple" label="Numbers" variant="secondary" onClick={() => setIsNumberPanelOpen(true)}>
+          <IconButton icon="mdi:magnify" label="Find number" className="number-select-button" variant="secondary" onClick={() => setIsNumberPanelOpen(true)}>
             <span className="button-count">{connectedAccounts}/{accounts.length}</span>
           </IconButton>
           <form className="header-link-form" onSubmit={connectAccount}>
@@ -689,7 +710,7 @@ export function App() {
                   }}
                 >
                   <span className={`status-dot status-dot-${account.status}`} />
-                  <span>{getAccountDisplayName(account)}</span>
+                  <span>{getAccountTabLabel(account)}</span>
                 </button>
                 <IconButton icon="mdi:close" label={`Close ${account.accountId}`} className="tab-close" variant="text" onClick={() => closeAccountTab(account.accountId)} />
               </div>
@@ -755,7 +776,20 @@ export function App() {
               failedDeliveries={activeAccountFailedDeliveries}
               isBusy={isBusy}
               matchType={ruleMatchType}
+              aliasDraft={activeAccount ? accountAliasDrafts[activeAccount.accountId] ?? activeAccount.alias ?? "" : ""}
               onActionChange={setRuleAction}
+              onAliasChange={(value) => {
+                if (!activeAccount) {
+                  return;
+                }
+                setAccountAliasDrafts((drafts) => ({ ...drafts, [activeAccount.accountId]: value }));
+              }}
+              onAliasSave={(alias) => {
+                if (!activeAccount) {
+                  return;
+                }
+                void saveAccountAlias(activeAccount.accountId, alias);
+              }}
               onCreateRule={createNumberRule}
               onDeleteRule={(ruleId) => void deleteNumberRule(ruleId)}
               onDisconnect={(accountId) => void disconnectAccount(accountId)}
@@ -805,6 +839,7 @@ export function App() {
 
 function NumberWorkspace({
   account,
+  aliasDraft,
   activeChat,
   activeChatJid,
   activeChatMessages,
@@ -814,6 +849,8 @@ function NumberWorkspace({
   isBusy,
   matchType,
   onActionChange,
+  onAliasChange,
+  onAliasSave,
   onCreateRule,
   onDeleteRule,
   onDisconnect,
@@ -830,6 +867,7 @@ function NumberWorkspace({
   rules,
 }: {
   account: WhatsAppAccount | null;
+  aliasDraft: string;
   activeChat: ChatSummary | null;
   activeChatJid: string;
   activeChatMessages: ChatMessage[];
@@ -839,6 +877,8 @@ function NumberWorkspace({
   isBusy: boolean;
   matchType: NumberRuleMatchType;
   onActionChange: (value: NumberRuleAction) => void;
+  onAliasChange: (value: string) => void;
+  onAliasSave: (alias: string) => void;
   onCreateRule: (event: FormEvent<HTMLFormElement>) => void;
   onDeleteRule: (ruleId: string) => void;
   onDisconnect: (accountId: string) => void;
@@ -863,10 +903,35 @@ function NumberWorkspace({
       <div className="number-header">
         <div>
           <span className="panel-kicker">Number</span>
-          <h2>{getAccountDisplayName(account)}</h2>
-          <p>{getAccountActivity(account)}</p>
+          <h2>{getAccountPrimaryLabel(account)}</h2>
+          <p>{getAccountDetailLine(account)}</p>
         </div>
         <div className="number-header-actions">
+          <form
+            className="alias-form"
+            onSubmit={(event) => {
+              event.preventDefault();
+              onAliasSave(aliasDraft);
+            }}
+          >
+            <label>
+              <span className="visually-hidden">Number alias</span>
+              <input
+                value={aliasDraft}
+                onChange={(event) => onAliasChange(event.target.value)}
+                placeholder="Alias"
+                maxLength={80}
+                disabled={isPendingAccountId(account.accountId)}
+              />
+            </label>
+            <IconButton
+              icon="mdi:content-save-outline"
+              label="Save alias"
+              type="submit"
+              variant="secondary"
+              disabled={isBusy || isPendingAccountId(account.accountId)}
+            />
+          </form>
           <span className={`badge badge-${account.status}`} title={getAccountStatusDetail(account)}>
             {account.status}
           </span>
@@ -963,7 +1028,8 @@ function NumberChooserPanel({
 
         <div className="number-panel-body">
           <label className="field number-panel-search">
-            <span>Search</span>
+            <span className="visually-hidden">Search</span>
+            <Icon icon="mdi:magnify" aria-hidden="true" />
             <input
               autoFocus
               value={search}
@@ -988,8 +1054,8 @@ function NumberChooserPanel({
                 >
                   <span className={`status-dot status-dot-${account.status}`} />
                   <span>
-                    <strong>{getAccountDisplayName(account)}</strong>
-                    <small>{getAccountActivity(account)}</small>
+                    <strong>{getAccountPrimaryLabel(account)}</strong>
+                    <small>{getAccountDetailLine(account)}</small>
                   </span>
                   <span className={`badge badge-${account.status}`}>{account.status}</span>
                 </button>
@@ -1766,8 +1832,34 @@ function mergeLinkingStatus(currentStatus: WhatsAppAccount | null, nextStatus: W
   return nextStatus;
 }
 
-function getAccountDisplayName(account: WhatsAppAccount) {
-  return isPendingAccountId(account.accountId) ? "Linking number" : account.accountId;
+function getAccountTabLabel(account: WhatsAppAccount) {
+  if (isPendingAccountId(account.accountId)) {
+    return "Linking number";
+  }
+
+  return account.alias?.trim() || account.accountId;
+}
+
+function getAccountPrimaryLabel(account: WhatsAppAccount) {
+  return getAccountTabLabel(account);
+}
+
+function getAccountDetailLine(account: WhatsAppAccount) {
+  const activity = getAccountActivity(account);
+  if (!account.alias?.trim() || isPendingAccountId(account.accountId)) {
+    return activity;
+  }
+
+  return `${account.accountId} · ${activity}`;
+}
+
+function accountMatchesSearch(account: WhatsAppAccount, search: string) {
+  const query = search.trim().toLowerCase();
+  if (!query) {
+    return true;
+  }
+
+  return [account.accountId, account.alias ?? ""].some((value) => value.toLowerCase().includes(query));
 }
 
 function isPendingAccountId(accountId: string) {

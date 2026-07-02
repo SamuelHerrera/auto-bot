@@ -106,13 +106,17 @@ button:disabled {
   min-width: 38px;
 }
 
+.number-select-button {
+  gap: 7px;
+  padding-inline: 10px;
+}
+
 .button-count {
   background: #eef1ee;
   border-radius: 999px;
   color: #526058;
   font-size: 0.74rem;
   line-height: 1;
-  margin-left: 7px;
   padding: 4px 7px;
 }
 
@@ -458,6 +462,29 @@ button:disabled {
   justify-content: end;
 }
 
+.alias-form {
+  align-items: center;
+  display: flex;
+  gap: 8px;
+  min-width: min(320px, 100%);
+}
+
+.alias-form label {
+  min-width: 0;
+}
+
+.alias-form input {
+  min-height: 38px;
+  padding-block: 8px;
+}
+
+.alias-form .icon-button {
+  flex: 0 0 auto;
+  min-height: 38px;
+  min-width: 38px;
+  padding: 8px;
+}
+
 .subnav {
   border-bottom: 1px solid #e5ebe6;
   display: flex;
@@ -567,6 +594,18 @@ button:disabled {
 .field {
   display: grid;
   gap: 7px;
+}
+
+.visually-hidden {
+  clip: rect(0 0 0 0);
+  border: 0;
+  height: 1px;
+  margin: -1px;
+  overflow: hidden;
+  padding: 0;
+  position: absolute;
+  white-space: nowrap;
+  width: 1px;
 }
 
 .field span {
@@ -918,8 +957,21 @@ button {
   padding: 20px;
 }
 
+.number-panel-search {
+  align-items: center;
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr);
+}
+
+.number-panel-search > svg {
+  color: #66746c;
+  height: 18px;
+  width: 18px;
+}
+
 .number-panel-search input {
   min-height: 46px;
+  padding-left: 12px;
 }
 
 .number-choice-list {
