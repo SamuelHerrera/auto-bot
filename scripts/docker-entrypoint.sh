@@ -8,7 +8,11 @@ CODEX_REFRESH_TOKEN_VALUE="${CODEX_REFRESH_TOKEN:-}"
 CODEX_ID_TOKEN_VALUE="${CODEX_ID_TOKEN:-}"
 CODEX_ACCOUNT_ID_VALUE="${CODEX_ACCOUNT_ID:-}"
 OPENAI_API_KEY_VALUE="${OPENAI_API_KEY:-}"
+ANTHROPIC_API_KEY_VALUE="${ANTHROPIC_API_KEY:-}"
+HERMES_MODEL_PROVIDER_VALUE="${HERMES_MODEL_PROVIDER:-}"
+HERMES_MODEL_DEFAULT_VALUE="${HERMES_MODEL_DEFAULT:-}"
 SSH_AUTHORIZED_KEY_VALUE="${SSH_AUTHORIZED_KEY:-}"
+SSH_AUTHORIZED_KEYS_VALUE="${SSH_AUTHORIZED_KEYS:-}"
 SSH_PORT_VALUE="${SSH_PORT:-2222}"
 ZEROTIER_AUTOSTART_VALUE="${ZEROTIER_AUTOSTART:-0}"
 ZEROTIER_NETWORK_ID_VALUE="${ZEROTIER_NETWORK_ID:-}"
@@ -30,9 +34,16 @@ EOF
 
 chown hermes:hermes /opt/data/.bashrc /opt/data/.profile
 
-if [ -n "${SSH_AUTHORIZED_KEY_VALUE}" ]; then
+if [ -n "${SSH_AUTHORIZED_KEY_VALUE}" ] || [ -n "${SSH_AUTHORIZED_KEYS_VALUE}" ]; then
   install -d -m 0700 -o hermes -g hermes /opt/data/.ssh
-  printf '%s\n' "${SSH_AUTHORIZED_KEY_VALUE}" > /opt/data/.ssh/authorized_keys
+  {
+    if [ -n "${SSH_AUTHORIZED_KEY_VALUE}" ]; then
+      printf '%s\n' "${SSH_AUTHORIZED_KEY_VALUE}"
+    fi
+    if [ -n "${SSH_AUTHORIZED_KEYS_VALUE}" ]; then
+      printf '%s\n' "${SSH_AUTHORIZED_KEYS_VALUE}"
+    fi
+  } | awk 'NF && !seen[$0]++' > /opt/data/.ssh/authorized_keys
   chmod 0600 /opt/data/.ssh/authorized_keys
   chown hermes:hermes /opt/data/.ssh/authorized_keys
 fi
@@ -110,5 +121,134 @@ elif [ -n "${OPENAI_API_KEY_VALUE}" ] && [ ! -f "${CODEX_HOME}/auth.json" ]; the
 fi
 
 chown -R hermes:hermes /opt/data/.codex
+
+if [ -f "${CODEX_HOME}/auth.json" ]; then
+  node <<'EOF'
+const fs = require("fs");
+
+const codexAuthPath = `${process.env.CODEX_HOME}/auth.json`;
+const hermesAuthPath = "/opt/data/auth.json";
+const now = new Date().toISOString();
+
+function readJson(path, fallback) {
+  try {
+    return JSON.parse(fs.readFileSync(path, "utf8"));
+  } catch {
+    return fallback;
+  }
+}
+
+const codexAuth = readJson(codexAuthPath, {});
+const tokens = codexAuth.tokens || {};
+const hasCodexTokens = Boolean(
+  tokens.access_token &&
+  tokens.refresh_token &&
+  tokens.id_token &&
+  tokens.account_id,
+);
+
+if (hasCodexTokens) {
+  const hermesAuth = readJson(hermesAuthPath, { version: 1, providers: {} });
+  if (!hermesAuth.providers || typeof hermesAuth.providers !== "object") {
+    hermesAuth.providers = {};
+  }
+
+  const existing = hermesAuth.providers["openai-codex"];
+  const existingTokens = existing && existing.tokens;
+  const hasExistingTokens = Boolean(
+    existingTokens &&
+    existingTokens.access_token &&
+    existingTokens.refresh_token,
+  );
+
+  if (!hasExistingTokens) {
+    hermesAuth.providers["openai-codex"] = {
+      tokens,
+      last_refresh: codexAuth.last_refresh || now,
+      auth_mode: codexAuth.auth_mode || "chatgpt",
+      label: "Codex CLI",
+    };
+    hermesAuth.active_provider = "openai-codex";
+    hermesAuth.version = hermesAuth.version || 1;
+    hermesAuth.updated_at = now;
+    fs.writeFileSync(hermesAuthPath, `${JSON.stringify(hermesAuth, null, 2)}\n`, { mode: 0o600 });
+  }
+}
+EOF
+fi
+
+if [ -z "${HERMES_MODEL_PROVIDER_VALUE}" ]; then
+  if [ -n "${CODEX_ACCESS_TOKEN_VALUE}" ] \
+    && [ -n "${CODEX_REFRESH_TOKEN_VALUE}" ] \
+    && [ -n "${CODEX_ID_TOKEN_VALUE}" ] \
+    && [ -n "${CODEX_ACCOUNT_ID_VALUE}" ]; then
+    HERMES_MODEL_PROVIDER_VALUE="openai-codex"
+  elif [ -n "${ANTHROPIC_API_KEY_VALUE}" ]; then
+    HERMES_MODEL_PROVIDER_VALUE="anthropic"
+  elif [ -n "${OPENAI_API_KEY_VALUE}" ]; then
+    HERMES_MODEL_PROVIDER_VALUE="openai-api"
+  fi
+fi
+
+if [ -z "${HERMES_MODEL_DEFAULT_VALUE}" ]; then
+  case "${HERMES_MODEL_PROVIDER_VALUE}" in
+    openai-codex) HERMES_MODEL_DEFAULT_VALUE="gpt-5.4" ;;
+    anthropic) HERMES_MODEL_DEFAULT_VALUE="claude-sonnet-4-5" ;;
+    openai-api) HERMES_MODEL_DEFAULT_VALUE="gpt-4.1" ;;
+  esac
+fi
+export HERMES_MODEL_PROVIDER="${HERMES_MODEL_PROVIDER_VALUE}"
+export HERMES_MODEL_DEFAULT="${HERMES_MODEL_DEFAULT_VALUE}"
+
+if [ -n "${OPENAI_API_KEY_VALUE}" ] || [ -n "${ANTHROPIC_API_KEY_VALUE}" ]; then
+  node <<'EOF'
+const fs = require("fs");
+
+const envPath = "/opt/data/.env";
+const existing = fs.existsSync(envPath)
+  ? fs.readFileSync(envPath, "utf8").split(/\r?\n/)
+  : [];
+const values = new Map();
+
+for (const line of existing) {
+  if (!line || line.trimStart().startsWith("#") || !line.includes("=")) continue;
+  const index = line.indexOf("=");
+  values.set(line.slice(0, index), line.slice(index + 1));
+}
+
+function quote(value) {
+  return JSON.stringify(value);
+}
+
+function setIfProvided(key, value) {
+  if (value) values.set(key, quote(value));
+}
+
+setIfProvided("OPENAI_API_KEY", process.env.OPENAI_API_KEY || "");
+setIfProvided("ANTHROPIC_API_KEY", process.env.ANTHROPIC_API_KEY || "");
+
+const lines = Array.from(values.entries()).map(([key, value]) => `${key}=${value}`);
+fs.writeFileSync(envPath, `${lines.join("\n")}\n`, { mode: 0o600 });
+EOF
+fi
+
+if [ ! -f /opt/data/config.yaml ] \
+  && [ -n "${HERMES_MODEL_PROVIDER_VALUE}" ] \
+  && [ -n "${HERMES_MODEL_DEFAULT_VALUE}" ]; then
+  node <<'EOF'
+const fs = require("fs");
+
+const provider = process.env.HERMES_MODEL_PROVIDER;
+const model = process.env.HERMES_MODEL_DEFAULT;
+
+fs.writeFileSync(
+  "/opt/data/config.yaml",
+  `model:\n  provider: ${JSON.stringify(provider)}\n  default: ${JSON.stringify(model)}\n`,
+  { mode: 0o600 },
+);
+EOF
+fi
+
+chown hermes:hermes /opt/data/.env /opt/data/config.yaml /opt/data/auth.json 2>/dev/null || true
 
 exec sudo -E -H -u hermes "$@"

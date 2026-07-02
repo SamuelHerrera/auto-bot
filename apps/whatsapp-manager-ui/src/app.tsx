@@ -23,18 +23,6 @@ interface SessionMapping {
   updatedAt: string;
 }
 
-interface HermesSession {
-  id: string;
-  sessionKey: string;
-  accountId: string;
-  chatJid: string;
-  chatType: "direct" | "group";
-  chatId: string;
-  createdAt: string;
-  lastActivityAt: string;
-  status: "active" | "reset";
-}
-
 interface DeliveryRecord {
   id: string;
   accountId: string;
@@ -52,16 +40,30 @@ interface DeliveryRecord {
   updatedAt: string;
 }
 
-interface GroupPolicy {
-  accountId: string;
-  groupJid: string;
-  policy: "group" | "participant";
-  createdAt: string;
-  updatedAt: string;
-}
-
 interface ApiError {
   error: string;
+}
+
+interface ChatSummary {
+  accountId: string;
+  chatJid: string;
+  chatType: "direct" | "group";
+  sessionKey?: string;
+  hermesSessionId?: string;
+  createdAt?: string;
+  updatedAt: string;
+  deliveryCount: number;
+  failedCount: number;
+  lastText?: string;
+}
+
+interface ChatMessage {
+  id: string;
+  direction: "inbound" | "outbound";
+  text: string;
+  status: DeliveryRecord["status"];
+  timestamp: string;
+  record: DeliveryRecord;
 }
 
 const storageKeys = {
@@ -70,31 +72,22 @@ const storageKeys = {
 };
 
 const defaultApiUrl =
-  import.meta.env.VITE_WHATSAPP_MANAGER_API_URL?.trim() || "http://127.0.0.1:3000";
+  import.meta.env.VITE_WHATSAPP_MANAGER_API_URL?.trim() || getDefaultApiUrl();
+const defaultApiToken =
+  import.meta.env.VITE_WHATSAPP_MANAGER_API_TOKEN?.trim() || "local-dev-token";
 const appTitle =
   import.meta.env.VITE_WHATSAPP_MANAGER_UI_TITLE?.trim() || "WhatsApp Account Console";
 
 export function App() {
   const [apiUrl, setApiUrl] = useState(() => localStorage.getItem(storageKeys.apiUrl) || defaultApiUrl);
-  const [apiToken, setApiToken] = useState(() => localStorage.getItem(storageKeys.apiToken) || "");
+  const [apiToken, setApiToken] = useState(() => localStorage.getItem(storageKeys.apiToken) || defaultApiToken);
   const [accounts, setAccounts] = useState<WhatsAppAccount[]>([]);
   const [mappings, setMappings] = useState<SessionMapping[]>([]);
   const [deliveries, setDeliveries] = useState<DeliveryRecord[]>([]);
-  const [groupPolicies, setGroupPolicies] = useState<GroupPolicy[]>([]);
-  const [selectedSession, setSelectedSession] = useState<HermesSession | null>(null);
-  const [activeChatId, setActiveChatId] = useState("");
   const [activeAccountId, setActiveAccountId] = useState("");
+  const [activeChatJid, setActiveChatJid] = useState("");
   const [accountIdInput, setAccountIdInput] = useState("");
-  const [sessionAccountId, setSessionAccountId] = useState("manual");
-  const [chatIdInput, setChatIdInput] = useState("");
-  const [remapSessionId, setRemapSessionId] = useState("");
-  const [outboundAccountId, setOutboundAccountId] = useState("manual");
-  const [outboundChatId, setOutboundChatId] = useState("");
-  const [outboundText, setOutboundText] = useState("");
-  const [groupPolicyAccountId, setGroupPolicyAccountId] = useState("");
-  const [groupPolicyJid, setGroupPolicyJid] = useState("");
-  const [groupPolicyValue, setGroupPolicyValue] = useState<"group" | "participant">("group");
-  const [statusMessage, setStatusMessage] = useState("Enter the API token, then sync the current WhatsApp workspace.");
+  const [statusMessage, setStatusMessage] = useState("Workspace ready. Sync or register an account.");
   const [errorMessage, setErrorMessage] = useState("");
   const [isBusy, setIsBusy] = useState(false);
 
@@ -123,6 +116,13 @@ export function App() {
 
     return () => window.clearInterval(interval);
   }, [accounts, apiToken, apiUrl]);
+
+  useEffect(() => {
+    const firstAccount = accounts[0];
+    if (!activeAccountId && firstAccount) {
+      setActiveAccountId(firstAccount.accountId);
+    }
+  }, [accounts, activeAccountId]);
 
   async function request<T>(path: string, init?: RequestInit): Promise<T> {
     const response = await fetch(`${apiUrl}${path}`, {
@@ -156,17 +156,15 @@ export function App() {
     setErrorMessage("");
 
     try {
-      const [accountResponse, mappingResponse, deliveryResponse, groupPolicyResponse] = await Promise.all([
+      const [accountResponse, mappingResponse, deliveryResponse] = await Promise.all([
         request<{ items: WhatsAppAccount[] }>("/whatsapp/accounts"),
         request<{ items: SessionMapping[] }>("/sessions"),
         request<{ items: DeliveryRecord[] }>("/deliveries"),
-        request<{ items: GroupPolicy[] }>("/group-policies"),
       ]);
 
       setAccounts(accountResponse.items);
       setMappings(mappingResponse.items);
       setDeliveries(deliveryResponse.items);
-      setGroupPolicies(groupPolicyResponse.items);
 
       if (showMessage) {
         setStatusMessage("Workspace synced.");
@@ -181,172 +179,46 @@ export function App() {
   async function connectAccount(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!accountIdInput.trim()) {
-      setErrorMessage("Provide an account ID before connecting a WhatsApp account.");
+      setErrorMessage("Provide an account ID before registering a WhatsApp account.");
       return;
     }
 
+    const accountId = accountIdInput.trim();
     await runAction(async () => {
-      await request("/whatsapp/connect", {
+      const account = await request<WhatsAppAccount>("/whatsapp/connect", {
         method: "POST",
-        body: JSON.stringify({ accountId: accountIdInput.trim() }),
+        body: JSON.stringify({ accountId }),
       });
 
+      setAccounts((currentAccounts) => upsertAccount(currentAccounts, account));
       setAccountIdInput("");
-      setStatusMessage("WhatsApp account connected.");
+      setActiveAccountId(accountId);
+      setActiveChatJid("");
+      setStatusMessage(
+        account.qrCode
+          ? `QR ready for ${accountId}.`
+          : `Registration started for ${accountId}. Waiting for WhatsApp QR.`,
+      );
       await refreshData(false);
     });
   }
 
   async function disconnectAccount(accountId: string) {
     await runAction(async () => {
-      await request(`/whatsapp/accounts/${encodeURIComponent(accountId)}/disconnect`, {
+      const result = await request<WhatsAppAccount>(`/whatsapp/accounts/${encodeURIComponent(accountId)}/disconnect`, {
         method: "POST",
       });
 
-      setStatusMessage(`Account ${accountId} disconnected.`);
-      await refreshData(false);
-    });
-  }
-
-  async function createSession(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    if (!chatIdInput.trim()) {
-      setErrorMessage("Provide a WhatsApp chat ID before creating or loading a session.");
-      return;
-    }
-
-    await runAction(async () => {
-      const session = await request<HermesSession>(
-        `/chats/${encodeURIComponent(chatIdInput.trim())}/session`,
-        {
-          method: "POST",
-          body: JSON.stringify({ accountId: sessionAccountId.trim() || "manual" }),
-        },
+      setAccounts((currentAccounts) => currentAccounts.filter((account) => account.accountId !== accountId));
+      if (activeAccountId === accountId) {
+        setActiveAccountId("");
+        setActiveChatJid("");
+      }
+      setStatusMessage(
+        result.lastError
+          ? `Account ${accountId} disconnected locally. ${result.lastError}`
+          : `Account ${accountId} disconnected.`,
       );
-
-      setSelectedSession(session);
-      setActiveChatId(chatIdInput.trim());
-      setActiveAccountId(session.accountId);
-      setStatusMessage(`Hermes session ready for ${chatIdInput.trim()}.`);
-      setChatIdInput("");
-      await refreshData(false);
-    });
-  }
-
-  async function inspectSession(mapping: SessionMapping) {
-    await runAction(async () => {
-      const query = new URLSearchParams({
-        accountId: mapping.accountId,
-        chatType: mapping.chatType,
-      });
-      const session = await request<HermesSession>(
-        `/chats/${encodeURIComponent(mapping.chatJid)}/session?${query.toString()}`,
-      );
-      setSelectedSession(session);
-      setActiveChatId(mapping.chatJid);
-      setActiveAccountId(mapping.accountId);
-      setStatusMessage(`Loaded session for ${mapping.chatJid}.`);
-    });
-  }
-
-  async function resetSession(mapping: SessionMapping) {
-    await runAction(async () => {
-      const session = await request<HermesSession>(
-        `/chats/${encodeURIComponent(mapping.chatJid)}/session/reset`,
-        {
-          method: "POST",
-          body: JSON.stringify({
-            accountId: mapping.accountId,
-            chatType: mapping.chatType,
-          }),
-        },
-      );
-
-      setSelectedSession(session);
-      setActiveChatId(mapping.chatJid);
-      setActiveAccountId(mapping.accountId);
-      setStatusMessage(`Session reset for ${mapping.chatJid}.`);
-      await refreshData(false);
-    });
-  }
-
-  async function remapSession(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    if (!activeChatId) {
-      setErrorMessage("Select a chat mapping before remapping the Hermes session.");
-      return;
-    }
-
-    if (!remapSessionId.trim()) {
-      setErrorMessage("Provide the target Hermes session ID.");
-      return;
-    }
-
-    await runAction(async () => {
-      await request(`/chats/${encodeURIComponent(activeChatId)}/session/remap`, {
-        method: "POST",
-        body: JSON.stringify({
-          accountId: activeAccountId || "manual",
-          hermesSessionId: remapSessionId.trim(),
-        }),
-      });
-
-      setRemapSessionId("");
-      setStatusMessage(`Session remapped for ${activeChatId}.`);
-      await refreshData(false);
-    });
-  }
-
-  async function sendOutboundMessage(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    if (!outboundChatId.trim() || !outboundText.trim()) {
-      setErrorMessage("Provide both a chat ID and message text before queueing an outbound message.");
-      return;
-    }
-
-    await runAction(async () => {
-      await request("/messages/outbound", {
-        method: "POST",
-        body: JSON.stringify({
-          accountId: outboundAccountId.trim() || "manual",
-          chatId: outboundChatId.trim(),
-          text: outboundText.trim(),
-        }),
-      });
-
-      setOutboundText("");
-      setStatusMessage(`Outbound message queued for ${outboundChatId.trim()}.`);
-    });
-  }
-
-  async function retryDelivery(deliveryId: string) {
-    await runAction(async () => {
-      await request(`/deliveries/${encodeURIComponent(deliveryId)}/retry`, {
-        method: "POST",
-      });
-      setStatusMessage("Delivery retry queued.");
-      await refreshData(false);
-    });
-  }
-
-  async function saveGroupPolicy(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    if (!groupPolicyAccountId.trim() || !groupPolicyJid.trim()) {
-      setErrorMessage("Provide both account ID and group JID before saving a group policy.");
-      return;
-    }
-
-    await runAction(async () => {
-      await request("/group-policies", {
-        method: "PUT",
-        body: JSON.stringify({
-          accountId: groupPolicyAccountId.trim(),
-          groupJid: groupPolicyJid.trim(),
-          policy: groupPolicyValue,
-        }),
-      });
-
-      setStatusMessage(`Group policy saved for ${groupPolicyJid.trim()}.`);
       await refreshData(false);
     });
   }
@@ -369,369 +241,253 @@ export function App() {
     }
   }
 
+  function openAccount(accountId: string) {
+    setActiveAccountId(accountId);
+    setActiveChatJid("");
+    setStatusMessage(`Opened ${accountId}.`);
+  }
+
   const connectedAccounts = accounts.filter((account) => account.status === "connected").length;
-  const selectedMapping = mappings.find(
-    (mapping) => mapping.chatJid === activeChatId && mapping.accountId === activeAccountId,
-  );
-  const failedDeliveries = deliveries.filter((delivery) => delivery.status === "failed");
+  const activeAccount = accounts.find((account) => account.accountId === activeAccountId) ?? null;
+  const activeChats = buildChatSummaries(activeAccountId, mappings, deliveries);
+  const activeChat = activeChats.find((chat) => chat.chatJid === activeChatJid) ?? null;
+  const activeChatMessages = activeChat
+    ? buildChatMessages(deliveries.filter(
+        (delivery) => delivery.accountId === activeAccountId && delivery.chatJid === activeChat.chatJid,
+      ))
+    : [];
+  const pendingQrAccount =
+    accounts.find((account) => account.accountId === activeAccountId && account.qrCode) ??
+    accounts.find((account) => account.qrCode) ??
+    null;
+  const activeFailedCount = deliveries.filter(
+    (delivery) => delivery.accountId === activeAccountId && delivery.status === "failed",
+  ).length;
 
   return (
     <div className="shell">
-      <div className="hero">
-        <div className="hero-copy">
-          <span className="eyebrow">Operator surface</span>
+      <header className="topbar">
+        <div>
+          <span className="eyebrow">WhatsApp manager</span>
           <h1>{appTitle}</h1>
-          <p>
-            Manage WhatsApp accounts, inspect live chat-to-Hermes mappings, and test routing from a
-            dedicated browser UI instead of driving the workspace only from the terminal.
-          </p>
         </div>
-        <div className="hero-metrics">
-          <MetricCard label="Connected accounts" value={String(connectedAccounts)} />
-          <MetricCard label="Tracked mappings" value={String(mappings.length)} />
-          <MetricCard label="API endpoint" value={stripProtocol(apiUrl)} />
-        </div>
-      </div>
+        <button className="secondary-button" onClick={() => void refreshData()} disabled={isBusy}>
+          Sync
+        </button>
+      </header>
 
-      <div className="top-grid">
-        <section className="panel">
-          <div className="panel-header">
-            <div>
-              <span className="panel-kicker">Connection</span>
-              <h2>Workspace settings</h2>
-            </div>
-            <button className="secondary-button" onClick={() => void refreshData()} disabled={isBusy}>
-              Sync
-            </button>
-          </div>
-
-          <form className="stack" onSubmit={(event) => event.preventDefault()}>
-            <label className="field">
-              <span>API base URL</span>
-              <input value={apiUrl} onChange={(event) => setApiUrl(event.target.value)} />
-            </label>
-            <label className="field">
-              <span>API token</span>
-              <input
-                type="password"
-                value={apiToken}
-                onChange={(event) => setApiToken(event.target.value)}
-                placeholder="local-dev-token"
-              />
-            </label>
-          </form>
-
-          <div className="status-strip">
-            <span className="status-label">Status</span>
-            <p>{errorMessage || statusMessage}</p>
-          </div>
-        </section>
-
-        <section className="panel">
-          <div className="panel-header">
-            <div>
-              <span className="panel-kicker">Accounts</span>
-              <h2>WhatsApp fleet</h2>
-            </div>
-          </div>
-
-          <form className="inline-form" onSubmit={connectAccount}>
-            <input
-              value={accountIdInput}
-              onChange={(event) => setAccountIdInput(event.target.value)}
-              placeholder="ops-main-phone"
-            />
-            <button type="submit" disabled={isBusy}>
-              Connect account
-            </button>
-          </form>
-
-          <div className="account-grid">
-            {accounts.length === 0 ? (
-              <EmptyState
-                title="No accounts tracked yet"
-                description="Connect the first WhatsApp account to seed the operator workspace."
-              />
-            ) : (
-              accounts.map((account) => (
-                <article key={account.accountId} className="account-card">
-                  <div className="account-card-header">
-                    <div>
-                      <span className={`badge badge-${account.status}`}>{account.status}</span>
-                      <h3>{account.accountId}</h3>
-                    </div>
-                    <button
-                      className="secondary-button"
-                      onClick={() => void disconnectAccount(account.accountId)}
-                      disabled={isBusy || account.status === "disconnected"}
-                    >
-                      Disconnect
-                    </button>
-                  </div>
-                  <p className="mono">
-                    {account.connectedAt
-                      ? formatTimestamp(account.connectedAt)
-                      : account.disconnectedAt
-                        ? formatTimestamp(account.disconnectedAt)
-                        : "No active session"}
-                  </p>
-                  {account.qrCode ? (
-                    <div className="qr-panel" aria-label={`Pairing QR for ${account.accountId}`}>
-                      <QRCodeSVG value={account.qrCode} size={164} marginSize={2} />
-                    </div>
-                  ) : null}
-                  {account.lastError ? <p className="error-text">{account.lastError}</p> : null}
-                </article>
-              ))
-            )}
-          </div>
-        </section>
-      </div>
-
-      <div className="content-grid">
-        <section className="panel">
-          <div className="panel-header">
-            <div>
-              <span className="panel-kicker">Sessions</span>
-              <h2>Chat routing map</h2>
-            </div>
-          </div>
-
-          <form className="inline-form" onSubmit={createSession}>
-            <input
-              value={sessionAccountId}
-              onChange={(event) => setSessionAccountId(event.target.value)}
-              placeholder="Account ID"
-            />
-            <input
-              value={chatIdInput}
-              onChange={(event) => setChatIdInput(event.target.value)}
-              placeholder="15551234567@s.whatsapp.net"
-            />
-            <button type="submit" disabled={isBusy}>
-              Create or load
-            </button>
-          </form>
-
-          <div className="mapping-list">
-            {mappings.length === 0 ? (
-              <EmptyState
-                title="No chat mappings yet"
-                description="Inbound traffic or manual session creation will populate this table."
-              />
-            ) : (
-              mappings.map((mapping) => (
-                <button
-                  key={mapping.sessionKey}
-                  className={`mapping-card${
-                    activeChatId === mapping.chatJid && activeAccountId === mapping.accountId
-                      ? " mapping-card-active"
-                      : ""
-                  }`}
-                  onClick={() => void inspectSession(mapping)}
-                >
-                  <div>
-                    <h3>{mapping.chatJid}</h3>
-                    <p className="mono">{mapping.accountId}</p>
-                    <p className="mono">{mapping.hermesSessionId}</p>
-                  </div>
-                  <div className="mapping-card-meta">
-                    <span>{mapping.chatType}</span>
-                    <span>Updated {formatTimestamp(mapping.updatedAt)}</span>
-                    <span>Created {formatTimestamp(mapping.createdAt)}</span>
-                  </div>
-                </button>
-              ))
-            )}
-          </div>
-        </section>
-
-        <section className="panel">
-          <div className="panel-header">
-            <div>
-              <span className="panel-kicker">Inspector</span>
-              <h2>Session controls</h2>
-            </div>
-            {selectedMapping ? (
-              <button className="secondary-button" onClick={() => void resetSession(selectedMapping)} disabled={isBusy}>
-                Reset
-              </button>
-            ) : null}
-          </div>
-
-          {selectedSession ? (
-            <div className="stack">
-              <div className="detail-card">
-                <div className="detail-row">
-                  <span>Session ID</span>
-                  <strong className="mono">{selectedSession.id}</strong>
-                </div>
-                <div className="detail-row">
-                  <span>Account</span>
-                  <strong className="mono">{selectedSession.accountId}</strong>
-                </div>
-                <div className="detail-row">
-                  <span>Chat</span>
-                  <strong className="mono">{selectedSession.chatJid}</strong>
-                </div>
-                <div className="detail-row">
-                  <span>Route</span>
-                  <strong className="mono">{selectedSession.sessionKey}</strong>
-                </div>
-                <div className="detail-row">
-                  <span>Status</span>
-                  <strong>{selectedSession.status}</strong>
-                </div>
-                <div className="detail-row">
-                  <span>Created</span>
-                  <strong>{formatTimestamp(selectedSession.createdAt)}</strong>
-                </div>
-                <div className="detail-row">
-                  <span>Last activity</span>
-                  <strong>{formatTimestamp(selectedSession.lastActivityAt)}</strong>
-                </div>
-              </div>
-
-              <form className="stack" onSubmit={remapSession}>
-                <label className="field">
-                  <span>Remap to Hermes session ID</span>
-                  <input
-                    value={remapSessionId}
-                    onChange={(event) => setRemapSessionId(event.target.value)}
-                    placeholder="hermes_existing_session"
-                  />
-                </label>
-                <button type="submit" disabled={isBusy}>
-                  Remap session
-                </button>
-              </form>
-            </div>
-          ) : (
-            <EmptyState
-              title="No session selected"
-              description="Choose a mapping or create a new chat session to inspect its Hermes state."
-            />
-          )}
-        </section>
-      </div>
-
-      <section className="panel">
-        <div className="panel-header">
-          <div>
-            <span className="panel-kicker">Outbound</span>
-            <h2>Manual message queue</h2>
-          </div>
-        </div>
-
-        <form className="outbound-form" onSubmit={sendOutboundMessage}>
+      <section className="connection-strip" aria-label="Workspace connection">
+        <label className="field compact-field">
+          <span>API base URL</span>
+          <input value={apiUrl} onChange={(event) => setApiUrl(event.target.value)} />
+        </label>
+        <label className="field compact-field">
+          <span>API token</span>
           <input
-            value={outboundAccountId}
-            onChange={(event) => setOutboundAccountId(event.target.value)}
-            placeholder="Account ID"
+            type="password"
+            value={apiToken}
+            onChange={(event) => setApiToken(event.target.value)}
+            placeholder="local-dev-token"
           />
-          <input
-            value={outboundChatId}
-            onChange={(event) => setOutboundChatId(event.target.value)}
-            placeholder="Destination chat ID"
-          />
-          <textarea
-            value={outboundText}
-            onChange={(event) => setOutboundText(event.target.value)}
-            placeholder="Send a test message through the WhatsApp gateway"
-            rows={4}
-          />
-          <button type="submit" disabled={isBusy}>
-            Queue outbound message
-          </button>
-        </form>
+        </label>
+        <div className={`status-strip${errorMessage ? " status-strip-error" : ""}`}>
+          <span className="status-label">Status</span>
+          <p>{errorMessage || statusMessage}</p>
+        </div>
       </section>
 
-      <div className="content-grid">
-        <section className="panel">
-          <div className="panel-header">
+      <main className="workspace simple-workspace">
+        <aside className="account-rail" aria-label="Accounts">
+          <div className="section-heading">
             <div>
-              <span className="panel-kicker">Failures</span>
-              <h2>Delivery retry queue</h2>
+              <span className="panel-kicker">Accounts</span>
+              <h2>Accounts</h2>
             </div>
+            <span className="count-pill">{connectedAccounts}/{accounts.length} online</span>
           </div>
 
-          <div className="mapping-list">
-            {failedDeliveries.length === 0 ? (
-              <EmptyState title="No failed deliveries" description="Failed Hermes or WhatsApp sends will appear here." />
-            ) : (
-              failedDeliveries.map((delivery) => (
-                <article key={delivery.id} className="detail-card">
-                  <div className="detail-row">
-                    <span>{delivery.accountId}</span>
-                    <strong className="mono">{delivery.chatJid}</strong>
-                  </div>
-                  <p>{delivery.failureStage === "hermes" ? "Hermes turn failed" : "WhatsApp send failed"}</p>
-                  <p>{delivery.error || "Delivery failed"}</p>
-                  <p className="mono">{delivery.outboundText || delivery.inboundText || "(no retry payload)"}</p>
-                  <button
-                    className="secondary-button"
-                    onClick={() => void retryDelivery(delivery.id)}
-                    disabled={isBusy || !(delivery.outboundText.trim() || delivery.inboundText?.trim())}
-                  >
-                    Retry
-                  </button>
-                </article>
-              ))
-            )}
-          </div>
-        </section>
-
-        <section className="panel">
-          <div className="panel-header">
-            <div>
-              <span className="panel-kicker">Groups</span>
-              <h2>Routing policy</h2>
-            </div>
-          </div>
-
-          <form className="stack" onSubmit={saveGroupPolicy}>
+          <form className="register-form" onSubmit={connectAccount}>
             <label className="field">
-              <span>Account ID</span>
-              <input value={groupPolicyAccountId} onChange={(event) => setGroupPolicyAccountId(event.target.value)} />
-            </label>
-            <label className="field">
-              <span>Group JID</span>
-              <input value={groupPolicyJid} onChange={(event) => setGroupPolicyJid(event.target.value)} />
-            </label>
-            <label className="field">
-              <span>Policy</span>
-              <select value={groupPolicyValue} onChange={(event) => setGroupPolicyValue(event.target.value as "group" | "participant")}>
-                <option value="group">One session per group</option>
-                <option value="participant">One session per participant</option>
-              </select>
+              <span>Register account</span>
+              <input
+                value={accountIdInput}
+                onChange={(event) => setAccountIdInput(event.target.value)}
+                placeholder="account-name"
+              />
             </label>
             <button type="submit" disabled={isBusy}>
-              Save policy
+              Generate QR
             </button>
           </form>
 
-          <div className="mapping-list">
-            {groupPolicies.map((policy) => (
-              <div className="detail-card" key={`${policy.accountId}:${policy.groupJid}`}>
-                <div className="detail-row">
-                  <span>{policy.accountId}</span>
-                  <strong>{policy.policy}</strong>
+          <div className="account-list">
+            {accounts.length === 0 ? (
+              <EmptyState title="No accounts" description="Register an account to create a QR pairing session." />
+            ) : (
+              accounts.map((account) => (
+                <div
+                  key={account.accountId}
+                  className={`account-row${account.accountId === activeAccountId ? " account-row-active" : ""}`}
+                >
+                  <button className="account-open" onClick={() => openAccount(account.accountId)}>
+                    <span className={`status-dot status-dot-${account.status}`} />
+                    <span>
+                      <strong>{account.accountId}</strong>
+                      <small>{account.status}</small>
+                    </span>
+                  </button>
+                  <button
+                    className="text-button danger-button"
+                    onClick={() => void disconnectAccount(account.accountId)}
+                    disabled={isBusy || account.status === "disconnected"}
+                  >
+                    Disconnect
+                  </button>
                 </div>
-                <p className="mono">{policy.groupJid}</p>
+              ))
+            )}
+          </div>
+        </aside>
+
+        <section className="account-workspace" aria-label="Selected account workspace">
+          <div className="account-summary">
+            <div>
+              <span className="panel-kicker">Open account</span>
+              <h2>{activeAccount?.accountId ?? "No account selected"}</h2>
+              <p>
+                {activeAccount
+                  ? getAccountActivity(activeAccount)
+                  : "Choose an account to see chats and message metadata."}
+              </p>
+            </div>
+            {activeAccount ? <span className={`badge badge-${activeAccount.status}`}>{activeAccount.status}</span> : null}
+          </div>
+
+          {pendingQrAccount ? (
+            <section className="registration-band">
+              <div className="qr-layout">
+                <div className="qr-panel" aria-label={`Pairing QR for ${pendingQrAccount.accountId}`}>
+                  <QRCodeSVG value={pendingQrAccount.qrCode ?? ""} size={164} marginSize={2} />
+                </div>
+                <div>
+                  <span className="panel-kicker">Registration</span>
+                  <h3>{pendingQrAccount.accountId}</h3>
+                  <p>Scan this code from WhatsApp to finish pairing this account.</p>
+                </div>
               </div>
-            ))}
+            </section>
+          ) : null}
+
+          <div className="summary-strip">
+            <Metric label="Chats" value={String(activeChats.length)} />
+            <Metric label="Deliveries" value={String(deliveries.filter((delivery) => delivery.accountId === activeAccountId).length)} />
+            {activeFailedCount > 0 ? (
+              <Metric label="Failures" value={String(activeFailedCount)} tone="danger" />
+            ) : (
+              <Metric label="Failures" value="0" />
+            )}
+          </div>
+
+          <div className="chat-workspace">
+            <section className="chat-list-pane">
+              <div className="section-heading">
+                <div>
+                  <span className="panel-kicker">Chats</span>
+                  <h3>Known chats</h3>
+                </div>
+              </div>
+
+              <div className="chat-list">
+                {!activeAccount ? (
+                  <EmptyState title="Select an account" description="Chats are scoped to the opened account." />
+                ) : activeChats.length === 0 ? (
+                  <EmptyState title="No chats yet" description="Chats appear after inbound WhatsApp activity is routed." />
+                ) : (
+                  activeChats.map((chat) => (
+                    <button
+                      key={chat.chatJid}
+                      className={`chat-row${chat.chatJid === activeChatJid ? " chat-row-active" : ""}`}
+                      onClick={() => setActiveChatJid(chat.chatJid)}
+                    >
+                      <span>
+                        <strong>{chat.chatJid}</strong>
+                        <small>{chat.lastText ?? chat.hermesSessionId ?? "No message preview"}</small>
+                      </span>
+                      <span className="chat-meta">
+                        <span>{chat.chatType}</span>
+                        <span>{formatTimestamp(chat.updatedAt)}</span>
+                      </span>
+                    </button>
+                  ))
+                )}
+              </div>
+            </section>
+
+            <section className="chat-detail-pane">
+              <div className="section-heading">
+                <div>
+                  <span className="panel-kicker">Chat detail</span>
+                  <h3>{activeChat?.chatJid ?? "No chat selected"}</h3>
+                </div>
+              </div>
+
+              {activeChat ? (
+                <div className="chat-detail-content">
+                  <dl className="detail-list">
+                    <div>
+                      <dt>Type</dt>
+                      <dd>{activeChat.chatType}</dd>
+                    </div>
+                    <div>
+                      <dt>Hermes session</dt>
+                      <dd>{activeChat.hermesSessionId ?? "Not created"}</dd>
+                    </div>
+                    <div>
+                      <dt>Session key</dt>
+                      <dd>{activeChat.sessionKey ?? "Not available"}</dd>
+                    </div>
+                    <div>
+                      <dt>Last activity</dt>
+                      <dd>{formatTimestamp(activeChat.updatedAt)}</dd>
+                    </div>
+                    <div>
+                      <dt>Failed deliveries</dt>
+                      <dd>{activeChat.failedCount}</dd>
+                    </div>
+                  </dl>
+
+                  <div className="message-list">
+                    <div className="message-list-header">
+                      <span className="panel-kicker">Messages</span>
+                      <span className="count-pill">{activeChatMessages.length}</span>
+                    </div>
+                    {activeChatMessages.length === 0 ? (
+                      <EmptyState
+                        title="No stored messages"
+                        description="Only routed delivery records are available in this version."
+                      />
+                    ) : (
+                      activeChatMessages.map((message) => (
+                        <article key={message.id} className={`message-row message-row-${message.direction}`}>
+                          <div>
+                            <strong>{message.direction === "inbound" ? "Inbound" : "Hermes reply"}</strong>
+                            <time>{formatTimestamp(message.timestamp)}</time>
+                          </div>
+                          <p>{message.text}</p>
+                          <span className={`delivery-status delivery-status-${message.status}`}>{message.status}</span>
+                          {message.record.error ? <p className="error-text">{message.record.error}</p> : null}
+                        </article>
+                      ))
+                    )}
+                  </div>
+                </div>
+              ) : (
+                <EmptyState title="Open a chat" description="Select a chat to see stored messages and metadata." />
+              )}
+            </section>
           </div>
         </section>
-      </div>
-    </div>
-  );
-}
-
-function MetricCard({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="metric-card">
-      <span>{label}</span>
-      <strong>{value}</strong>
+      </main>
     </div>
   );
 }
@@ -745,12 +501,130 @@ function EmptyState({ title, description }: { title: string; description: string
   );
 }
 
+function Metric({ label, value, tone }: { label: string; value: string; tone?: "danger" }) {
+  return (
+    <div className={`metric-row${tone ? ` metric-row-${tone}` : ""}`}>
+      <span>{label}</span>
+      <strong>{value}</strong>
+    </div>
+  );
+}
+
+function buildChatSummaries(
+  accountId: string,
+  mappings: SessionMapping[],
+  deliveries: DeliveryRecord[],
+): ChatSummary[] {
+  if (!accountId) {
+    return [];
+  }
+
+  const chats = new Map<string, ChatSummary>();
+
+  for (const mapping of mappings.filter((item) => item.accountId === accountId)) {
+    chats.set(mapping.chatJid, {
+      accountId: mapping.accountId,
+      chatJid: mapping.chatJid,
+      chatType: mapping.chatType,
+      sessionKey: mapping.sessionKey,
+      hermesSessionId: mapping.hermesSessionId,
+      createdAt: mapping.createdAt,
+      updatedAt: mapping.updatedAt,
+      deliveryCount: 0,
+      failedCount: 0,
+    });
+  }
+
+  for (const delivery of deliveries.filter((item) => item.accountId === accountId)) {
+    const current = chats.get(delivery.chatJid);
+    const updatedAt = maxTimestamp(current?.updatedAt, delivery.updatedAt);
+    const lastText = delivery.outboundText || delivery.inboundText || current?.lastText;
+    chats.set(delivery.chatJid, {
+      accountId: delivery.accountId,
+      chatJid: delivery.chatJid,
+      chatType: delivery.chatType,
+      sessionKey: current?.sessionKey ?? delivery.sessionKey,
+      createdAt: current?.createdAt ?? delivery.createdAt,
+      updatedAt,
+      deliveryCount: (current?.deliveryCount ?? 0) + 1,
+      failedCount: (current?.failedCount ?? 0) + (delivery.status === "failed" ? 1 : 0),
+      ...(current?.hermesSessionId ? { hermesSessionId: current.hermesSessionId } : {}),
+      ...(lastText ? { lastText } : {}),
+    });
+  }
+
+  return [...chats.values()].sort((a, b) => Date.parse(b.updatedAt) - Date.parse(a.updatedAt));
+}
+
+function buildChatMessages(deliveries: DeliveryRecord[]): ChatMessage[] {
+  return deliveries
+    .flatMap((delivery): ChatMessage[] => {
+      const messages: ChatMessage[] = [];
+      if (delivery.inboundText?.trim()) {
+        messages.push({
+          id: `${delivery.id}:inbound`,
+          direction: "inbound",
+          text: delivery.inboundText,
+          status: delivery.status,
+          timestamp: delivery.createdAt,
+          record: delivery,
+        });
+      }
+      if (delivery.outboundText.trim()) {
+        messages.push({
+          id: `${delivery.id}:outbound`,
+          direction: "outbound",
+          text: delivery.outboundText,
+          status: delivery.status,
+          timestamp: delivery.updatedAt,
+          record: delivery,
+        });
+      }
+      return messages;
+    })
+    .sort((a, b) => Date.parse(a.timestamp) - Date.parse(b.timestamp));
+}
+
 function formatTimestamp(value: string) {
   return new Date(value).toLocaleString();
 }
 
-function stripProtocol(value: string) {
-  return value.replace(/^https?:\/\//, "");
+function getDefaultApiUrl() {
+  if (typeof window === "undefined") {
+    return "http://127.0.0.1:3000";
+  }
+
+  return `${window.location.protocol}//${window.location.hostname}:3000`;
+}
+
+function maxTimestamp(left: string | undefined, right: string) {
+  if (!left) {
+    return right;
+  }
+
+  return Date.parse(left) > Date.parse(right) ? left : right;
+}
+
+function upsertAccount(accounts: WhatsAppAccount[], nextAccount: WhatsAppAccount) {
+  const accountIndex = accounts.findIndex((account) => account.accountId === nextAccount.accountId);
+
+  if (accountIndex === -1) {
+    return [nextAccount, ...accounts];
+  }
+
+  return accounts.map((account, index) => (index === accountIndex ? nextAccount : account));
+}
+
+function getAccountActivity(account: WhatsAppAccount) {
+  if (account.connectedAt) {
+    return `Connected ${formatTimestamp(account.connectedAt)}`;
+  }
+
+  if (account.disconnectedAt) {
+    return `Disconnected ${formatTimestamp(account.disconnectedAt)}`;
+  }
+
+  return "No active WhatsApp session yet.";
 }
 
 function normalizeError(error: unknown) {

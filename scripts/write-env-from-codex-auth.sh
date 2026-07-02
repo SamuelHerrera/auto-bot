@@ -17,12 +17,14 @@ if [ ! -f "${AUTH_FILE}" ]; then
 fi
 
 OPENAI_API_KEY_VALUE="$(jq -r '.OPENAI_API_KEY // empty' "${AUTH_FILE}")"
+ANTHROPIC_API_KEY_VALUE="${ANTHROPIC_API_KEY:-}"
 AUTH_MODE_VALUE="$(jq -r '.auth_mode // empty' "${AUTH_FILE}")"
 ACCESS_TOKEN_VALUE="$(jq -r '.tokens.access_token // empty' "${AUTH_FILE}")"
 REFRESH_TOKEN_VALUE="$(jq -r '.tokens.refresh_token // empty' "${AUTH_FILE}")"
 ID_TOKEN_VALUE="$(jq -r '.tokens.id_token // empty' "${AUTH_FILE}")"
 ACCOUNT_ID_VALUE="$(jq -r '.tokens.account_id // empty' "${AUTH_FILE}")"
 SSH_AUTHORIZED_KEY_VALUE=""
+SSH_AUTHORIZED_KEYS_VALUE="${SSH_AUTHORIZED_KEYS:-}"
 ZEROTIER_NETWORK_ID_VALUE=""
 
 if [ -f "${SSH_PUBLIC_KEY_FILE}" ]; then
@@ -45,12 +47,13 @@ CODEX_REFRESH_TOKEN=$(quote_value "${REFRESH_TOKEN_VALUE}")
 CODEX_ID_TOKEN=$(quote_value "${ID_TOKEN_VALUE}")
 CODEX_ACCOUNT_ID=$(quote_value "${ACCOUNT_ID_VALUE}")
 SSH_AUTHORIZED_KEY=$(quote_value "${SSH_AUTHORIZED_KEY_VALUE}")
+SSH_AUTHORIZED_KEYS=$(quote_value "${SSH_AUTHORIZED_KEYS_VALUE}")
 SSH_PORT="2222"
 AUTO_BOT_DATA_DIR="./data"
 ZEROTIER_AUTOSTART="1"
 ZEROTIER_NETWORK_ID=$(quote_value "${ZEROTIER_NETWORK_ID_VALUE}")
-OPENAI_API_KEY=""
-ANTHROPIC_API_KEY=""
+OPENAI_API_KEY=$(quote_value "${OPENAI_API_KEY_VALUE}")
+ANTHROPIC_API_KEY=$(quote_value "${ANTHROPIC_API_KEY_VALUE}")
 EOF
 elif [ -n "${OPENAI_API_KEY_VALUE}" ]; then
   cat > "${ENV_FILE}" <<EOF
@@ -60,12 +63,13 @@ CODEX_REFRESH_TOKEN=""
 CODEX_ID_TOKEN=""
 CODEX_ACCOUNT_ID=""
 SSH_AUTHORIZED_KEY=$(quote_value "${SSH_AUTHORIZED_KEY_VALUE}")
+SSH_AUTHORIZED_KEYS=$(quote_value "${SSH_AUTHORIZED_KEYS_VALUE}")
 SSH_PORT="2222"
 AUTO_BOT_DATA_DIR="./data"
 ZEROTIER_AUTOSTART="1"
 ZEROTIER_NETWORK_ID=$(quote_value "${ZEROTIER_NETWORK_ID_VALUE}")
 OPENAI_API_KEY=$(quote_value "${OPENAI_API_KEY_VALUE}")
-ANTHROPIC_API_KEY=""
+ANTHROPIC_API_KEY=$(quote_value "${ANTHROPIC_API_KEY_VALUE}")
 EOF
 else
   echo "No supported Codex auth data found in ${AUTH_FILE}" >&2

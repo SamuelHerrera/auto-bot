@@ -6,7 +6,7 @@ import makeWASocket, {
   type WAMessageContent,
   useMultiFileAuthState,
 } from "@whiskeysockets/baileys";
-import { mkdir } from "node:fs/promises";
+import { mkdir, rm } from "node:fs/promises";
 import path from "node:path";
 import pino from "pino";
 import type {
@@ -64,7 +64,7 @@ export class BaileysWhatsAppGateway implements WhatsAppGateway {
       return existing.status;
     }
 
-    const accountPath = path.join(this.stateDir, sanitizePathSegment(accountId));
+    const accountPath = this.getAccountPath(accountId);
     await mkdir(accountPath, { recursive: true });
 
     const { state, saveCreds } = await useMultiFileAuthState(accountPath);
@@ -101,28 +101,39 @@ export class BaileysWhatsAppGateway implements WhatsAppGateway {
 
   async disconnectAccount(accountId: string): Promise<WhatsAppAccountStatus> {
     const runtime = this.accounts.get(accountId);
+    const accountPath = this.getAccountPath(accountId);
     if (!runtime) {
+      await rm(accountPath, { recursive: true, force: true });
       return {
         accountId,
         status: "disconnected",
         disconnectedAt: new Date().toISOString(),
+        lastError: "No active WhatsApp socket was available; local auth state was removed.",
       };
     }
 
     runtime.reconnecting = false;
-    await runtime.socket.logout().catch(() => runtime.socket.end(undefined));
+    let logoutError: string | undefined;
+    await runtime.socket.logout().catch((error: unknown) => {
+      logoutError = error instanceof Error ? error.message : "WhatsApp logout failed.";
+      runtime.socket.end(undefined);
+    });
+    await rm(accountPath, { recursive: true, force: true });
 
-    runtime.status = {
+    const status: WhatsAppAccountStatus = {
       accountId,
       status: "disconnected",
       disconnectedAt: new Date().toISOString(),
+      ...(logoutError ? { lastError: logoutError } : {}),
     };
+    runtime.status = status;
+    this.accounts.delete(accountId);
 
     if (this.lastActiveAccountId === accountId) {
       this.lastActiveAccountId = null;
     }
 
-    return runtime.status;
+    return status;
   }
 
   async sendMessage(message: OutboundWhatsAppMessage): Promise<void> {
@@ -358,6 +369,10 @@ export class BaileysWhatsAppGateway implements WhatsAppGateway {
     return (
       [...this.accounts.values()].find((account) => account.status.status === "connected") ?? null
     );
+  }
+
+  private getAccountPath(accountId: string) {
+    return path.join(this.stateDir, sanitizePathSegment(accountId));
   }
 }
 
