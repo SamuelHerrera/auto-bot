@@ -454,6 +454,11 @@ export class BaileysWhatsAppGateway implements WhatsAppGateway {
         continue;
       }
 
+      if (entry.name.startsWith("pending-")) {
+        await rm(this.getAccountPath(entry.name), { recursive: true, force: true });
+        continue;
+      }
+
       await this.initializeAccountRuntime(entry.name, entry.name.startsWith("pending-")).catch((error: unknown) => {
         this.accounts.set(entry.name, {
           accountId: entry.name,

@@ -15,7 +15,7 @@ import { SqliteBridgeStateStore } from "./services/sqlite-bridge-state-store.js"
 import { AppEventBus } from "./services/event-bus.js";
 import { evaluateNumberRules, recordBlockedNumberDelivery } from "./services/number-rules.js";
 import type { WhatsAppGateway } from "./services/whatsapp-service.js";
-import type { WhatsAppAccountStatus } from "./domain/types.js";
+import type { AuditLogInput, WhatsAppAccountStatus } from "./domain/types.js";
 
 export interface AppServices {
   hermesAdapter: HermesAdapter;
@@ -42,13 +42,20 @@ export function buildServices(config: AppConfig): AppServices {
     bridgeStore instanceof SqliteBridgeStateStore ? bridgeStore : undefined,
   );
 
+  function recordAuditLog(input: AuditLogInput) {
+    if (bridgeStore instanceof SqliteBridgeStateStore) {
+      bridgeStore.recordAuditLog(input);
+      eventBus.publish("logs");
+    }
+  }
+
   whatsappGateway.onStatusChange?.((status) => {
     const createdDefaultRule = ensureDefaultDenyAllNumberRule(
       bridgeStore instanceof SqliteBridgeStateStore ? bridgeStore : undefined,
       status,
     );
-    if (bridgeStore instanceof SqliteBridgeStateStore) {
-      bridgeStore.recordAuditLog({
+    if (!isPendingAccountId(status.accountId)) {
+      recordAuditLog({
         action: "whatsapp.status-change",
         resourceType: "whatsapp-account",
         resourceId: status.accountId,
@@ -71,7 +78,7 @@ export function buildServices(config: AppConfig): AppServices {
     const decision = evaluateNumberRules(numberRuleStore, event);
     if (!decision.allowed) {
       recordBlockedNumberDelivery(deliveryStore, event, decision.reason ?? "Blocked by number rule");
-      bridgeStore instanceof SqliteBridgeStateStore && bridgeStore.recordAuditLog({
+      recordAuditLog({
         action: "message.inbound",
         outcome: "failure",
         resourceType: "whatsapp-message",
@@ -110,7 +117,7 @@ export function buildServices(config: AppConfig): AppServices {
         });
       }
       console.error("Hermes inbound turn failed", error);
-      bridgeStore instanceof SqliteBridgeStateStore && bridgeStore.recordAuditLog({
+      recordAuditLog({
         action: "message.inbound",
         outcome: "failure",
         resourceType: "whatsapp-message",
@@ -126,7 +133,7 @@ export function buildServices(config: AppConfig): AppServices {
     }
 
     if (result.duplicate || !result.reply) {
-      bridgeStore instanceof SqliteBridgeStateStore && bridgeStore.recordAuditLog({
+      recordAuditLog({
         action: "message.inbound",
         resourceType: "whatsapp-message",
         resourceId: event.messageId,
@@ -148,7 +155,7 @@ export function buildServices(config: AppConfig): AppServices {
     }).catch((error: unknown) => {
       console.error("WhatsApp reply delivery failed", error);
     });
-    bridgeStore instanceof SqliteBridgeStateStore && bridgeStore.recordAuditLog({
+    recordAuditLog({
       action: "message.inbound",
       resourceType: "whatsapp-message",
       resourceId: event.messageId,
@@ -195,6 +202,10 @@ export function ensureDefaultDenyAllNumberRule(
     enabled: true,
   });
   return true;
+}
+
+function isPendingAccountId(accountId: string) {
+  return accountId.startsWith("pending-");
 }
 
 export async function sendReplyWithDeliveryRecord(input: {

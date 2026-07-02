@@ -779,59 +779,68 @@ describe("whatsapp-manager-api", () => {
 
     try {
       const services = createTestServices(auditConfig);
+      const events: string[] = [];
+      const unsubscribe = services.eventBus.subscribe((event) => {
+        events.push(event.type);
+      });
       app = createApp({ config: auditConfig, services });
 
-      await app.inject({
-        method: "POST",
-        url: "/whatsapp/connect",
-        headers: {
-          authorization: "Bearer test-token",
-        },
-        payload: {
-          accountId: "ops-main",
-        },
-      });
+      try {
+        await app.inject({
+          method: "POST",
+          url: "/whatsapp/connect",
+          headers: {
+            authorization: "Bearer test-token",
+          },
+          payload: {
+            accountId: "ops-main",
+          },
+        });
 
-      const created = await app.inject({
-        method: "POST",
-        url: "/number-rules",
-        headers: {
-          authorization: "Bearer test-token",
-        },
-        payload: {
-          accountId: "ops-main",
-          action: "allow",
-          matchType: "exact",
-          pattern: "12345",
-        },
-      });
+        const created = await app.inject({
+          method: "POST",
+          url: "/number-rules",
+          headers: {
+            authorization: "Bearer test-token",
+          },
+          payload: {
+            accountId: "ops-main",
+            action: "allow",
+            matchType: "exact",
+            pattern: "12345",
+          },
+        });
 
-      expect(created.statusCode).toBe(200);
+        expect(created.statusCode).toBe(200);
 
-      const logs = await app.inject({
-        method: "GET",
-        url: "/audit-logs?limit=10",
-        headers: {
-          authorization: "Bearer test-token",
-        },
-      });
+        const logs = await app.inject({
+          method: "GET",
+          url: "/audit-logs?limit=10",
+          headers: {
+            authorization: "Bearer test-token",
+          },
+        });
 
-      expect(logs.statusCode).toBe(200);
-      expect(logs.json().items).toEqual(
-        expect.arrayContaining([
-          expect.objectContaining({
-            action: "whatsapp.connect",
-            resourceType: "whatsapp-account",
-            resourceId: "ops-main",
-            outcome: "success",
-          }),
-          expect.objectContaining({
-            action: "number-rule.create",
-            resourceType: "number-rule",
-            outcome: "success",
-          }),
-        ]),
-      );
+        expect(logs.statusCode).toBe(200);
+        expect(logs.json().items).toEqual(
+          expect.arrayContaining([
+            expect.objectContaining({
+              action: "whatsapp.connect",
+              resourceType: "whatsapp-account",
+              resourceId: "ops-main",
+              outcome: "success",
+            }),
+            expect.objectContaining({
+              action: "number-rule.create",
+              resourceType: "number-rule",
+              outcome: "success",
+            }),
+          ]),
+        );
+        expect(events.filter((event) => event === "logs")).toHaveLength(2);
+      } finally {
+        unsubscribe();
+      }
     } finally {
       rmSync(dir, { force: true, recursive: true });
     }

@@ -1,4 +1,4 @@
-export type AppEventType = "sync" | "accounts" | "activity" | "rules";
+export type AppEventType = "sync" | "accounts" | "activity" | "rules" | "logs";
 
 export interface AppEvent {
   type: AppEventType;

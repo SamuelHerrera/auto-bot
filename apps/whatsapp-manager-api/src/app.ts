@@ -31,6 +31,7 @@ export function createApp({ config, services = buildServices(config) }: CreateAp
       ...input,
     };
     app.log.info({ audit: record }, "audit event");
+    services.eventBus.publish("logs");
     return record;
   }
 

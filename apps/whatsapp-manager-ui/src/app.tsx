@@ -174,6 +174,9 @@ export function App() {
     events.addEventListener("rules", () => {
       void refreshData(false, false, ["rules"]);
     });
+    events.addEventListener("logs", () => {
+      void refreshData(false, false, ["logs"]);
+    });
     events.addEventListener("sync", () => {
       void refreshData(false, false);
     });
@@ -352,7 +355,6 @@ export function App() {
           ? "QR ready."
           : "Link session started. Waiting for WhatsApp QR.",
       );
-      await refreshData(false, true, ["accounts"]);
     });
   }
 
@@ -368,7 +370,6 @@ export function App() {
       await request<WhatsAppAccount>(`/whatsapp/accounts/${encodeURIComponent(accountId)}/disconnect`, {
         method: "POST",
       });
-      await refreshData(false, false, ["accounts"]);
     } catch (error) {
       setErrorMessage(normalizeError(error));
     }
@@ -391,7 +392,6 @@ export function App() {
           ? `Account ${accountId} disconnected locally. ${result.lastError}`
           : `Account ${accountId} disconnected.`,
       );
-      await refreshData(false, true, ["accounts"]);
     });
   }
 
@@ -401,7 +401,6 @@ export function App() {
         method: "POST",
       });
       setStatusMessage("Delivery retry completed.");
-      await refreshData(false, true, ["activity"]);
     });
   }
 
@@ -428,7 +427,6 @@ export function App() {
       setRulePattern("");
       setRuleLabel("");
       setStatusMessage("Number rule saved.");
-      await refreshData(false, true, ["rules"]);
     });
   }
 
@@ -439,7 +437,6 @@ export function App() {
         body: JSON.stringify({ enabled }),
       });
       setStatusMessage(enabled ? "Rule enabled." : "Rule disabled.");
-      await refreshData(false, true, ["rules"]);
     });
   }
 
@@ -449,7 +446,6 @@ export function App() {
         method: "DELETE",
       });
       setStatusMessage("Number rule deleted.");
-      await refreshData(false, true, ["rules"]);
     });
   }
 
@@ -499,7 +495,6 @@ export function App() {
 
     try {
       await action();
-      await refreshData(false, false, ["logs"]);
     } catch (error) {
       setErrorMessage(normalizeError(error));
     } finally {
@@ -523,7 +518,6 @@ export function App() {
   function openLogsTab() {
     setIsLogsTabOpen(true);
     setActiveTabId("logs");
-    void refreshData(false, true, ["logs"]);
   }
 
   function closeLogsTab() {
@@ -669,7 +663,6 @@ export function App() {
                   className="workspace-tab-main"
                   onClick={() => {
                     setActiveTabId("logs");
-                    void refreshData(false, true, ["logs"]);
                   }}
                 >
                   <span>Logs</span>
@@ -694,8 +687,6 @@ export function App() {
           {activeTabId === "logs" ? (
             <LogsView
               auditLogs={auditLogs}
-              isBusy={isBusy}
-              onRefresh={() => void refreshData(false, true, ["logs"])}
             />
           ) : null}
 
@@ -1362,12 +1353,8 @@ function SettingsView({
 
 function LogsView({
   auditLogs,
-  isBusy,
-  onRefresh,
 }: {
   auditLogs: AuditLogRecord[];
-  isBusy: boolean;
-  onRefresh: () => void;
 }) {
   return (
     <>
@@ -1376,9 +1363,6 @@ function LogsView({
           <span className="panel-kicker">Audit</span>
           <h2>App logs</h2>
         </div>
-        <button className="secondary-button" onClick={onRefresh} disabled={isBusy}>
-          Refresh
-        </button>
       </div>
 
       <div className="audit-log-list">
