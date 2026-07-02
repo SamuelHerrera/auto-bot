@@ -125,7 +125,7 @@ export class BaileysWhatsAppGateway implements WhatsAppGateway {
 
   async disconnectAccount(accountId: string): Promise<WhatsAppAccountStatus> {
     const runtime = this.accounts.get(accountId);
-    const accountPath = this.getAccountPath(accountId);
+    const accountPath = runtime?.statePath ?? this.getAccountPath(accountId);
     if (!runtime) {
       await rm(accountPath, { recursive: true, force: true });
       return {
@@ -454,7 +454,7 @@ export class BaileysWhatsAppGateway implements WhatsAppGateway {
         continue;
       }
 
-      if (entry.name.startsWith("pending-")) {
+      if (entry.name.startsWith("pending-") && !(await hasPersistedAuthState(this.getAccountPath(entry.name)))) {
         await rm(this.getAccountPath(entry.name), { recursive: true, force: true });
         continue;
       }
@@ -476,6 +476,11 @@ export class BaileysWhatsAppGateway implements WhatsAppGateway {
       });
     }
   }
+}
+
+async function hasPersistedAuthState(accountPath: string) {
+  const entries = await readdir(accountPath).catch(() => []);
+  return entries.some((entry) => entry.endsWith(".json"));
 }
 
 function normalizeBaileysMessage(accountId: string, message: WAMessage): WhatsAppMessageEvent | null {
