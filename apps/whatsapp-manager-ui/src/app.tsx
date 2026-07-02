@@ -5,6 +5,7 @@ type AccountStatus = "disconnected" | "connecting" | "connected";
 type ActiveView = "accounts" | "messages" | "rules" | "failures" | "settings";
 type NumberRuleAction = "allow" | "deny";
 type NumberRuleMatchType = "all" | "exact" | "regex";
+type RefreshScope = "accounts" | "activity" | "rules";
 
 interface WhatsAppAccount {
   accountId: string;
@@ -135,11 +136,24 @@ export function App() {
       return;
     }
 
-    const interval = window.setInterval(() => {
+    const events = new EventSource(buildEventUrl(apiUrl, apiToken));
+    events.addEventListener("accounts", () => {
+      void refreshData(false, false, ["accounts"]);
+    });
+    events.addEventListener("activity", () => {
+      void refreshData(false, false, ["activity"]);
+    });
+    events.addEventListener("rules", () => {
+      void refreshData(false, false, ["rules"]);
+    });
+    events.addEventListener("sync", () => {
       void refreshData(false, false);
-    }, 3000);
+    });
+    events.onerror = () => {
+      setStatusMessage("Live updates reconnecting.");
+    };
 
-    return () => window.clearInterval(interval);
+    return () => events.close();
   }, [apiToken, apiUrl]);
 
   useEffect(() => {
@@ -179,7 +193,11 @@ export function App() {
     return response.json() as Promise<T>;
   }
 
-  async function refreshData(showMessage = true, showBusy = true) {
+  async function refreshData(
+    showMessage = true,
+    showBusy = true,
+    scopes: RefreshScope[] = ["accounts", "activity", "rules"],
+  ) {
     if (!apiToken.trim()) {
       setErrorMessage("An API token is required before the UI can manage accounts.");
       return;
@@ -191,21 +209,32 @@ export function App() {
     setErrorMessage("");
 
     try {
+      const shouldRefreshAccounts = scopes.includes("accounts");
+      const shouldRefreshActivity = scopes.includes("activity");
+      const shouldRefreshRules = scopes.includes("rules");
       const [accountResponse, mappingResponse, deliveryResponse, ruleResponse, linkStatus] = await Promise.all([
-        request<{ items: WhatsAppAccount[] }>("/whatsapp/accounts"),
-        request<{ items: SessionMapping[] }>("/sessions"),
-        request<{ items: DeliveryRecord[] }>("/deliveries"),
-        request<{ items: NumberRule[] }>("/number-rules"),
-        request<WhatsAppAccount>("/whatsapp/status"),
+        shouldRefreshAccounts ? request<{ items: WhatsAppAccount[] }>("/whatsapp/accounts") : Promise.resolve(null),
+        shouldRefreshActivity ? request<{ items: SessionMapping[] }>("/sessions") : Promise.resolve(null),
+        shouldRefreshActivity ? request<{ items: DeliveryRecord[] }>("/deliveries") : Promise.resolve(null),
+        shouldRefreshRules ? request<{ items: NumberRule[] }>("/number-rules") : Promise.resolve(null),
+        shouldRefreshAccounts ? request<WhatsAppAccount>("/whatsapp/status") : Promise.resolve(null),
       ]);
 
-      setAccounts(accountResponse.items);
-      setMappings(mappingResponse.items.filter((mapping) => mapping.chatType === "direct"));
-      setDeliveries(deliveryResponse.items.filter((delivery) => delivery.chatType === "direct"));
-      setNumberRules(ruleResponse.items);
-      if (linkStatus.qrCode || linkStatus.status === "connecting") {
+      if (accountResponse) {
+        setAccounts(accountResponse.items);
+      }
+      if (mappingResponse) {
+        setMappings(mappingResponse.items.filter((mapping) => mapping.chatType === "direct"));
+      }
+      if (deliveryResponse) {
+        setDeliveries(deliveryResponse.items.filter((delivery) => delivery.chatType === "direct"));
+      }
+      if (ruleResponse) {
+        setNumberRules(ruleResponse.items);
+      }
+      if (linkStatus?.qrCode || linkStatus?.status === "connecting") {
         setLinkingStatus(linkStatus);
-      } else if (linkingStatus || isLinkDialogOpen) {
+      } else if (linkStatus && (linkingStatus || isLinkDialogOpen)) {
         setLinkingStatus(null);
         if (linkStatus.status === "connected") {
           setIsLinkDialogOpen(false);
@@ -247,7 +276,7 @@ export function App() {
           ? "QR ready."
           : "Link session started. Waiting for WhatsApp QR.",
       );
-      await refreshData(false);
+      await refreshData(false, true, ["accounts"]);
     });
   }
 
@@ -267,7 +296,7 @@ export function App() {
           ? `Account ${accountId} disconnected locally. ${result.lastError}`
           : `Account ${accountId} disconnected.`,
       );
-      await refreshData(false);
+      await refreshData(false, true, ["accounts"]);
     });
   }
 
@@ -277,7 +306,7 @@ export function App() {
         method: "POST",
       });
       setStatusMessage("Delivery retry completed.");
-      await refreshData(false);
+      await refreshData(false, true, ["activity"]);
     });
   }
 
@@ -304,7 +333,7 @@ export function App() {
       setRulePattern("");
       setRuleLabel("");
       setStatusMessage("Number rule saved.");
-      await refreshData(false);
+      await refreshData(false, true, ["rules"]);
     });
   }
 
@@ -315,7 +344,7 @@ export function App() {
         body: JSON.stringify({ enabled }),
       });
       setStatusMessage(enabled ? "Rule enabled." : "Rule disabled.");
-      await refreshData(false);
+      await refreshData(false, true, ["rules"]);
     });
   }
 
@@ -325,7 +354,7 @@ export function App() {
         method: "DELETE",
       });
       setStatusMessage("Number rule deleted.");
-      await refreshData(false);
+      await refreshData(false, true, ["rules"]);
     });
   }
 
@@ -1073,6 +1102,13 @@ function getRuleDisplayValue(rule: NumberRule) {
   }
 
   return `${rule.matchType === "exact" ? "Full match" : "Regex"} ${rule.pattern}`;
+}
+
+function buildEventUrl(apiUrl: string, apiToken: string) {
+  const baseUrl = apiUrl.trim() || window.location.origin;
+  const url = new URL("/events", baseUrl);
+  url.searchParams.set("token", apiToken);
+  return apiUrl.trim() ? url.toString() : `${url.pathname}${url.search}`;
 }
 
 function getInitialApiUrl() {
