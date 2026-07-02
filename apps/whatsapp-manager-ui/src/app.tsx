@@ -2,7 +2,7 @@ import { FormEvent, useEffect, useState } from "react";
 import { QRCodeSVG } from "qrcode.react";
 
 type AccountStatus = "disconnected" | "connecting" | "connected";
-type ActiveView = "accounts" | "messages" | "rules" | "failures" | "settings";
+type NumberSubview = "messages" | "rules" | "failures";
 type NumberRuleAction = "allow" | "deny";
 type NumberRuleMatchType = "all" | "exact" | "regex";
 type RefreshScope = "accounts" | "activity" | "rules";
@@ -99,12 +99,15 @@ export function App() {
   const [mappings, setMappings] = useState<SessionMapping[]>([]);
   const [deliveries, setDeliveries] = useState<DeliveryRecord[]>([]);
   const [numberRules, setNumberRules] = useState<NumberRule[]>([]);
-  const [activeView, setActiveView] = useState<ActiveView>("accounts");
+  const [activeNumberView, setActiveNumberView] = useState<NumberSubview>("messages");
+  const [accountSearch, setAccountSearch] = useState("");
+  const [openAccountTabs, setOpenAccountTabs] = useState<string[]>([]);
+  const [activeTabId, setActiveTabId] = useState("settings");
   const [activeAccountId, setActiveAccountId] = useState("");
   const [activeChatJid, setActiveChatJid] = useState("");
   const [isLinkDialogOpen, setIsLinkDialogOpen] = useState(false);
   const [linkingStatus, setLinkingStatus] = useState<WhatsAppAccount | null>(null);
-  const [statusMessage, setStatusMessage] = useState("Live. Register an account to begin.");
+  const [statusMessage, setStatusMessage] = useState("Live");
   const [errorMessage, setErrorMessage] = useState("");
   const [isBusy, setIsBusy] = useState(false);
   const [ruleAction, setRuleAction] = useState<NumberRuleAction>("allow");
@@ -239,6 +242,7 @@ export function App() {
         if (linkStatus.status === "connected") {
           setIsLinkDialogOpen(false);
           setActiveAccountId(linkStatus.accountId);
+          openAccountTab(linkStatus.accountId);
           setStatusMessage(`Account ${linkStatus.accountId} linked.`);
         }
       }
@@ -264,12 +268,12 @@ export function App() {
         body: JSON.stringify({}),
       });
 
-      setActiveView("accounts");
       setIsLinkDialogOpen(true);
       if (account.qrCode || account.status === "connecting") {
         setLinkingStatus(account);
       } else if (account.status === "connected") {
         setActiveAccountId(account.accountId);
+        openAccountTab(account.accountId);
       }
       setStatusMessage(
         account.qrCode
@@ -287,6 +291,7 @@ export function App() {
       });
 
       setAccounts((currentAccounts) => currentAccounts.filter((account) => account.accountId !== accountId));
+      closeAccountTab(accountId);
       if (activeAccountId === accountId) {
         setActiveAccountId("");
         setActiveChatJid("");
@@ -377,13 +382,36 @@ export function App() {
   }
 
   function openAccount(accountId: string) {
+    openAccountTab(accountId);
     setActiveAccountId(accountId);
     setActiveChatJid("");
-    setActiveView("messages");
+    setActiveNumberView("messages");
     setStatusMessage(`Opened ${accountId}.`);
   }
 
+  function openAccountTab(accountId: string) {
+    setOpenAccountTabs((currentTabs) => (currentTabs.includes(accountId) ? currentTabs : [...currentTabs, accountId]));
+    setActiveTabId(accountId);
+  }
+
+  function closeAccountTab(accountId: string) {
+    setOpenAccountTabs((currentTabs) => currentTabs.filter((tabAccountId) => tabAccountId !== accountId));
+    if (activeTabId === accountId) {
+      const nextAccountId = openAccountTabs.find((tabAccountId) => tabAccountId !== accountId);
+      setActiveTabId(nextAccountId ?? "settings");
+      setActiveAccountId(nextAccountId ?? "");
+      setActiveChatJid("");
+    }
+  }
+
   const connectedAccounts = accounts.filter((account) => account.status === "connected").length;
+  const filteredAccounts = accounts.filter((account) =>
+    account.accountId.toLowerCase().includes(accountSearch.trim().toLowerCase()),
+  );
+  const selectedTabAccountId = activeTabId === "settings" ? activeAccountId : activeTabId;
+  const tabAccounts = openAccountTabs
+    .map((accountId) => accounts.find((account) => account.accountId === accountId))
+    .filter((account): account is WhatsAppAccount => Boolean(account));
   const activeAccount = accounts.find((account) => account.accountId === activeAccountId) ?? null;
   const activeChats = buildChatSummaries(activeAccountId, mappings, deliveries);
   const activeChat = activeChats.find((chat) => chat.chatJid === activeChatJid) ?? activeChats[0] ?? null;
@@ -398,6 +426,8 @@ export function App() {
     accounts.find((account) => account.qrCode) ??
     null;
   const failedDeliveries = deliveries.filter((delivery) => delivery.status === "failed");
+  const activeAccountFailedDeliveries = failedDeliveries.filter((delivery) => delivery.accountId === activeAccountId);
+  const statusTone = errorMessage ? "error" : isBusy ? "syncing" : "live";
 
   return (
     <div className="shell">
@@ -406,95 +436,92 @@ export function App() {
           <img src="/wa-mark.svg" alt="" aria-hidden="true" />
           <h1>{appTitle}</h1>
         </div>
-        <span className={`header-status-badge${errorMessage ? " header-status-badge-error" : ""}`} aria-live="polite">
-          {errorMessage || statusMessage}
-        </span>
+        <StatusIndicator detail={errorMessage || statusMessage} tone={statusTone} />
       </header>
 
       <main className="admin-layout">
-        <nav className="admin-nav" aria-label="Admin sections">
-          <TabButton active={activeView === "accounts"} onClick={() => setActiveView("accounts")}>
-            Accounts
-          </TabButton>
-          <TabButton active={activeView === "messages"} onClick={() => setActiveView("messages")}>
-            Messages
-          </TabButton>
-          <TabButton active={activeView === "rules"} onClick={() => setActiveView("rules")}>
-            Rules
-          </TabButton>
-          <TabButton active={activeView === "failures"} onClick={() => setActiveView("failures")}>
-            Failures
-          </TabButton>
-          <TabButton active={activeView === "settings"} onClick={() => setActiveView("settings")}>
-            Settings
-          </TabButton>
-        </nav>
+        <aside className="account-sidebar">
+          <div className="sidebar-action-row">
+            <div>
+              <span className="panel-kicker">Numbers</span>
+              <strong>{connectedAccounts}/{accounts.length} online</strong>
+            </div>
+            <form onSubmit={connectAccount}>
+              <button type="submit" disabled={isBusy}>
+                + Link
+              </button>
+            </form>
+          </div>
+
+          <label className="compact-field sidebar-search">
+            <span>Search</span>
+            <input
+              value={accountSearch}
+              onChange={(event) => setAccountSearch(event.target.value)}
+              placeholder="Find number"
+            />
+          </label>
+
+          <div className="account-list sidebar-account-list">
+            {filteredAccounts.length === 0 ? (
+              <EmptyState
+                title={accounts.length === 0 ? "No numbers" : "No matches"}
+                description={accounts.length === 0 ? "Use Link to pair a WhatsApp number." : "Adjust the search."}
+              />
+            ) : (
+              filteredAccounts.map((account) => (
+                <button
+                  key={account.accountId}
+                  className={`account-open sidebar-account-button${
+                    account.accountId === selectedTabAccountId ? " account-row-active" : ""
+                  }`}
+                  onClick={() => openAccount(account.accountId)}
+                  title={getAccountStatusDetail(account)}
+                >
+                  <span className={`status-dot status-dot-${account.status}`} />
+                  <span>
+                    <strong>{account.accountId}</strong>
+                    <small>{account.status}</small>
+                  </span>
+                </button>
+              ))
+            )}
+          </div>
+        </aside>
 
         <section className="admin-panel">
-          {activeView === "accounts" ? (
-            <AccountsView
-              accounts={accounts}
-              connectedAccounts={connectedAccounts}
-              isBusy={isBusy}
-              isLinkDialogOpen={isLinkDialogOpen}
-              onConnect={connectAccount}
-              onDisconnect={disconnectAccount}
-              onDismissLinkDialog={() => setIsLinkDialogOpen(false)}
-              onOpenAccount={openAccount}
-              pendingQrAccount={pendingQrAccount}
-            />
-          ) : null}
+          <div className="workspace-tabs" role="tablist" aria-label="Open workspaces">
+            {tabAccounts.map((account) => (
+              <div
+                key={account.accountId}
+                className={`workspace-tab${activeTabId === account.accountId ? " workspace-tab-active" : ""}`}
+                title={getAccountStatusDetail(account)}
+              >
+                <button
+                  className="workspace-tab-main"
+                  onClick={() => {
+                    setActiveTabId(account.accountId);
+                    setActiveAccountId(account.accountId);
+                    setActiveChatJid("");
+                  }}
+                >
+                  <span className={`status-dot status-dot-${account.status}`} />
+                  <span>{account.accountId}</span>
+                </button>
+                <button className="tab-close" aria-label={`Close ${account.accountId}`} onClick={() => closeAccountTab(account.accountId)}>
+                  x
+                </button>
+              </div>
+            ))}
+            <button
+              className={`workspace-tab${activeTabId === "settings" ? " workspace-tab-active" : ""}`}
+              onClick={() => setActiveTabId("settings")}
+            >
+              Settings
+            </button>
+          </div>
 
-          {activeView === "messages" ? (
-            <MessagesView
-              accounts={accounts}
-              activeAccount={activeAccount}
-              activeAccountId={activeAccountId}
-              activeChat={activeChat}
-              activeChatJid={activeChat?.chatJid ?? ""}
-              activeChatMessages={activeChatMessages}
-              chats={activeChats}
-              onSelectAccount={(accountId) => {
-                setActiveAccountId(accountId);
-                setActiveChatJid("");
-              }}
-              onSelectChat={setActiveChatJid}
-            />
-          ) : null}
-
-          {activeView === "rules" ? (
-            <RulesView
-              accounts={accounts}
-              activeAccountId={activeAccountId}
-              isBusy={isBusy}
-              matchType={ruleMatchType}
-              onActionChange={setRuleAction}
-              onCreate={createNumberRule}
-              onDelete={(ruleId) => void deleteNumberRule(ruleId)}
-              onEnabledChange={(rule, enabled) => void updateNumberRule(rule, enabled)}
-              onLabelChange={setRuleLabel}
-              onMatchTypeChange={setRuleMatchType}
-              onPatternChange={setRulePattern}
-              onSelectAccount={(accountId) => {
-                setActiveAccountId(accountId);
-                setActiveChatJid("");
-              }}
-              pattern={rulePattern}
-              ruleAction={ruleAction}
-              ruleLabel={ruleLabel}
-              rules={numberRules.filter((rule) => rule.accountId === activeAccountId)}
-            />
-          ) : null}
-
-          {activeView === "failures" ? (
-            <FailuresView
-              failedDeliveries={failedDeliveries}
-              isBusy={isBusy}
-              onRetry={(deliveryId) => void retryDelivery(deliveryId)}
-            />
-          ) : null}
-
-          {activeView === "settings" ? (
+          {activeTabId === "settings" ? (
             <SettingsView
               apiToken={apiToken}
               apiUrl={apiUrl}
@@ -504,8 +531,45 @@ export function App() {
               onResetApiUrl={() => setApiUrl("")}
             />
           ) : null}
+
+          {activeTabId !== "settings" ? (
+            <NumberWorkspace
+              account={activeAccount}
+              activeChat={activeChat}
+              activeChatJid={activeChat?.chatJid ?? ""}
+              activeChatMessages={activeChatMessages}
+              activeView={activeNumberView}
+              chats={activeChats}
+              failedDeliveries={activeAccountFailedDeliveries}
+              isBusy={isBusy}
+              matchType={ruleMatchType}
+              onActionChange={setRuleAction}
+              onCreateRule={createNumberRule}
+              onDeleteRule={(ruleId) => void deleteNumberRule(ruleId)}
+              onDisconnect={(accountId) => void disconnectAccount(accountId)}
+              onEnabledChange={(rule, enabled) => void updateNumberRule(rule, enabled)}
+              onLabelChange={setRuleLabel}
+              onMatchTypeChange={setRuleMatchType}
+              onPatternChange={setRulePattern}
+              onRetry={(deliveryId) => void retryDelivery(deliveryId)}
+              onSelectChat={setActiveChatJid}
+              onViewChange={setActiveNumberView}
+              pattern={rulePattern}
+              ruleAction={ruleAction}
+              ruleLabel={ruleLabel}
+              rules={numberRules.filter((rule) => rule.accountId === activeAccountId)}
+            />
+          ) : null}
         </section>
       </main>
+
+      {isLinkDialogOpen ? (
+        <LinkAccountDialog
+          account={pendingQrAccount}
+          isBusy={isBusy}
+          onClose={() => setIsLinkDialogOpen(false)}
+        />
+      ) : null}
     </div>
   );
 }
@@ -585,6 +649,133 @@ function AccountsView({
   );
 }
 
+function NumberWorkspace({
+  account,
+  activeChat,
+  activeChatJid,
+  activeChatMessages,
+  activeView,
+  chats,
+  failedDeliveries,
+  isBusy,
+  matchType,
+  onActionChange,
+  onCreateRule,
+  onDeleteRule,
+  onDisconnect,
+  onEnabledChange,
+  onLabelChange,
+  onMatchTypeChange,
+  onPatternChange,
+  onRetry,
+  onSelectChat,
+  onViewChange,
+  pattern,
+  ruleAction,
+  ruleLabel,
+  rules,
+}: {
+  account: WhatsAppAccount | null;
+  activeChat: ChatSummary | null;
+  activeChatJid: string;
+  activeChatMessages: ChatMessage[];
+  activeView: NumberSubview;
+  chats: ChatSummary[];
+  failedDeliveries: DeliveryRecord[];
+  isBusy: boolean;
+  matchType: NumberRuleMatchType;
+  onActionChange: (value: NumberRuleAction) => void;
+  onCreateRule: (event: FormEvent<HTMLFormElement>) => void;
+  onDeleteRule: (ruleId: string) => void;
+  onDisconnect: (accountId: string) => void;
+  onEnabledChange: (rule: NumberRule, enabled: boolean) => void;
+  onLabelChange: (value: string) => void;
+  onMatchTypeChange: (value: NumberRuleMatchType) => void;
+  onPatternChange: (value: string) => void;
+  onRetry: (deliveryId: string) => void;
+  onSelectChat: (chatJid: string) => void;
+  onViewChange: (view: NumberSubview) => void;
+  pattern: string;
+  ruleAction: NumberRuleAction;
+  ruleLabel: string;
+  rules: NumberRule[];
+}) {
+  if (!account) {
+    return <EmptyState title="Number unavailable" description="Select another number from the left rail." />;
+  }
+
+  return (
+    <>
+      <div className="number-header">
+        <div>
+          <span className="panel-kicker">Number</span>
+          <h2>{account.accountId}</h2>
+          <p>{getAccountActivity(account)}</p>
+        </div>
+        <div className="number-header-actions">
+          <span className={`badge badge-${account.status}`} title={getAccountStatusDetail(account)}>
+            {account.status}
+          </span>
+          <button
+            className="text-button danger-button"
+            onClick={() => onDisconnect(account.accountId)}
+            disabled={isBusy || account.status === "disconnected"}
+          >
+            Disconnect
+          </button>
+        </div>
+      </div>
+
+      <div className="subnav" aria-label="Number sections">
+        <TabButton active={activeView === "messages"} onClick={() => onViewChange("messages")}>
+          Messages
+        </TabButton>
+        <TabButton active={activeView === "rules"} onClick={() => onViewChange("rules")}>
+          Rules
+        </TabButton>
+        <TabButton active={activeView === "failures"} onClick={() => onViewChange("failures")}>
+          Failures
+        </TabButton>
+      </div>
+
+      {activeView === "messages" ? (
+        <MessagesView
+          activeAccount={account}
+          activeAccountId={account.accountId}
+          activeChat={activeChat}
+          activeChatJid={activeChatJid}
+          activeChatMessages={activeChatMessages}
+          chats={chats}
+          onSelectChat={onSelectChat}
+        />
+      ) : null}
+
+      {activeView === "rules" ? (
+        <RulesView
+          activeAccountId={account.accountId}
+          isBusy={isBusy}
+          matchType={matchType}
+          onActionChange={onActionChange}
+          onCreate={onCreateRule}
+          onDelete={onDeleteRule}
+          onEnabledChange={onEnabledChange}
+          onLabelChange={onLabelChange}
+          onMatchTypeChange={onMatchTypeChange}
+          onPatternChange={onPatternChange}
+          pattern={pattern}
+          ruleAction={ruleAction}
+          ruleLabel={ruleLabel}
+          rules={rules}
+        />
+      ) : null}
+
+      {activeView === "failures" ? (
+        <FailuresView failedDeliveries={failedDeliveries} isBusy={isBusy} onRetry={onRetry} />
+      ) : null}
+    </>
+  );
+}
+
 function LinkAccountDialog({
   account,
   isBusy,
@@ -630,24 +821,20 @@ function LinkAccountDialog({
 }
 
 function MessagesView({
-  accounts,
   activeAccount,
   activeAccountId,
   activeChat,
   activeChatJid,
   activeChatMessages,
   chats,
-  onSelectAccount,
   onSelectChat,
 }: {
-  accounts: WhatsAppAccount[];
   activeAccount: WhatsAppAccount | null;
   activeAccountId: string;
   activeChat: ChatSummary | null;
   activeChatJid: string;
   activeChatMessages: ChatMessage[];
   chats: ChatSummary[];
-  onSelectAccount: (accountId: string) => void;
   onSelectChat: (chatJid: string) => void;
 }) {
   return (
@@ -657,17 +844,6 @@ function MessagesView({
           <span className="panel-kicker">Messages</span>
           <h2>Direct chat activity</h2>
         </div>
-        <label className="select-field">
-          <span>Account</span>
-          <select value={activeAccountId} onChange={(event) => onSelectAccount(event.target.value)}>
-            <option value="">Select account</option>
-            {accounts.map((account) => (
-              <option key={account.accountId} value={account.accountId}>
-                {account.accountId}
-              </option>
-            ))}
-          </select>
-        </label>
       </div>
 
       <div className="summary-strip">
@@ -767,7 +943,6 @@ function MessagesView({
 }
 
 function RulesView({
-  accounts,
   activeAccountId,
   isBusy,
   matchType,
@@ -778,13 +953,11 @@ function RulesView({
   onLabelChange,
   onMatchTypeChange,
   onPatternChange,
-  onSelectAccount,
   pattern,
   ruleAction,
   ruleLabel,
   rules,
 }: {
-  accounts: WhatsAppAccount[];
   activeAccountId: string;
   isBusy: boolean;
   matchType: NumberRuleMatchType;
@@ -795,7 +968,6 @@ function RulesView({
   onLabelChange: (value: string) => void;
   onMatchTypeChange: (value: NumberRuleMatchType) => void;
   onPatternChange: (value: string) => void;
-  onSelectAccount: (accountId: string) => void;
   pattern: string;
   ruleAction: NumberRuleAction;
   ruleLabel: string;
@@ -808,17 +980,6 @@ function RulesView({
           <span className="panel-kicker">Rules</span>
           <h2>Approved number controls</h2>
         </div>
-        <label className="select-field">
-          <span>Account</span>
-          <select value={activeAccountId} onChange={(event) => onSelectAccount(event.target.value)}>
-            <option value="">Select account</option>
-            {accounts.map((account) => (
-              <option key={account.accountId} value={account.accountId}>
-                {account.accountId}
-              </option>
-            ))}
-          </select>
-        </label>
       </div>
 
       <form className="rule-form" onSubmit={onCreate}>
@@ -1001,6 +1162,21 @@ function TabButton({
   );
 }
 
+function StatusIndicator({ detail, tone }: { detail: string; tone: "live" | "syncing" | "error" }) {
+  return (
+    <span
+      className={`status-indicator status-indicator-${tone}`}
+      aria-label={`Status: ${detail}`}
+      aria-live="polite"
+      role="status"
+      tabIndex={0}
+    >
+      <span className="status-indicator-dot" />
+      <span className="status-tooltip">{detail}</span>
+    </span>
+  );
+}
+
 function EmptyState({ title, description }: { title: string; description: string }) {
   return (
     <div className="empty-state">
@@ -1166,6 +1342,24 @@ function getAccountActivity(account: WhatsAppAccount) {
   }
 
   return "No active WhatsApp session yet.";
+}
+
+function getAccountStatusDetail(account: WhatsAppAccount) {
+  if (account.status === "connected") {
+    return account.connectedAt ? `Connected at ${formatTimestamp(account.connectedAt)}` : "Connected to WhatsApp.";
+  }
+
+  if (account.status === "connecting") {
+    return account.qrCode ? "Waiting for the WhatsApp QR scan." : "Opening a WhatsApp pairing session.";
+  }
+
+  if (account.lastError) {
+    return account.lastError;
+  }
+
+  return account.disconnectedAt
+    ? `Disconnected at ${formatTimestamp(account.disconnectedAt)}`
+    : "Disconnected from WhatsApp.";
 }
 
 function normalizeError(error: unknown) {
