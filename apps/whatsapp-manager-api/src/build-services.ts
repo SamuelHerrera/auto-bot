@@ -19,7 +19,7 @@ import { AppEventBus } from "./services/event-bus.js";
 import { evaluateNumberRules, recordBlockedNumberDelivery } from "./services/number-rules.js";
 import type { WhatsAppGateway } from "./services/whatsapp-service.js";
 import { recordWhatsAppSyncEvent } from "./services/whatsapp-sync-recorder.js";
-import type { AuditLogInput, DeliveryRecord, WhatsAppAccountStatus } from "./domain/types.js";
+import type { AuditLogInput, DeliveryRecord, NumberRuleRecord, WhatsAppAccountStatus } from "./domain/types.js";
 
 export interface AppServices {
   hermesAdapter: HermesAdapter;
@@ -51,8 +51,8 @@ export function buildServices(config: AppConfig): AppServices {
 
   function recordAuditLog(input: AuditLogInput) {
     if (bridgeStore instanceof SqliteBridgeStateStore) {
-      bridgeStore.recordAuditLog(input);
-      eventBus.publish("logs");
+      const record = bridgeStore.recordAuditLog(input);
+      eventBus.publish("logs", { auditLogs: [record] });
     }
   }
 
@@ -68,15 +68,15 @@ export function buildServices(config: AppConfig): AppServices {
         resourceId: status.accountId,
         details: {
           status: status.status,
-          createdDefaultRule,
+          createdDefaultRule: Boolean(createdDefaultRule),
           hadError: Boolean(status.lastError),
         },
       });
     }
     if (createdDefaultRule) {
-      eventBus.publish("rules");
+      eventBus.publish("rules", { rules: [createdDefaultRule] });
     }
-    eventBus.publish("accounts");
+    eventBus.publish("accounts", { accounts: [status] });
   });
 
   whatsappGateway.onSyncEvent?.((event) => {
@@ -220,24 +220,23 @@ export function buildServices(config: AppConfig): AppServices {
 export function ensureDefaultDenyAllNumberRule(
   numberRuleStore: NumberRuleStore | undefined,
   status: WhatsAppAccountStatus,
-): boolean {
+): NumberRuleRecord | null {
   const accountId = status.accountId.trim();
   if (!numberRuleStore || status.status !== "connected" || !accountId) {
-    return false;
+    return null;
   }
 
   if (numberRuleStore.listNumberRules(accountId).length > 0) {
-    return false;
+    return null;
   }
 
-  numberRuleStore.createNumberRule({
+  return numberRuleStore.createNumberRule({
     accountId,
     action: "deny",
     matchType: "all",
     label: "Default deny all",
     enabled: true,
   });
-  return true;
 }
 
 function isPendingAccountId(accountId: string) {

@@ -35,6 +35,11 @@ interface AppSseEvent {
   details?: Record<string, unknown>;
 }
 
+interface AccountMetadata {
+  accountId: string;
+  alias?: string;
+}
+
 export function App() {
   const [branding, setBranding] = useState<BrandingSettings>(getInitialBranding);
   const [accounts, setAccounts] = useState<WhatsAppAccount[]>([]);
@@ -145,7 +150,11 @@ export function App() {
 
   useEffect(() => {
     const events = new EventSource(buildEventUrl());
-    events.addEventListener("accounts", () => {
+    events.addEventListener("accounts", (event) => {
+      if (applyAccountsEvent(event)) {
+        return;
+      }
+
       queueRefreshData(["accounts"]);
     });
     events.addEventListener("activity", (event) => {
@@ -155,10 +164,18 @@ export function App() {
 
       queueRefreshData(["activity", "chat"]);
     });
-    events.addEventListener("rules", () => {
+    events.addEventListener("rules", (event) => {
+      if (applyRulesEvent(event)) {
+        return;
+      }
+
       queueRefreshData(["rules"]);
     });
-    events.addEventListener("logs", () => {
+    events.addEventListener("logs", (event) => {
+      if (applyLogsEvent(event)) {
+        return;
+      }
+
       if (isLogsTabOpenRef.current) {
         queueRefreshData(["logs"]);
       }
@@ -412,6 +429,7 @@ export function App() {
     }
 
     const deliveriesPayload = readArray<DeliveryRecord>(details.deliveries);
+    const managerChatMetadataPayload = readArray<ManagerChatMetadata>(details.managerChatMetadata);
     const chatsPayload = readArray<WhatsAppSyncedChat>(details.chats).filter((chat) => chat.chatType === "direct");
     const contactsPayload = readArray<WhatsAppContact>(details.contacts);
     const lidMappingsPayload = readArray<WhatsAppLidMapping>(details.lidMappings);
@@ -422,6 +440,7 @@ export function App() {
 
     const hasPayload =
       deliveriesPayload.length > 0 ||
+      managerChatMetadataPayload.length > 0 ||
       chatsPayload.length > 0 ||
       contactsPayload.length > 0 ||
       lidMappingsPayload.length > 0 ||
@@ -436,6 +455,9 @@ export function App() {
 
     if (deliveriesPayload.length > 0) {
       setDeliveries((current) => upsertByKey(current, deliveriesPayload.filter((delivery) => delivery.chatType === "direct"), deliveryKey));
+    }
+    if (managerChatMetadataPayload.length > 0) {
+      setManagerChatMetadata((current) => upsertByKey(current, managerChatMetadataPayload, accountChatKey));
     }
     if (chatsPayload.length > 0) {
       setSyncedChats((current) => upsertByKey(current, chatsPayload, accountChatKey));
@@ -465,6 +487,47 @@ export function App() {
       if (addedMessages.length > 0) {
         setSyncedMessageCounts((current) => applyMessageCountDeltas(current, addedMessages));
       }
+    }
+
+    return true;
+  }
+
+  function applyAccountsEvent(event: Event) {
+    const appEvent = parseAppSseEvent(event);
+    const details = appEvent?.details;
+    if (!details) {
+      return false;
+    }
+
+    const accountsPayload = readArray<WhatsAppAccount>(details.accounts);
+    const accountMetadataPayload = readArray<AccountMetadata>(details.accountMetadata);
+    const deletedAccountIds = readStringArray(details.deletedAccountIds);
+    const hasPayload = accountsPayload.length > 0 || accountMetadataPayload.length > 0 || deletedAccountIds.length > 0;
+    if (!hasPayload) {
+      return false;
+    }
+
+    if (accountsPayload.length > 0) {
+      setAccounts((current) => upsertAccounts(current, accountsPayload));
+      setHasLoadedAccounts(true);
+    }
+    if (accountMetadataPayload.length > 0) {
+      setAccounts((current) => applyAccountMetadata(current, accountMetadataPayload));
+      setAccountAliasDrafts((drafts) => {
+        const next = { ...drafts };
+        for (const metadata of accountMetadataPayload) {
+          next[metadata.accountId] = metadata.alias ?? "";
+        }
+        return next;
+      });
+    }
+    if (deletedAccountIds.length > 0) {
+      const deletedAccountIdSet = new Set(deletedAccountIds);
+      setAccounts((current) => current.filter((account) => !deletedAccountIdSet.has(account.accountId)));
+      if (deletedAccountIdSet.has(activeAccountIdRef.current)) {
+        setActiveAccountId("");
+      }
+      setActiveChatJid((current) => deletedAccountIdSet.has(activeAccountIdRef.current) ? "" : current);
     }
 
     return true;
@@ -518,6 +581,82 @@ export function App() {
     return [...next.values()];
   }
 
+  function upsertAccounts(current: WhatsAppAccount[], accountsPayload: WhatsAppAccount[]) {
+    const currentByAccountId = new Map(current.map((account) => [account.accountId, account]));
+    const next = new Map(currentByAccountId);
+    for (const account of accountsPayload) {
+      const existing = currentByAccountId.get(account.accountId);
+      next.set(account.accountId, {
+        ...existing,
+        ...account,
+        ...(account.alias?.trim() ? { alias: account.alias } : existing?.alias?.trim() ? { alias: existing.alias } : {}),
+      });
+    }
+
+    return [...next.values()];
+  }
+
+  function applyAccountMetadata(current: WhatsAppAccount[], metadataPayload: AccountMetadata[]) {
+    const metadataByAccountId = new Map(metadataPayload.map((metadata) => [metadata.accountId, metadata]));
+    return current.map((account) => {
+      const metadata = metadataByAccountId.get(account.accountId);
+      if (!metadata) {
+        return account;
+      }
+
+      const { alias: _alias, ...accountWithoutAlias } = account;
+      return metadata.alias?.trim() ? { ...accountWithoutAlias, alias: metadata.alias } : accountWithoutAlias;
+    });
+  }
+
+  function applyRulesEvent(event: Event) {
+    const appEvent = parseAppSseEvent(event);
+    const details = appEvent?.details;
+    if (!details) {
+      return false;
+    }
+
+    const rulesPayload = readArray<NumberRule>(details.rules);
+    const deletedRuleIds = readStringArray(details.deletedRuleIds);
+    const hasPayload = rulesPayload.length > 0 || deletedRuleIds.length > 0;
+    if (!hasPayload) {
+      return false;
+    }
+
+    if (rulesPayload.length > 0) {
+      setNumberRules((current) => upsertByKey(current, rulesPayload, (rule) => rule.id));
+    }
+    if (deletedRuleIds.length > 0) {
+      const deletedRuleIdSet = new Set(deletedRuleIds);
+      setNumberRules((current) => current.filter((rule) => !deletedRuleIdSet.has(rule.id)));
+    }
+
+    return true;
+  }
+
+  function applyLogsEvent(event: Event) {
+    const appEvent = parseAppSseEvent(event);
+    const details = appEvent?.details;
+    if (!details) {
+      return false;
+    }
+
+    const auditLogsPayload = readArray<AuditLogRecord>(details.auditLogs);
+    if (auditLogsPayload.length === 0) {
+      return false;
+    }
+
+    if (isLogsTabOpenRef.current) {
+      setAuditLogs((current) => sortAuditLogs(upsertByKey(current, auditLogsPayload, (record) => record.id)).slice(0, 200));
+    }
+
+    return true;
+  }
+
+  function sortAuditLogs(logs: AuditLogRecord[]) {
+    return [...logs].sort((left, right) => Date.parse(right.createdAt) - Date.parse(left.createdAt));
+  }
+
   function applyMessageCountDeltas(current: WhatsAppMessageCount[], messages: WhatsAppSyncedMessage[]) {
     const countDeltas = new Map<string, WhatsAppMessageCount>();
     for (const message of messages) {
@@ -556,6 +695,10 @@ export function App() {
 
   function readArray<T>(value: unknown): T[] {
     return Array.isArray(value) ? value as T[] : [];
+  }
+
+  function readStringArray(value: unknown): string[] {
+    return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : [];
   }
 
   function isRecord(value: unknown): value is Record<string, unknown> {
@@ -599,6 +742,8 @@ export function App() {
         body: JSON.stringify({}),
       });
 
+      setAccounts((currentAccounts) => upsertAccounts(currentAccounts, [account]));
+      setHasLoadedAccounts(true);
       if (account.qrCode || account.status === "connecting") {
         startLinkSession(account, baselineAccountIds, linkingStartedAt);
       } else if (account.status === "connected") {
@@ -653,9 +798,10 @@ export function App() {
 
   async function retryDelivery(deliveryId: string) {
     await runAction(async () => {
-      await request<DeliveryRecord>(`/deliveries/${encodeURIComponent(deliveryId)}/retry`, {
+      const delivery = await request<DeliveryRecord>(`/deliveries/${encodeURIComponent(deliveryId)}/retry`, {
         method: "POST",
       });
+      setDeliveries((current) => upsertByKey(current, [delivery], deliveryKey));
       setStatusMessage("Delivery retry completed.");
     });
   }
@@ -669,7 +815,7 @@ export function App() {
         throw new Error("Select an account before adding a rule.");
       }
 
-      await request<NumberRule>("/number-rules", {
+      const rule = await request<NumberRule>("/number-rules", {
         method: "POST",
         body: JSON.stringify({
           accountId,
@@ -680,6 +826,7 @@ export function App() {
           enabled: true,
         }),
       });
+      setNumberRules((current) => upsertByKey(current, [rule], (item) => item.id));
       setRulePattern("");
       setRuleLabel("");
       setStatusMessage("Number rule saved.");
@@ -688,10 +835,11 @@ export function App() {
 
   async function updateNumberRule(rule: NumberRule, enabled: boolean) {
     await runAction(async () => {
-      await request<NumberRule>(`/number-rules/${encodeURIComponent(rule.id)}`, {
+      const updatedRule = await request<NumberRule>(`/number-rules/${encodeURIComponent(rule.id)}`, {
         method: "PUT",
         body: JSON.stringify({ enabled }),
       });
+      setNumberRules((current) => upsertByKey(current, [updatedRule], (item) => item.id));
       setStatusMessage(enabled ? "Rule enabled." : "Rule disabled.");
     });
   }
@@ -701,6 +849,7 @@ export function App() {
       await request<void>(`/number-rules/${encodeURIComponent(ruleId)}`, {
         method: "DELETE",
       });
+      setNumberRules((current) => current.filter((rule) => rule.id !== ruleId));
       setStatusMessage("Number rule deleted.");
     });
   }

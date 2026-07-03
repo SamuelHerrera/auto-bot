@@ -8,7 +8,7 @@ import {
   sendReplyWithDeliveryRecord,
   type AppServices,
 } from "./build-services.js";
-import type { AuditLogInput, NumberRuleInput } from "./domain/types.js";
+import type { AuditLogInput, NumberRuleInput, WhatsAppAccountMetadata, WhatsAppAccountStatus } from "./domain/types.js";
 import { evaluateNumberRules, recordBlockedNumberDelivery } from "./services/number-rules.js";
 import type { RoutingInput } from "./services/chat-session-router.js";
 
@@ -33,9 +33,9 @@ export function createApp({ config, services = buildServices(config) }: CreateAp
         outcome: input.outcome ?? "success",
         createdAt: new Date().toISOString(),
         ...input,
-      });
+    });
     app.log.info({ audit: record }, "audit event");
-    services.eventBus.publish("logs");
+    services.eventBus.publish("logs", { auditLogs: [record] });
     return record;
   }
 
@@ -97,9 +97,9 @@ export function createApp({ config, services = buildServices(config) }: CreateAp
   app.post<{ Body?: { accountId?: string } }>("/whatsapp/connect", async (request) => {
     const status = await services.whatsappGateway.initializeAccount(request.body?.accountId);
     const createdDefaultRule = ensureDefaultDenyAllNumberRule(services.numberRuleStore, status);
-    services.eventBus.publish("accounts");
+    services.eventBus.publish("accounts", { accounts: [withAccountMetadata(status, services.accountMetadataStore?.listAccountMetadata() ?? [])] });
     if (createdDefaultRule) {
-      services.eventBus.publish("rules");
+      services.eventBus.publish("rules", { rules: [createdDefaultRule] });
     }
     audit({
       action: "whatsapp.connect",
@@ -108,7 +108,7 @@ export function createApp({ config, services = buildServices(config) }: CreateAp
       details: {
         requestedAccountId: request.body?.accountId ?? null,
         status: status.status,
-        createdDefaultRule,
+        createdDefaultRule: Boolean(createdDefaultRule),
       },
     });
     return status;
@@ -130,7 +130,7 @@ export function createApp({ config, services = buildServices(config) }: CreateAp
 
     const alias = parseAccountAliasInput(request.body);
     const metadata = services.accountMetadataStore.setAccountAlias(accountId, alias);
-    services.eventBus.publish("accounts");
+    services.eventBus.publish("accounts", { accountMetadata: [metadata] });
     audit({
       action: "whatsapp-account.alias-update",
       resourceType: "whatsapp-account",
@@ -146,7 +146,10 @@ export function createApp({ config, services = buildServices(config) }: CreateAp
     "/whatsapp/accounts/:accountId/disconnect",
     async (request) => {
       const status = await services.whatsappGateway.disconnectAccount(request.params.accountId);
-      services.eventBus.publish("accounts");
+      services.eventBus.publish("accounts", {
+        accounts: [withAccountMetadata(status, services.accountMetadataStore?.listAccountMetadata() ?? [])],
+        deletedAccountIds: [status.accountId],
+      });
       audit({
         action: "whatsapp.disconnect",
         resourceType: "whatsapp-account",
@@ -264,7 +267,12 @@ export function createApp({ config, services = buildServices(config) }: CreateAp
 
     const input = parseManagerChatMetadataInput(request.body);
     const metadata = services.managerChatMetadataStore.setManagerChatArchived(input);
-    services.eventBus.publish("activity");
+    services.eventBus.publish("activity", {
+      accountId: metadata.accountId,
+      chatJid: metadata.chatJid,
+      source: "manager-chat",
+      managerChatMetadata: [metadata],
+    });
     audit({
       action: metadata.archived ? "manager-chat.archive" : "manager-chat.unarchive",
       resourceType: "manager-chat",
@@ -373,7 +381,7 @@ export function createApp({ config, services = buildServices(config) }: CreateAp
 
     const input = parseNumberRuleInput(request.body);
     const rule = services.numberRuleStore.createNumberRule(input);
-    services.eventBus.publish("rules");
+    services.eventBus.publish("rules", { rules: [rule] });
     audit({
       action: "number-rule.create",
       resourceType: "number-rule",
@@ -401,7 +409,7 @@ export function createApp({ config, services = buildServices(config) }: CreateAp
 
     const input = parseNumberRuleInput(request.body, existing);
     const rule = services.numberRuleStore.updateNumberRule(existing.id, input);
-    services.eventBus.publish("rules");
+    services.eventBus.publish("rules", { rules: rule ? [rule] : [] });
     audit({
       action: "number-rule.update",
       resourceType: "number-rule",
@@ -430,7 +438,7 @@ export function createApp({ config, services = buildServices(config) }: CreateAp
       return reply.code(404).send({ error: "Number rule not found" });
     }
 
-    services.eventBus.publish("rules");
+    services.eventBus.publish("rules", { deletedRuleIds: [existing.id] });
     audit({
       action: "number-rule.delete",
       resourceType: "number-rule",
@@ -591,7 +599,6 @@ export function createApp({ config, services = buildServices(config) }: CreateAp
         text: request.body.text,
       });
 
-      services.eventBus.publish("activity");
       audit({
         action: "message.outbound",
         resourceType: "whatsapp-message",
@@ -776,6 +783,13 @@ function mergeAccountMetadata<T extends { accountId: string }>(
     const alias = metadataByAccountId.get(account.accountId)?.alias?.trim();
     return alias ? { ...account, alias } : account;
   });
+}
+
+function withAccountMetadata(
+  account: WhatsAppAccountStatus,
+  metadata: WhatsAppAccountMetadata[],
+): WhatsAppAccountStatus {
+  return mergeAccountMetadata([account], metadata)[0] ?? account;
 }
 
 function parseAuditLogInput(body: unknown): AuditLogInput {
