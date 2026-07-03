@@ -6,7 +6,7 @@ import makeWASocket, {
   type WAMessageContent,
   useMultiFileAuthState,
 } from "@whiskeysockets/baileys";
-import { mkdir, readdir, rm } from "node:fs/promises";
+import { mkdir, readdir, readFile, rename, rm } from "node:fs/promises";
 import path from "node:path";
 import pino from "pino";
 import type {
@@ -450,24 +450,40 @@ export class BaileysWhatsAppGateway implements WhatsAppGateway {
     await mkdir(this.stateDir, { recursive: true });
     const entries = await readdir(this.stateDir, { withFileTypes: true }).catch(() => []);
     for (const entry of entries) {
-      if (!entry.isDirectory() || this.accounts.has(entry.name)) {
+      if (!entry.isDirectory()) {
         continue;
       }
 
-      if (entry.name.startsWith("pending-") && !(await hasPersistedAuthState(this.getAccountPath(entry.name)))) {
-        await rm(this.getAccountPath(entry.name), { recursive: true, force: true });
+      let accountId = entry.name;
+      let transient = accountId.startsWith("pending-");
+      if (transient) {
+        const pendingPath = this.getAccountPath(accountId);
+        if (!(await hasPersistedAuthState(pendingPath))) {
+          await rm(pendingPath, { recursive: true, force: true });
+          continue;
+        }
+
+        accountId = await normalizePendingAccountDirectory({
+          currentAccountId: accountId,
+          currentPath: pendingPath,
+          getAccountPath: (nextAccountId) => this.getAccountPath(nextAccountId),
+        });
+        transient = accountId.startsWith("pending-");
+      }
+
+      if (this.accounts.has(accountId)) {
         continue;
       }
 
-      await this.initializeAccountRuntime(entry.name, entry.name.startsWith("pending-")).catch((error: unknown) => {
-        this.accounts.set(entry.name, {
-          accountId: entry.name,
-          statePath: this.getAccountPath(entry.name),
-          transient: entry.name.startsWith("pending-"),
+      await this.initializeAccountRuntime(accountId, transient).catch((error: unknown) => {
+        this.accounts.set(accountId, {
+          accountId,
+          statePath: this.getAccountPath(accountId),
+          transient,
           reconnecting: false,
           disconnecting: false,
           status: {
-            accountId: entry.name,
+            accountId,
             status: "disconnected",
             disconnectedAt: new Date().toISOString(),
             lastError: error instanceof Error ? error.message : "Persisted WhatsApp account initialization failed.",
@@ -481,6 +497,46 @@ export class BaileysWhatsAppGateway implements WhatsAppGateway {
 async function hasPersistedAuthState(accountPath: string) {
   const entries = await readdir(accountPath).catch(() => []);
   return entries.some((entry) => entry.endsWith(".json"));
+}
+
+async function normalizePendingAccountDirectory(options: {
+  currentAccountId: string;
+  currentPath: string;
+  getAccountPath: (accountId: string) => string;
+}) {
+  const linkedAccountId = await readLinkedAccountIdFromCreds(options.currentPath);
+  if (!linkedAccountId || linkedAccountId === options.currentAccountId) {
+    return options.currentAccountId;
+  }
+
+  const nextAccountId = sanitizePathSegment(linkedAccountId);
+  if (!nextAccountId || nextAccountId.startsWith("pending-")) {
+    return options.currentAccountId;
+  }
+
+  const nextPath = options.getAccountPath(nextAccountId);
+  const destinationExists = await hasPersistedAuthState(nextPath);
+  if (destinationExists) {
+    return options.currentAccountId;
+  }
+
+  await rename(options.currentPath, nextPath).catch(() => undefined);
+  const moved = await hasPersistedAuthState(nextPath);
+  return moved ? nextAccountId : options.currentAccountId;
+}
+
+async function readLinkedAccountIdFromCreds(accountPath: string) {
+  const rawCreds = await readFile(path.join(accountPath, "creds.json"), "utf8").catch(() => "");
+  if (!rawCreds) {
+    return null;
+  }
+
+  try {
+    const parsed = JSON.parse(rawCreds) as { me?: { id?: unknown } };
+    return typeof parsed.me?.id === "string" ? getBareWhatsAppUserId(parsed.me.id) : null;
+  } catch {
+    return null;
+  }
 }
 
 function normalizeBaileysMessage(accountId: string, message: WAMessage): WhatsAppMessageEvent | null {
@@ -660,6 +716,10 @@ function getLinkedAccountId(socket?: WASocket): string | null {
     return null;
   }
 
+  return getBareWhatsAppUserId(userId);
+}
+
+function getBareWhatsAppUserId(userId: string): string | null {
   const bareId = userId.split("@")[0]?.split(":")[0]?.trim();
   return bareId || null;
 }

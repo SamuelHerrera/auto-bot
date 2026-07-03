@@ -3,7 +3,7 @@ import { Icon } from "@iconify/react";
 import { QRCodeSVG } from "qrcode.react";
 
 type AccountStatus = "disconnected" | "connecting" | "connected";
-type NumberSubview = "messages" | "rules" | "failures";
+type NumberSubview = "home" | "messages" | "rules" | "failures";
 type NumberRuleAction = "allow" | "deny";
 type NumberRuleMatchType = "all" | "exact" | "regex";
 type RefreshScope = "accounts" | "activity" | "rules" | "logs";
@@ -135,7 +135,7 @@ export function App() {
   const [deliveries, setDeliveries] = useState<DeliveryRecord[]>([]);
   const [numberRules, setNumberRules] = useState<NumberRule[]>([]);
   const [auditLogs, setAuditLogs] = useState<AuditLogRecord[]>([]);
-  const [activeNumberView, setActiveNumberView] = useState<NumberSubview>("messages");
+  const [activeNumberView, setActiveNumberView] = useState<NumberSubview>("home");
   const [accountSearch, setAccountSearch] = useState("");
   const [openAccountTabs, setOpenAccountTabs] = useState<string[]>(initialWorkspace.openAccountTabs);
   const [isNumberPanelOpen, setIsNumberPanelOpen] = useState(false);
@@ -601,7 +601,7 @@ export function App() {
     openAccountTab(accountId);
     setActiveAccountId(accountId);
     setActiveChatJid("");
-    setActiveNumberView("messages");
+    setActiveNumberView("home");
     setIsNumberPanelOpen(false);
     setStatusMessage(`Opened ${accountId}.`);
   }
@@ -657,6 +657,8 @@ export function App() {
     .filter((account): account is WhatsAppAccount => Boolean(account));
   const activeAccount = accounts.find((account) => account.accountId === activeAccountId) ?? null;
   const activeChats = buildChatSummaries(activeAccountId, mappings, deliveries);
+  const activeAccountDeliveries = deliveries.filter((delivery) => delivery.accountId === activeAccountId);
+  const activeAccountMappings = mappings.filter((mapping) => mapping.accountId === activeAccountId);
   const activeChat = activeChats.find((chat) => chat.chatJid === activeChatJid) ?? activeChats[0] ?? null;
   const activeChatMessages = activeChat
     ? buildChatMessages(deliveries.filter(
@@ -773,8 +775,10 @@ export function App() {
               activeChatMessages={activeChatMessages}
               activeView={activeNumberView}
               chats={activeChats}
+              deliveries={activeAccountDeliveries}
               failedDeliveries={activeAccountFailedDeliveries}
               isBusy={isBusy}
+              mappings={activeAccountMappings}
               matchType={ruleMatchType}
               aliasDraft={activeAccount ? accountAliasDrafts[activeAccount.accountId] ?? activeAccount.alias ?? "" : ""}
               onActionChange={setRuleAction}
@@ -845,8 +849,10 @@ function NumberWorkspace({
   activeChatMessages,
   activeView,
   chats,
+  deliveries,
   failedDeliveries,
   isBusy,
+  mappings,
   matchType,
   onActionChange,
   onAliasChange,
@@ -873,8 +879,10 @@ function NumberWorkspace({
   activeChatMessages: ChatMessage[];
   activeView: NumberSubview;
   chats: ChatSummary[];
+  deliveries: DeliveryRecord[];
   failedDeliveries: DeliveryRecord[];
   isBusy: boolean;
+  mappings: SessionMapping[];
   matchType: NumberRuleMatchType;
   onActionChange: (value: NumberRuleAction) => void;
   onAliasChange: (value: string) => void;
@@ -894,44 +902,31 @@ function NumberWorkspace({
   ruleLabel: string;
   rules: NumberRule[];
 }) {
+  const [isAliasDialogOpen, setIsAliasDialogOpen] = useState(false);
+
   if (!account) {
     return <EmptyState title="Number unavailable" description="Select another number from the left rail." />;
   }
 
+  const hasAlias = Boolean(account.alias?.trim());
+
   return (
     <>
       <div className="number-header">
-        <div>
+        <div className="number-title">
           <span className="panel-kicker">Number</span>
           <h2>{getAccountPrimaryLabel(account)}</h2>
-          <p>{getAccountDetailLine(account)}</p>
+          {hasAlias ? <p>{account.accountId}</p> : null}
         </div>
         <div className="number-header-actions">
-          <form
-            className="alias-form"
-            onSubmit={(event) => {
-              event.preventDefault();
-              onAliasSave(aliasDraft);
-            }}
-          >
-            <label>
-              <span className="visually-hidden">Number alias</span>
-              <input
-                value={aliasDraft}
-                onChange={(event) => onAliasChange(event.target.value)}
-                placeholder="Alias"
-                maxLength={80}
-                disabled={isPendingAccountId(account.accountId)}
-              />
-            </label>
-            <IconButton
-              icon="mdi:content-save-outline"
-              label="Save alias"
-              type="submit"
-              variant="secondary"
-              disabled={isBusy || isPendingAccountId(account.accountId)}
-            />
-          </form>
+          <AccountInfoPanel account={account} chatCount={chats.length} deliveryCount={deliveries.length} ruleCount={rules.length} />
+          <IconButton
+            icon="mdi:pencil-outline"
+            label="Edit alias"
+            variant="secondary"
+            onClick={() => setIsAliasDialogOpen(true)}
+            disabled={isPendingAccountId(account.accountId)}
+          />
           <span className={`badge badge-${account.status}`} title={getAccountStatusDetail(account)}>
             {account.status}
           </span>
@@ -946,6 +941,9 @@ function NumberWorkspace({
       </div>
 
       <div className="subnav" aria-label="Number sections">
+        <TabButton active={activeView === "home"} icon="mdi:view-dashboard-outline" onClick={() => onViewChange("home")}>
+          Home
+        </TabButton>
         <TabButton active={activeView === "messages"} icon="mdi:message-text-outline" onClick={() => onViewChange("messages")}>
           Messages
         </TabButton>
@@ -957,9 +955,19 @@ function NumberWorkspace({
         </TabButton>
       </div>
 
+      {activeView === "home" ? (
+        <HomeView
+          account={account}
+          chats={chats}
+          deliveries={deliveries}
+          failedDeliveries={failedDeliveries}
+          mappings={mappings}
+          rules={rules}
+        />
+      ) : null}
+
       {activeView === "messages" ? (
         <MessagesView
-          activeAccount={account}
           activeAccountId={account.accountId}
           activeChat={activeChat}
           activeChatJid={activeChatJid}
@@ -991,7 +999,124 @@ function NumberWorkspace({
       {activeView === "failures" ? (
         <FailuresView failedDeliveries={failedDeliveries} isBusy={isBusy} onRetry={onRetry} />
       ) : null}
+
+      {isAliasDialogOpen ? (
+        <AliasDialog
+          account={account}
+          aliasDraft={aliasDraft}
+          isBusy={isBusy}
+          onAliasChange={onAliasChange}
+          onClose={() => setIsAliasDialogOpen(false)}
+          onSave={(alias) => {
+            onAliasSave(alias);
+            setIsAliasDialogOpen(false);
+          }}
+        />
+      ) : null}
     </>
+  );
+}
+
+function AccountInfoPanel({
+  account,
+  chatCount,
+  deliveryCount,
+  ruleCount,
+}: {
+  account: WhatsAppAccount;
+  chatCount: number;
+  deliveryCount: number;
+  ruleCount: number;
+}) {
+  return (
+    <details className="account-info-panel">
+      <summary aria-label="Show account details" title="Account details">
+        <Icon icon="mdi:information-outline" aria-hidden="true" />
+      </summary>
+      <dl>
+        <div>
+          <dt>Account</dt>
+          <dd>{account.accountId}</dd>
+        </div>
+        <div>
+          <dt>Connection</dt>
+          <dd>{getAccountActivity(account)}</dd>
+        </div>
+        <div>
+          <dt>Chats</dt>
+          <dd>{chatCount}</dd>
+        </div>
+        <div>
+          <dt>Deliveries</dt>
+          <dd>{deliveryCount}</dd>
+        </div>
+        <div>
+          <dt>Rules</dt>
+          <dd>{ruleCount}</dd>
+        </div>
+        {account.lastError ? (
+          <div>
+            <dt>Last error</dt>
+            <dd>{account.lastError}</dd>
+          </div>
+        ) : null}
+      </dl>
+    </details>
+  );
+}
+
+function AliasDialog({
+  account,
+  aliasDraft,
+  isBusy,
+  onAliasChange,
+  onClose,
+  onSave,
+}: {
+  account: WhatsAppAccount;
+  aliasDraft: string;
+  isBusy: boolean;
+  onAliasChange: (value: string) => void;
+  onClose: () => void;
+  onSave: (alias: string) => void;
+}) {
+  return (
+    <div className="dialog-backdrop" role="presentation">
+      <section className="alias-dialog" role="dialog" aria-modal="true" aria-labelledby="alias-dialog-title">
+        <form
+          onSubmit={(event) => {
+            event.preventDefault();
+            onSave(aliasDraft);
+          }}
+        >
+          <div className="dialog-header">
+            <div>
+              <span className="panel-kicker">Alias</span>
+              <h3 id="alias-dialog-title">Edit display name</h3>
+              <p className="dialog-subtitle">{account.accountId}</p>
+            </div>
+            <IconButton icon="mdi:close" label="Close alias dialog" variant="text" onClick={onClose} type="button" />
+          </div>
+
+          <div className="dialog-body alias-dialog-body">
+            <label className="field">
+              <span>Alias</span>
+              <input
+                autoFocus
+                value={aliasDraft}
+                onChange={(event) => onAliasChange(event.target.value)}
+                placeholder="Optional display name"
+                maxLength={80}
+              />
+            </label>
+            <div className="dialog-actions">
+              <IconButton icon="mdi:close" label="Cancel" type="button" variant="secondary" onClick={onClose} />
+              <IconButton icon="mdi:content-save-outline" label="Save alias" type="submit" disabled={isBusy} />
+            </div>
+          </div>
+        </form>
+      </section>
+    </div>
   );
 }
 
@@ -1113,8 +1238,123 @@ function LinkAccountDialog({
   );
 }
 
+function HomeView({
+  account,
+  chats,
+  deliveries,
+  failedDeliveries,
+  mappings,
+  rules,
+}: {
+  account: WhatsAppAccount;
+  chats: ChatSummary[];
+  deliveries: DeliveryRecord[];
+  failedDeliveries: DeliveryRecord[];
+  mappings: SessionMapping[];
+  rules: NumberRule[];
+}) {
+  const messageCount = buildChatMessages(deliveries.filter((delivery) => delivery.chatType === "direct")).length;
+  const sentDeliveries = deliveries.filter((delivery) => delivery.status === "sent").length;
+  const pendingDeliveries = deliveries.filter((delivery) => delivery.status === "pending").length;
+  const latestChat = chats[0] ?? null;
+  const enabledRules = rules.filter((rule) => rule.enabled).length;
+
+  return (
+    <>
+      <div className="summary-strip summary-strip-home">
+        <Metric label="Chats" value={String(chats.length)} />
+        <Metric label="Messages" value={String(messageCount)} />
+        {failedDeliveries.length ? (
+          <Metric label="Failures" value={String(failedDeliveries.length)} tone="danger" />
+        ) : (
+          <Metric label="Failures" value="0" />
+        )}
+        <Metric label="Routes" value={String(mappings.length)} />
+      </div>
+
+      <div className="home-grid">
+        <section className="home-section">
+          <div className="section-heading section-heading-compact">
+            <div>
+              <span className="panel-kicker">Connection</span>
+              <h3>{account.status}</h3>
+            </div>
+          </div>
+          <dl className="detail-list">
+            <div>
+              <dt>Number</dt>
+              <dd>{account.accountId}</dd>
+            </div>
+            <div>
+              <dt>Alias</dt>
+              <dd>{account.alias?.trim() || "Not set"}</dd>
+            </div>
+            <div>
+              <dt>Activity</dt>
+              <dd>{getAccountActivity(account)}</dd>
+            </div>
+            <div>
+              <dt>Status detail</dt>
+              <dd>{getAccountStatusDetail(account)}</dd>
+            </div>
+          </dl>
+        </section>
+
+        <section className="home-section">
+          <div className="section-heading section-heading-compact">
+            <div>
+              <span className="panel-kicker">Messages</span>
+              <h3>Delivery overview</h3>
+            </div>
+          </div>
+          <dl className="detail-list">
+            <div>
+              <dt>Sent</dt>
+              <dd>{sentDeliveries}</dd>
+            </div>
+            <div>
+              <dt>Pending</dt>
+              <dd>{pendingDeliveries}</dd>
+            </div>
+            <div>
+              <dt>Failed</dt>
+              <dd>{failedDeliveries.length}</dd>
+            </div>
+            <div>
+              <dt>Latest chat</dt>
+              <dd>{latestChat ? `${latestChat.chatJid} · ${formatTimestamp(latestChat.updatedAt)}` : "No chat activity"}</dd>
+            </div>
+          </dl>
+        </section>
+
+        <section className="home-section">
+          <div className="section-heading section-heading-compact">
+            <div>
+              <span className="panel-kicker">Controls</span>
+              <h3>Rules</h3>
+            </div>
+          </div>
+          <dl className="detail-list">
+            <div>
+              <dt>Total rules</dt>
+              <dd>{rules.length}</dd>
+            </div>
+            <div>
+              <dt>Enabled</dt>
+              <dd>{enabledRules}</dd>
+            </div>
+            <div>
+              <dt>Disabled</dt>
+              <dd>{rules.length - enabledRules}</dd>
+            </div>
+          </dl>
+        </section>
+      </div>
+    </>
+  );
+}
+
 function MessagesView({
-  activeAccount,
   activeAccountId,
   activeChat,
   activeChatJid,
@@ -1122,7 +1362,6 @@ function MessagesView({
   chats,
   onSelectChat,
 }: {
-  activeAccount: WhatsAppAccount | null;
   activeAccountId: string;
   activeChat: ChatSummary | null;
   activeChatJid: string;
@@ -1131,20 +1370,7 @@ function MessagesView({
   onSelectChat: (chatJid: string) => void;
 }) {
   return (
-    <>
-      <div className="section-heading">
-        <div>
-          <span className="panel-kicker">Messages</span>
-          <h2>Direct chat activity</h2>
-        </div>
-      </div>
-
-      <div className="summary-strip">
-        <Metric label="Chats" value={String(chats.length)} />
-        <Metric label="Messages" value={String(activeChatMessages.length)} />
-        <Metric label="Account" value={activeAccount?.status ?? "none"} />
-      </div>
-
+    <div className="messages-view">
       <div className="chat-workspace">
         <section className="chat-list-pane">
           <div className="section-heading">
@@ -1231,7 +1457,7 @@ function MessagesView({
           )}
         </section>
       </div>
-    </>
+    </div>
   );
 }
 

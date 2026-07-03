@@ -439,12 +439,16 @@ button:disabled {
   display: flex;
   gap: 14px;
   justify-content: space-between;
-  min-height: 86px;
-  padding: 16px;
+  min-height: 68px;
+  padding: 12px 16px;
+}
+
+.number-title {
+  min-width: 0;
 }
 
 .number-header h2 {
-  font-size: 1.2rem;
+  font-size: 1.12rem;
   margin: 0;
   overflow-wrap: anywhere;
 }
@@ -462,27 +466,74 @@ button:disabled {
   justify-content: end;
 }
 
-.alias-form {
+.account-info-panel {
+  position: relative;
+}
+
+.account-info-panel summary {
   align-items: center;
-  display: flex;
-  gap: 8px;
-  min-width: min(320px, 100%);
+  background: #ffffff;
+  border: 1px solid #ccd7cf;
+  border-radius: 6px;
+  color: #526058;
+  cursor: pointer;
+  display: inline-flex;
+  height: 40px;
+  justify-content: center;
+  list-style: none;
+  width: 40px;
 }
 
-.alias-form label {
+.account-info-panel summary::-webkit-details-marker {
+  display: none;
+}
+
+.account-info-panel summary svg {
+  height: 1.2rem;
+  width: 1.2rem;
+}
+
+.account-info-panel[open] summary,
+.account-info-panel summary:hover,
+.account-info-panel summary:focus {
+  border-color: #167f5b;
+  color: #09643f;
+  outline: none;
+}
+
+.account-info-panel dl {
+  background: #ffffff;
+  border: 1px solid #ccd7cf;
+  box-shadow: 0 16px 36px rgba(23, 33, 29, 0.16);
+  display: grid;
+  margin: 8px 0 0;
+  min-width: min(360px, calc(100vw - 32px));
+  position: absolute;
+  right: 0;
+  z-index: 10;
+}
+
+.account-info-panel div {
+  border-bottom: 1px solid #e5ebe6;
+  display: grid;
+  gap: 10px;
+  grid-template-columns: 96px minmax(0, 1fr);
+  padding: 10px 12px;
+}
+
+.account-info-panel div:last-child {
+  border-bottom: 0;
+}
+
+.account-info-panel dt {
+  color: #66746c;
+  font-weight: 750;
+}
+
+.account-info-panel dd {
+  margin: 0;
   min-width: 0;
-}
-
-.alias-form input {
-  min-height: 38px;
-  padding-block: 8px;
-}
-
-.alias-form .icon-button {
-  flex: 0 0 auto;
-  min-height: 38px;
-  min-width: 38px;
-  padding: 8px;
+  overflow-wrap: anywhere;
 }
 
 .subnav {
@@ -910,7 +961,8 @@ button {
   z-index: 20;
 }
 
-.link-dialog {
+.link-dialog,
+.alias-dialog {
   background: #ffffff;
   border: 1px solid #ccd7cf;
   box-shadow: 0 24px 60px rgba(23, 33, 29, 0.22);
@@ -947,6 +999,21 @@ button {
 
 .dialog-body {
   padding: 20px;
+}
+
+.alias-dialog form {
+  margin: 0;
+}
+
+.alias-dialog-body {
+  display: grid;
+  gap: 18px;
+}
+
+.dialog-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: end;
 }
 
 .number-panel-body {
@@ -1043,6 +1110,10 @@ button {
   grid-template-columns: repeat(3, minmax(0, 1fr));
 }
 
+.summary-strip-home {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
 .metric-row {
   border-right: 1px solid #e5ebe6;
   display: grid;
@@ -1067,6 +1138,36 @@ button {
 
 .metric-row-danger strong {
   color: #a33b2f;
+}
+
+.home-grid {
+  display: grid;
+  gap: 16px;
+  grid-template-columns: repeat(2, minmax(280px, 1fr));
+  padding: 16px;
+}
+
+.home-section {
+  border: 1px solid #e5ebe6;
+  min-width: 0;
+}
+
+.home-section .detail-list {
+  border: 0;
+  border-top: 1px solid #e5ebe6;
+}
+
+.home-section .detail-list div {
+  grid-template-columns: minmax(96px, 0.32fr) minmax(0, 1fr);
+}
+
+.section-heading-compact {
+  min-height: 0;
+  padding: 14px 16px;
+}
+
+.messages-view .chat-workspace {
+  min-height: 640px;
 }
 
 .chat-workspace {
@@ -1510,6 +1611,7 @@ button {
   .admin-layout,
   .accounts-grid,
   .operation-grid,
+  .home-grid,
   .chat-workspace,
   .summary-strip,
   .rule-form {
@@ -1561,8 +1663,14 @@ button {
   .branding-preview,
   .table-row,
   .detail-list div,
+  .account-info-panel div,
   .select-field {
     grid-template-columns: 1fr;
+  }
+
+  .account-info-panel dl {
+    left: auto;
+    right: 0;
   }
 
   .brand-lockup,
