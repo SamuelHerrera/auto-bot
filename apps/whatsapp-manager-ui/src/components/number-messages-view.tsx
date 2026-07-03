@@ -40,6 +40,7 @@ export function MessagesView({
                   <span className="chat-meta">
                     <span>{formatTimestamp(chat.updatedAt)}</span>
                     <span>{formatCountLabel(chat.messageCount, "message")}</span>
+                    {chat.unreadCount ? <span className="unread-pill">{chat.unreadCount}</span> : null}
                     {chat.failedCount ? <span>{chat.failedCount} failed</span> : null}
                   </span>
                 </button>
@@ -51,22 +52,46 @@ export function MessagesView({
         <section className="chat-detail-pane">
           {activeChat ? (
             <div className="chat-detail-content">
+              <header className="chat-thread-header">
+                <div>
+                  <strong>{activeChat.displayName ?? activeChat.phoneNumber ?? activeChat.chatJid}</strong>
+                  <span>{activeChat.phoneNumber ?? activeChat.pnJid ?? activeChat.chatJid}</span>
+                </div>
+                <small>{activeChat.source === "mixed" ? "Synced + routed" : activeChat.source}</small>
+              </header>
               <div className="message-list">
                 {activeChatMessages.length === 0 ? (
                   <EmptyState
-                    title="No stored messages"
-                    description="Only routed delivery records are available in this version."
+                    title="No messages stored"
+                    description="This chat is known from sync metadata, but WhatsApp did not provide message content yet."
                   />
                 ) : (
                   activeChatMessages.map((message) => (
                     <article key={message.id} className={`message-row message-row-${message.direction}`}>
-                      <div>
-                        <strong>{message.direction === "inbound" ? "WhatsApp" : "Hermes"}</strong>
-                        <time>{formatTimestamp(message.timestamp)}</time>
+                      <div className="message-bubble">
+                        {message.media?.length ? (
+                          <div className="message-media-stack">
+                            {message.media.map((item) => (
+                              <span key={item.id} className="message-media-chip">
+                                {item.mediaType}
+                                {item.localPath ? " saved" : ""}
+                              </span>
+                            ))}
+                          </div>
+                        ) : null}
+                        <p>{message.text}</p>
+                        {message.updates?.length ? (
+                          <div className="message-update-line">
+                            {message.updates.map((update) => update.updateType).join(", ")}
+                          </div>
+                        ) : null}
+                        <footer>
+                          <time>{formatTimestamp(message.timestamp)}</time>
+                          {message.status ? <span className={`delivery-status delivery-status-${message.status}`}>{message.status}</span> : null}
+                          {message.receipts?.length ? <span>{latestReceiptLabel(message)}</span> : null}
+                        </footer>
+                        {message.record && "error" in message.record && message.record.error ? <p className="error-text">{message.record.error}</p> : null}
                       </div>
-                      <p>{message.text}</p>
-                      <span className={`delivery-status delivery-status-${message.status}`}>{message.status}</span>
-                      {message.record.error ? <p className="error-text">{message.record.error}</p> : null}
                     </article>
                   ))
                 )}
@@ -79,4 +104,10 @@ export function MessagesView({
       </div>
     </div>
   );
+}
+
+function latestReceiptLabel(message: ChatMessage) {
+  const latest = [...(message.receipts ?? [])]
+    .sort((a, b) => Date.parse(b.timestamp ?? b.receivedAt) - Date.parse(a.timestamp ?? a.receivedAt))[0];
+  return latest?.receiptType ?? "received";
 }

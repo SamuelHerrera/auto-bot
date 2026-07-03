@@ -1,4 +1,16 @@
-import type { ChatMessage, ChatSummary, DeliveryRecord, SessionMapping, WhatsAppContact, WhatsAppLidMapping } from "./models";
+import type {
+  ChatMessage,
+  ChatSummary,
+  DeliveryRecord,
+  SessionMapping,
+  WhatsAppContact,
+  WhatsAppLidMapping,
+  WhatsAppMediaAsset,
+  WhatsAppMessageReceipt,
+  WhatsAppMessageUpdate,
+  WhatsAppSyncedChat,
+  WhatsAppSyncedMessage,
+} from "./models";
 
 export type ContactDisplayIndex = Map<string, Pick<ChatSummary, "displayName" | "phoneNumber" | "lidJid" | "pnJid">>;
 
@@ -6,6 +18,8 @@ export function buildChatSummaries(
   accountId: string,
   mappings: SessionMapping[],
   deliveries: DeliveryRecord[],
+  syncedChats: WhatsAppSyncedChat[] = [],
+  syncedMessages: WhatsAppSyncedMessage[] = [],
   contactDisplayIndex: ContactDisplayIndex = new Map(),
 ): ChatSummary[] {
   if (!accountId) {
@@ -13,19 +27,45 @@ export function buildChatSummaries(
   }
 
   const chats = new Map<string, ChatSummary>();
+  const syncedMessageCounts = countMessagesByChat(syncedMessages.filter((item) => item.accountId === accountId));
+  const appliedSyncedMessageCounts = new Set<string>();
+
+  for (const syncedChat of syncedChats.filter((item) => item.accountId === accountId && item.chatType === "direct")) {
+    const display = contactDisplayIndex.get(syncedChat.chatJid);
+    const updatedAt = syncedChat.lastMessageAt ?? syncedChat.lastSeenAt;
+    const displayName = normalizeDisplayName(syncedChat.displayName, display?.phoneNumber);
+    chats.set(syncedChat.chatJid, {
+      accountId: syncedChat.accountId,
+      chatJid: syncedChat.chatJid,
+      ...display,
+      ...(displayName ? { displayName } : {}),
+      createdAt: syncedChat.firstSeenAt,
+      updatedAt,
+      deliveryCount: 0,
+      failedCount: 0,
+      messageCount: syncedMessageCounts.get(syncedChat.chatJid) ?? 0,
+      ...(syncedChat.unreadCount !== undefined ? { unreadCount: syncedChat.unreadCount } : {}),
+      source: "synced",
+    });
+    appliedSyncedMessageCounts.add(syncedChat.chatJid);
+  }
 
   for (const mapping of mappings.filter((item) => item.accountId === accountId && item.chatType === "direct")) {
+    const current = chats.get(mapping.chatJid);
     chats.set(mapping.chatJid, {
       accountId: mapping.accountId,
       chatJid: mapping.chatJid,
       ...contactDisplayIndex.get(mapping.chatJid),
       sessionKey: mapping.sessionKey,
       hermesSessionId: mapping.hermesSessionId,
-      createdAt: mapping.createdAt,
-      updatedAt: mapping.updatedAt,
-      deliveryCount: 0,
-      failedCount: 0,
-      messageCount: 0,
+      createdAt: current?.createdAt ?? mapping.createdAt,
+      updatedAt: maxTimestamp(current?.updatedAt, mapping.updatedAt),
+      deliveryCount: current?.deliveryCount ?? 0,
+      failedCount: current?.failedCount ?? 0,
+      messageCount: current?.messageCount ?? 0,
+      ...(current?.unreadCount !== undefined ? { unreadCount: current.unreadCount } : {}),
+      source: current ? "mixed" : "routed",
+      ...(current?.lastText ? { lastText: current.lastText } : {}),
     });
   }
 
@@ -43,9 +83,41 @@ export function buildChatSummaries(
       deliveryCount: (current?.deliveryCount ?? 0) + 1,
       failedCount: (current?.failedCount ?? 0) + (delivery.status === "failed" ? 1 : 0),
       messageCount: (current?.messageCount ?? 0) + countDeliveryMessages(delivery),
+      ...(current?.unreadCount !== undefined ? { unreadCount: current.unreadCount } : {}),
+      source: current?.source === "synced" || current?.source === "mixed" ? "mixed" : "routed",
       ...(current?.hermesSessionId ? { hermesSessionId: current.hermesSessionId } : {}),
       ...(lastText ? { lastText } : {}),
     });
+  }
+
+  for (const message of syncedMessages.filter((item) => item.accountId === accountId)) {
+    const current = chats.get(message.chatJid);
+    if (!current) {
+      chats.set(message.chatJid, {
+        accountId,
+        chatJid: message.chatJid,
+        ...contactDisplayIndex.get(message.chatJid),
+        updatedAt: message.timestamp,
+        deliveryCount: 0,
+        failedCount: 0,
+        messageCount: syncedMessageCounts.get(message.chatJid) ?? 1,
+        source: "synced",
+        ...(message.text ? { lastText: message.text } : {}),
+      });
+      appliedSyncedMessageCounts.add(message.chatJid);
+      continue;
+    }
+
+    const messageIsNewer = Date.parse(message.timestamp) >= Date.parse(current.updatedAt);
+    const shouldApplySyncedCount = !appliedSyncedMessageCounts.has(message.chatJid);
+    chats.set(message.chatJid, {
+      ...current,
+      updatedAt: maxTimestamp(current.updatedAt, message.timestamp),
+      messageCount: shouldApplySyncedCount ? current.messageCount + (syncedMessageCounts.get(message.chatJid) ?? 0) : current.messageCount,
+      source: current.source === "routed" ? "mixed" : current.source,
+      ...(messageIsNewer && message.text ? { lastText: message.text } : {}),
+    });
+    appliedSyncedMessageCounts.add(message.chatJid);
   }
 
   return [...chats.values()].sort((a, b) => Date.parse(b.updatedAt) - Date.parse(a.updatedAt));
@@ -72,8 +144,13 @@ export function buildContactDisplayIndex(
   }
 
   for (const contact of contacts) {
-    const displayName = contact.displayName || contact.notifyName || contact.verifiedName || contact.pushName;
-    const phoneNumber = contact.phoneNumber || jidToPhoneNumber(contact.contactJid) || (contact.lidJid ? index.get(contact.lidJid)?.phoneNumber : undefined);
+    const rawDisplayName = contact.displayName || contact.notifyName || contact.verifiedName || contact.pushName;
+    const phoneNumber =
+      normalizePhoneNumber(contact.phoneNumber) ||
+      jidToPhoneNumber(contact.contactJid) ||
+      index.get(contact.contactJid)?.phoneNumber ||
+      (contact.lidJid ? index.get(contact.lidJid)?.phoneNumber : undefined);
+    const displayName = normalizeDisplayName(rawDisplayName, phoneNumber);
     const contactDisplay = {
       ...(displayName ? { displayName } : {}),
       ...(phoneNumber ? { phoneNumber } : {}),
@@ -94,8 +171,18 @@ export function countDeliveryMessages(delivery: DeliveryRecord): number {
   return Number(Boolean(delivery.inboundText?.trim())) + Number(Boolean(delivery.outboundText.trim()));
 }
 
-export function buildChatMessages(deliveries: DeliveryRecord[]): ChatMessage[] {
-  return deliveries
+export function buildChatMessages(
+  deliveries: DeliveryRecord[],
+  syncedMessages: WhatsAppSyncedMessage[] = [],
+  receipts: WhatsAppMessageReceipt[] = [],
+  updates: WhatsAppMessageUpdate[] = [],
+  mediaAssets: WhatsAppMediaAsset[] = [],
+): ChatMessage[] {
+  const receiptsByMessage = groupByMessageId(receipts);
+  const updatesByMessage = groupByMessageId(updates.filter((update) => update.messageId));
+  const mediaByMessage = groupByMessageId(mediaAssets);
+
+  const deliveryMessages = deliveries
     .flatMap((delivery): ChatMessage[] => {
       const messages: ChatMessage[] = [];
       if (delivery.inboundText?.trim()) {
@@ -105,6 +192,7 @@ export function buildChatMessages(deliveries: DeliveryRecord[]): ChatMessage[] {
           text: delivery.inboundText,
           status: delivery.status,
           timestamp: delivery.createdAt,
+          source: "delivery",
           record: delivery,
         });
       }
@@ -115,11 +203,39 @@ export function buildChatMessages(deliveries: DeliveryRecord[]): ChatMessage[] {
           text: delivery.outboundText,
           status: delivery.status,
           timestamp: delivery.updatedAt,
+          source: "delivery",
           record: delivery,
         });
       }
       return messages;
-    })
+    });
+
+  const syncMessages = syncedMessages.map((message): ChatMessage => {
+    const media = mediaByMessage.get(message.messageId) ?? [];
+    const reaction = parseJsonRecord(message.reactionJson);
+    const fallbackText = media.length
+      ? media.map((item) => item.caption || item.fileName || `${item.mediaType} attachment`).join(", ")
+      : reaction?.emoji && reaction?.targetMessageId
+        ? `${reaction.emoji} reacted to ${reaction.targetMessageId}`
+        : message.messageType
+          ? `[${message.messageType}]`
+          : "[message]";
+    return {
+      id: `sync:${message.accountId}:${message.chatJid}:${message.messageId}`,
+      direction: message.fromMe ? "outbound" : "inbound",
+      text: message.text?.trim() || fallbackText,
+      timestamp: message.timestamp,
+      source: "sync",
+      ...(message.messageType ? { messageType: message.messageType } : {}),
+      media,
+      receipts: receiptsByMessage.get(message.messageId) ?? [],
+      updates: updatesByMessage.get(message.messageId) ?? [],
+      record: message,
+    };
+  });
+
+  return [...syncMessages, ...deliveryMessages]
+    .filter((message, index, all) => all.findIndex((candidate) => messagesOverlap(candidate, message)) === index)
     .sort((a, b) => Date.parse(a.timestamp) - Date.parse(b.timestamp));
 }
 
@@ -151,6 +267,65 @@ function jidToPhoneNumber(jid: string | undefined) {
   return phone || undefined;
 }
 
+function normalizePhoneNumber(value: string | undefined) {
+  return jidToPhoneNumber(value) ?? value;
+}
+
+function normalizeDisplayName(value: string | undefined, phoneNumber: string | undefined) {
+  if (!value) {
+    return undefined;
+  }
+
+  return value.endsWith("@s.whatsapp.net") || value.endsWith("@lid") ? phoneNumber : value;
+}
+
 function removeUndefined<T extends Record<string, unknown>>(value: T): Partial<T> {
   return Object.fromEntries(Object.entries(value).filter(([, item]) => item !== undefined)) as Partial<T>;
+}
+
+function countMessagesByChat(messages: WhatsAppSyncedMessage[]) {
+  const counts = new Map<string, number>();
+  for (const message of messages) {
+    counts.set(message.chatJid, (counts.get(message.chatJid) ?? 0) + 1);
+  }
+
+  return counts;
+}
+
+function groupByMessageId<T extends { messageId?: string }>(items: T[]) {
+  const grouped = new Map<string, T[]>();
+  for (const item of items) {
+    if (!item.messageId) {
+      continue;
+    }
+
+    grouped.set(item.messageId, [...(grouped.get(item.messageId) ?? []), item]);
+  }
+
+  return grouped;
+}
+
+function parseJsonRecord(value: string | undefined): Record<string, unknown> | null {
+  if (!value) {
+    return null;
+  }
+
+  try {
+    const parsed = JSON.parse(value);
+    return parsed && typeof parsed === "object" ? parsed as Record<string, unknown> : null;
+  } catch {
+    return null;
+  }
+}
+
+function messagesOverlap(left: ChatMessage, right: ChatMessage) {
+  if (left.id === right.id) {
+    return true;
+  }
+
+  if (left.source === right.source || left.direction !== right.direction || left.text !== right.text) {
+    return false;
+  }
+
+  return Math.abs(Date.parse(left.timestamp) - Date.parse(right.timestamp)) < 2000;
 }

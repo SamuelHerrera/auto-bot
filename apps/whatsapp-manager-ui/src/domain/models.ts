@@ -69,6 +69,74 @@ export interface WhatsAppLidMapping {
   rawPayload?: unknown;
 }
 
+export interface WhatsAppSyncedChat {
+  accountId: string;
+  chatJid: string;
+  chatType: "direct" | "group";
+  displayName?: string;
+  unreadCount?: number;
+  archived?: boolean;
+  muted?: boolean;
+  pinned?: boolean;
+  lastMessageAt?: string;
+  rawPayload?: unknown;
+  firstSeenAt: string;
+  lastSeenAt: string;
+}
+
+export interface WhatsAppSyncedMessage {
+  accountId: string;
+  chatJid: string;
+  messageId: string;
+  senderJid?: string;
+  fromMe: boolean;
+  timestamp: string;
+  messageType?: string;
+  text?: string;
+  mediaJson?: string;
+  reactionJson?: string;
+  rawJson?: string;
+  receivedAt: string;
+}
+
+export interface WhatsAppMessageReceipt {
+  id: string;
+  accountId: string;
+  chatJid: string;
+  messageId: string;
+  participantJid?: string;
+  receiptType?: string;
+  timestamp?: string;
+  rawJson?: string;
+  receivedAt: string;
+}
+
+export interface WhatsAppMessageUpdate {
+  id: string;
+  accountId: string;
+  chatJid?: string;
+  messageId?: string;
+  updateType: string;
+  rawJson?: string;
+  receivedAt: string;
+}
+
+export interface WhatsAppMediaAsset {
+  id: string;
+  accountId: string;
+  chatJid: string;
+  messageId: string;
+  mediaType: "image" | "video" | "audio" | "document";
+  mimetype?: string;
+  fileName?: string;
+  caption?: string;
+  url?: string;
+  directPath?: string;
+  localPath?: string;
+  rawJson?: string;
+  receivedAt: string;
+}
+
 export interface NumberRule {
   id: string;
   accountId: string;
@@ -95,6 +163,8 @@ export interface ChatSummary {
   deliveryCount: number;
   failedCount: number;
   messageCount: number;
+  unreadCount?: number;
+  source: "routed" | "synced" | "mixed";
   lastText?: string;
 }
 
@@ -102,9 +172,14 @@ export interface ChatMessage {
   id: string;
   direction: "inbound" | "outbound";
   text: string;
-  status: DeliveryRecord["status"];
+  status?: DeliveryRecord["status"];
   timestamp: string;
-  record: DeliveryRecord;
+  source: "delivery" | "sync";
+  messageType?: string;
+  media?: WhatsAppMediaAsset[];
+  receipts?: WhatsAppMessageReceipt[];
+  updates?: WhatsAppMessageUpdate[];
+  record?: DeliveryRecord | WhatsAppSyncedMessage;
 }
 
 export interface AuditLogRecord {

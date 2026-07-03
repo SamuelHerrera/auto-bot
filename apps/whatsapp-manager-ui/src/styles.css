@@ -1349,6 +1349,7 @@ button {
   grid-template-columns: minmax(280px, 0.42fr) minmax(0, 1fr);
   height: 100%;
   min-height: 0;
+  background: #f7faf7;
 }
 
 .chat-list-pane {
@@ -1384,16 +1385,16 @@ button {
   gap: 10px;
   grid-template-columns: minmax(0, 1fr) auto;
   justify-content: stretch;
-  min-height: 76px;
+  min-height: 62px;
   min-width: 0;
-  padding: 12px 16px;
+  padding: 10px 14px;
   text-align: left;
   width: 100%;
 }
 
 .chat-row-active {
-  background: #f0f7f3;
-  box-shadow: inset 3px 0 0 #167f5b;
+  background: #eaf6ef;
+  box-shadow: inset 3px 0 0 #128c5b;
 }
 
 .chat-row strong,
@@ -1419,22 +1420,78 @@ button {
   white-space: nowrap;
 }
 
+.unread-pill {
+  align-items: center;
+  background: #25d366;
+  border-radius: 999px;
+  color: #073b24;
+  display: inline-flex;
+  font-size: 0.72rem;
+  font-weight: 900;
+  justify-content: center;
+  min-height: 20px;
+  min-width: 20px;
+  padding: 0 6px;
+}
+
 .chat-detail-content {
   display: grid;
-  grid-template-rows: minmax(0, 1fr);
+  grid-template-rows: auto minmax(0, 1fr);
   height: 100%;
   min-height: 0;
   overflow: hidden;
-  padding: 16px;
+  padding: 0;
+}
+
+.chat-thread-header {
+  align-items: center;
+  background: #f0f5f1;
+  border-bottom: 1px solid #dbe6df;
+  display: flex;
+  justify-content: space-between;
+  min-height: 56px;
+  padding: 10px 16px;
+}
+
+.chat-thread-header div {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.chat-thread-header strong,
+.chat-thread-header span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chat-thread-header span,
+.chat-thread-header small {
+  color: #66746c;
+  font-size: 0.82rem;
+}
+
+.chat-thread-header small {
+  border: 1px solid #cfe0d6;
+  border-radius: 999px;
+  padding: 3px 8px;
+  text-transform: capitalize;
 }
 
 .message-list {
   align-content: start;
-  border: 1px solid #e5ebe6;
+  background:
+    linear-gradient(rgba(239, 247, 241, 0.9), rgba(239, 247, 241, 0.9)),
+    radial-gradient(circle at 14px 14px, rgba(18, 140, 91, 0.08) 1px, transparent 1px);
+  background-size: auto, 28px 28px;
+  border: 0;
   display: grid;
   grid-auto-rows: max-content;
+  gap: 5px;
   min-height: 0;
   overflow: auto;
+  padding: 12px 18px;
 }
 
 .message-list-header {
@@ -1448,70 +1505,101 @@ button {
 .message-row {
   align-content: start;
   align-items: start;
-  border-bottom: 1px solid #e5ebe6;
-  display: grid;
-  gap: 8px;
-  min-width: 0;
-  padding: 12px;
-}
-
-.message-row:last-child {
   border-bottom: 0;
-}
-
-.message-row > div {
-  align-items: baseline;
   display: flex;
-  gap: 10px;
-  justify-content: space-between;
-}
-
-.message-row time {
-  color: #66746c;
-  font-size: 0.78rem;
-}
-
-.message-row p {
-  margin: 0;
-  overflow-wrap: anywhere;
+  min-width: 0;
+  padding: 0;
 }
 
 .message-row-inbound {
-  background: #ffffff;
+  justify-content: flex-start;
 }
 
 .message-row-outbound {
-  background: #f8faf8;
+  justify-content: flex-end;
+}
+
+.message-bubble {
+  background: #ffffff;
+  border: 1px solid rgba(214, 224, 217, 0.9);
+  border-radius: 7px;
+  box-shadow: 0 1px 1px rgba(18, 40, 28, 0.08);
+  color: #1f2c25;
+  display: grid;
+  gap: 4px;
+  max-width: min(620px, 78%);
+  min-width: 92px;
+  padding: 6px 8px 5px;
+}
+
+.message-row-outbound .message-bubble {
+  background: #d9fdd3;
+  border-color: #c2efbd;
+}
+
+.message-bubble p {
+  font-size: 0.92rem;
+  line-height: 1.32;
+  margin: 0;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
+.message-bubble footer {
+  align-items: center;
+  color: #66746c;
+  display: flex;
+  font-size: 0.7rem;
+  gap: 5px;
+  justify-content: flex-end;
+  line-height: 1;
+}
+
+.message-media-stack {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.message-media-chip,
+.message-update-line {
+  background: rgba(7, 94, 84, 0.08);
+  border-radius: 999px;
+  color: #075e54;
+  font-size: 0.72rem;
+  font-weight: 800;
+  padding: 3px 7px;
+}
+
+.message-update-line {
+  justify-self: start;
 }
 
 .delivery-status {
   align-self: start;
-  border-radius: 999px;
+  background: transparent;
+  border-radius: 0;
   display: inline-flex;
-  font-size: 0.76rem;
+  font-size: 0.7rem;
   font-weight: 800;
   justify-self: start;
   line-height: 1.2;
-  padding: 3px 8px;
+  padding: 0;
 }
 
 .delivery-status-sent {
-  background: #dff6e8;
   color: #09643f;
 }
 
 .delivery-status-pending {
-  background: #fff1cf;
   color: #8a5b00;
 }
 
 .delivery-status-failed {
-  background: #fff3f1;
   color: #a33b2f;
 }
 
 .delivery-status-ignored {
-  background: #eef1ee;
   color: #526058;
 }
 
