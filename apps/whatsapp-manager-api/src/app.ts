@@ -273,6 +273,30 @@ export function createApp({ config, services = buildServices(config) }: CreateAp
     }) ?? [],
   }));
 
+  app.get<{ Querystring: SyncListQuery & { chatJid?: string } }>("/whatsapp/sync/message-receipts", async (request) => ({
+    items: services.whatsappSyncStore?.listWhatsAppMessageReceipts({
+      limit: readLimit(request.query.limit, 1000),
+      ...(request.query.accountId ? { accountId: request.query.accountId } : {}),
+      ...(request.query.chatJid ? { chatJid: request.query.chatJid } : {}),
+    }) ?? [],
+  }));
+
+  app.get<{ Querystring: SyncListQuery & { chatJid?: string } }>("/whatsapp/sync/message-updates", async (request) => ({
+    items: services.whatsappSyncStore?.listWhatsAppMessageUpdates({
+      limit: readLimit(request.query.limit, 1000),
+      ...(request.query.accountId ? { accountId: request.query.accountId } : {}),
+      ...(request.query.chatJid ? { chatJid: request.query.chatJid } : {}),
+    }) ?? [],
+  }));
+
+  app.get<{ Querystring: SyncListQuery & { chatJid?: string } }>("/whatsapp/sync/media-assets", async (request) => ({
+    items: services.whatsappSyncStore?.listWhatsAppMediaAssets({
+      limit: readLimit(request.query.limit, 1000),
+      ...(request.query.accountId ? { accountId: request.query.accountId } : {}),
+      ...(request.query.chatJid ? { chatJid: request.query.chatJid } : {}),
+    }) ?? [],
+  }));
+
   app.get<{ Querystring: SyncListQuery }>("/whatsapp/sync/lid-mappings", async (request) => ({
     items: services.whatsappSyncStore?.listWhatsAppLidMappings(
       request.query.accountId,
@@ -721,6 +745,9 @@ function emptyWhatsAppSyncSummary() {
     contacts: 0,
     chats: 0,
     messages: 0,
+    messageReceipts: 0,
+    messageUpdates: 0,
+    mediaAssets: 0,
     lidMappings: 0,
     historySyncBatches: 0,
     syncEvents: 0,

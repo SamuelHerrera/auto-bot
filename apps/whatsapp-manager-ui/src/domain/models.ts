@@ -44,6 +44,31 @@ export interface DeliveryRecord {
   updatedAt: string;
 }
 
+export interface WhatsAppContact {
+  accountId: string;
+  contactJid: string;
+  phoneNumber?: string;
+  lidJid?: string;
+  notifyName?: string;
+  verifiedName?: string;
+  pushName?: string;
+  displayName?: string;
+  source: string;
+  firstSeenAt: string;
+  lastSeenAt: string;
+  rawPayload?: unknown;
+}
+
+export interface WhatsAppLidMapping {
+  accountId: string;
+  lidJid: string;
+  pnJid: string;
+  source: string;
+  firstSeenAt: string;
+  lastSeenAt: string;
+  rawPayload?: unknown;
+}
+
 export interface NumberRule {
   id: string;
   accountId: string;
@@ -59,6 +84,10 @@ export interface NumberRule {
 export interface ChatSummary {
   accountId: string;
   chatJid: string;
+  displayName?: string;
+  phoneNumber?: string;
+  lidJid?: string;
+  pnJid?: string;
   sessionKey?: string;
   hermesSessionId?: string;
   createdAt?: string;

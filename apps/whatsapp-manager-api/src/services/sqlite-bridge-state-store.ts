@@ -17,6 +17,9 @@ import type {
   WhatsAppGroupRoutingPolicy,
   WhatsAppHistorySyncBatchRecord,
   WhatsAppLidMappingRecord,
+  WhatsAppMediaAssetRecord,
+  WhatsAppMessageReceiptRecord,
+  WhatsAppMessageUpdateRecord,
   WhatsAppStoredMessageRecord,
   WhatsAppSyncEventRecord,
   WhatsAppSyncSummary,
@@ -520,6 +523,90 @@ export class SqliteBridgeStateStore
       );
   }
 
+  saveWhatsAppMessageReceipt(record: WhatsAppMessageReceiptRecord): void {
+    this.db
+      .prepare(`
+        INSERT INTO whatsapp_message_receipts
+          (id, account_id, chat_jid, message_id, participant_jid, receipt_type, timestamp, raw_json, received_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(id) DO UPDATE SET
+          participant_jid = COALESCE(excluded.participant_jid, whatsapp_message_receipts.participant_jid),
+          receipt_type = COALESCE(excluded.receipt_type, whatsapp_message_receipts.receipt_type),
+          timestamp = COALESCE(excluded.timestamp, whatsapp_message_receipts.timestamp),
+          raw_json = COALESCE(excluded.raw_json, whatsapp_message_receipts.raw_json),
+          received_at = excluded.received_at
+      `)
+      .run(
+        record.id,
+        record.accountId,
+        record.chatJid,
+        record.messageId,
+        record.participantJid ?? null,
+        record.receiptType ?? null,
+        record.timestamp ?? null,
+        record.rawJson ?? null,
+        record.receivedAt,
+      );
+  }
+
+  saveWhatsAppMessageUpdate(record: WhatsAppMessageUpdateRecord): void {
+    this.db
+      .prepare(`
+        INSERT INTO whatsapp_message_updates
+          (id, account_id, chat_jid, message_id, update_type, raw_json, received_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(id) DO UPDATE SET
+          chat_jid = COALESCE(excluded.chat_jid, whatsapp_message_updates.chat_jid),
+          message_id = COALESCE(excluded.message_id, whatsapp_message_updates.message_id),
+          update_type = excluded.update_type,
+          raw_json = COALESCE(excluded.raw_json, whatsapp_message_updates.raw_json),
+          received_at = excluded.received_at
+      `)
+      .run(
+        record.id,
+        record.accountId,
+        record.chatJid ?? null,
+        record.messageId ?? null,
+        record.updateType,
+        record.rawJson ?? null,
+        record.receivedAt,
+      );
+  }
+
+  saveWhatsAppMediaAsset(record: WhatsAppMediaAssetRecord): void {
+    this.db
+      .prepare(`
+        INSERT INTO whatsapp_media_assets
+          (id, account_id, chat_jid, message_id, media_type, mimetype, file_name, caption, url, direct_path, local_path, raw_json, received_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(id) DO UPDATE SET
+          media_type = excluded.media_type,
+          mimetype = COALESCE(excluded.mimetype, whatsapp_media_assets.mimetype),
+          file_name = COALESCE(excluded.file_name, whatsapp_media_assets.file_name),
+          caption = COALESCE(excluded.caption, whatsapp_media_assets.caption),
+          url = COALESCE(excluded.url, whatsapp_media_assets.url),
+          direct_path = COALESCE(excluded.direct_path, whatsapp_media_assets.direct_path),
+          local_path = COALESCE(excluded.local_path, whatsapp_media_assets.local_path),
+          raw_json = COALESCE(excluded.raw_json, whatsapp_media_assets.raw_json),
+          received_at = excluded.received_at
+      `)
+      .run(
+        record.id,
+        record.accountId,
+        record.chatJid,
+        record.messageId,
+        record.mediaType,
+        record.mimetype ?? null,
+        record.fileName ?? null,
+        record.caption ?? null,
+        record.url ?? null,
+        record.directPath ?? null,
+        record.localPath ?? null,
+        record.rawJson ?? null,
+        record.receivedAt,
+      );
+  }
+
   saveWhatsAppLidMapping(record: WhatsAppLidMappingRecord): void {
     this.db
       .prepare(`
@@ -591,6 +678,9 @@ export class SqliteBridgeStateStore
       contacts: this.countRows("whatsapp_contacts", accountId),
       chats: this.countRows("whatsapp_chats", accountId),
       messages: this.countRows("whatsapp_messages", accountId),
+      messageReceipts: this.countRows("whatsapp_message_receipts", accountId),
+      messageUpdates: this.countRows("whatsapp_message_updates", accountId),
+      mediaAssets: this.countRows("whatsapp_media_assets", accountId),
       lidMappings: this.countRows("whatsapp_lid_mappings", accountId),
       historySyncBatches: this.countRows("whatsapp_history_sync_batches", accountId),
       syncEvents: this.countRows("whatsapp_sync_events", accountId),
@@ -629,6 +719,30 @@ export class SqliteBridgeStateStore
       .prepare(`SELECT * FROM whatsapp_messages ${clause} ORDER BY timestamp DESC LIMIT ?`)
       .all(...args, safeLimit(input.limit))
       .map(rowToWhatsAppMessage);
+  }
+
+  listWhatsAppMessageReceipts(input: { accountId?: string; chatJid?: string; limit?: number } = {}): WhatsAppMessageReceiptRecord[] {
+    const { clause, args } = syncWhereClause(input);
+    return this.db
+      .prepare(`SELECT * FROM whatsapp_message_receipts ${clause} ORDER BY COALESCE(timestamp, received_at) DESC LIMIT ?`)
+      .all(...args, safeLimit(input.limit))
+      .map(rowToWhatsAppMessageReceipt);
+  }
+
+  listWhatsAppMessageUpdates(input: { accountId?: string; chatJid?: string; limit?: number } = {}): WhatsAppMessageUpdateRecord[] {
+    const { clause, args } = syncWhereClause(input);
+    return this.db
+      .prepare(`SELECT * FROM whatsapp_message_updates ${clause} ORDER BY received_at DESC LIMIT ?`)
+      .all(...args, safeLimit(input.limit))
+      .map(rowToWhatsAppMessageUpdate);
+  }
+
+  listWhatsAppMediaAssets(input: { accountId?: string; chatJid?: string; limit?: number } = {}): WhatsAppMediaAssetRecord[] {
+    const { clause, args } = syncWhereClause(input);
+    return this.db
+      .prepare(`SELECT * FROM whatsapp_media_assets ${clause} ORDER BY received_at DESC LIMIT ?`)
+      .all(...args, safeLimit(input.limit))
+      .map(rowToWhatsAppMediaAsset);
   }
 
   listWhatsAppLidMappings(accountId?: string, limit = 200): WhatsAppLidMappingRecord[] {
@@ -801,6 +915,53 @@ export class SqliteBridgeStateStore
 
       CREATE INDEX IF NOT EXISTS whatsapp_messages_chat_timestamp_idx
         ON whatsapp_messages(account_id, chat_jid, timestamp DESC);
+
+      CREATE TABLE IF NOT EXISTS whatsapp_message_receipts (
+        id TEXT PRIMARY KEY,
+        account_id TEXT NOT NULL,
+        chat_jid TEXT NOT NULL,
+        message_id TEXT NOT NULL,
+        participant_jid TEXT,
+        receipt_type TEXT,
+        timestamp TEXT,
+        raw_json TEXT,
+        received_at TEXT NOT NULL
+      );
+
+      CREATE INDEX IF NOT EXISTS whatsapp_message_receipts_chat_idx
+        ON whatsapp_message_receipts(account_id, chat_jid, received_at DESC);
+
+      CREATE TABLE IF NOT EXISTS whatsapp_message_updates (
+        id TEXT PRIMARY KEY,
+        account_id TEXT NOT NULL,
+        chat_jid TEXT,
+        message_id TEXT,
+        update_type TEXT NOT NULL,
+        raw_json TEXT,
+        received_at TEXT NOT NULL
+      );
+
+      CREATE INDEX IF NOT EXISTS whatsapp_message_updates_chat_idx
+        ON whatsapp_message_updates(account_id, chat_jid, received_at DESC);
+
+      CREATE TABLE IF NOT EXISTS whatsapp_media_assets (
+        id TEXT PRIMARY KEY,
+        account_id TEXT NOT NULL,
+        chat_jid TEXT NOT NULL,
+        message_id TEXT NOT NULL,
+        media_type TEXT NOT NULL,
+        mimetype TEXT,
+        file_name TEXT,
+        caption TEXT,
+        url TEXT,
+        direct_path TEXT,
+        local_path TEXT,
+        raw_json TEXT,
+        received_at TEXT NOT NULL
+      );
+
+      CREATE INDEX IF NOT EXISTS whatsapp_media_assets_chat_idx
+        ON whatsapp_media_assets(account_id, chat_jid, received_at DESC);
 
       CREATE TABLE IF NOT EXISTS whatsapp_lid_mappings (
         account_id TEXT NOT NULL,
@@ -1032,6 +1193,53 @@ function rowToWhatsAppMessage(row: unknown): WhatsAppStoredMessageRecord {
   };
 }
 
+function rowToWhatsAppMessageReceipt(row: unknown): WhatsAppMessageReceiptRecord {
+  const value = row as Record<string, string | null>;
+  return {
+    id: String(value.id),
+    accountId: String(value.account_id),
+    chatJid: String(value.chat_jid),
+    messageId: String(value.message_id),
+    ...(value.participant_jid ? { participantJid: String(value.participant_jid) } : {}),
+    ...(value.receipt_type ? { receiptType: String(value.receipt_type) } : {}),
+    ...(value.timestamp ? { timestamp: String(value.timestamp) } : {}),
+    ...(value.raw_json ? { rawJson: String(value.raw_json) } : {}),
+    receivedAt: String(value.received_at),
+  };
+}
+
+function rowToWhatsAppMessageUpdate(row: unknown): WhatsAppMessageUpdateRecord {
+  const value = row as Record<string, string | null>;
+  return {
+    id: String(value.id),
+    accountId: String(value.account_id),
+    ...(value.chat_jid ? { chatJid: String(value.chat_jid) } : {}),
+    ...(value.message_id ? { messageId: String(value.message_id) } : {}),
+    updateType: String(value.update_type),
+    ...(value.raw_json ? { rawJson: String(value.raw_json) } : {}),
+    receivedAt: String(value.received_at),
+  };
+}
+
+function rowToWhatsAppMediaAsset(row: unknown): WhatsAppMediaAssetRecord {
+  const value = row as Record<string, string | null>;
+  return {
+    id: String(value.id),
+    accountId: String(value.account_id),
+    chatJid: String(value.chat_jid),
+    messageId: String(value.message_id),
+    mediaType: String(value.media_type) as WhatsAppMediaAssetRecord["mediaType"],
+    ...(value.mimetype ? { mimetype: String(value.mimetype) } : {}),
+    ...(value.file_name ? { fileName: String(value.file_name) } : {}),
+    ...(value.caption ? { caption: String(value.caption) } : {}),
+    ...(value.url ? { url: String(value.url) } : {}),
+    ...(value.direct_path ? { directPath: String(value.direct_path) } : {}),
+    ...(value.local_path ? { localPath: String(value.local_path) } : {}),
+    ...(value.raw_json ? { rawJson: String(value.raw_json) } : {}),
+    receivedAt: String(value.received_at),
+  };
+}
+
 function rowToWhatsAppLidMapping(row: unknown): WhatsAppLidMappingRecord {
   const value = row as Record<string, string | null>;
   return {
@@ -1077,6 +1285,24 @@ function accountWhereClause(accountId?: string) {
   }
 
   return { clause: "WHERE account_id = ?", args: [accountId.trim()] };
+}
+
+function syncWhereClause(input: { accountId?: string; chatJid?: string }) {
+  const filters: string[] = [];
+  const args: string[] = [];
+  if (input.accountId?.trim()) {
+    filters.push("account_id = ?");
+    args.push(input.accountId.trim());
+  }
+  if (input.chatJid?.trim()) {
+    filters.push("chat_jid = ?");
+    args.push(input.chatJid.trim());
+  }
+
+  return {
+    clause: filters.length ? `WHERE ${filters.join(" AND ")}` : "",
+    args,
+  };
 }
 
 function safeLimit(limit: number | undefined) {

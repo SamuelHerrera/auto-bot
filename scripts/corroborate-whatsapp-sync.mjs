@@ -16,6 +16,15 @@ const endpoints = {
   messages: chatJid
     ? `/whatsapp/sync/messages?limit=50&chatJid=${encodeURIComponent(chatJid)}`
     : "/whatsapp/sync/messages?limit=50",
+  messageReceipts: chatJid
+    ? `/whatsapp/sync/message-receipts?limit=50&chatJid=${encodeURIComponent(chatJid)}`
+    : "/whatsapp/sync/message-receipts?limit=50",
+  messageUpdates: chatJid
+    ? `/whatsapp/sync/message-updates?limit=50&chatJid=${encodeURIComponent(chatJid)}`
+    : "/whatsapp/sync/message-updates?limit=50",
+  mediaAssets: chatJid
+    ? `/whatsapp/sync/media-assets?limit=50&chatJid=${encodeURIComponent(chatJid)}`
+    : "/whatsapp/sync/media-assets?limit=50",
 };
 
 const data = await loadAll(endpoints);
@@ -24,6 +33,9 @@ const checks = [
   createCheck("Contacts", summary.contacts, true, "Contact rows are persisted"),
   createCheck("Chats", summary.chats, true, "Chat rows are persisted"),
   createCheck("Messages", summary.messages, true, chatJid ? `Messages are persisted for ${chatJid}` : "Message rows are persisted"),
+  createCheck("Message receipts", summary.messageReceipts, false, "Typed receipt rows are persisted when WhatsApp supplies them"),
+  createCheck("Message updates", summary.messageUpdates, false, "Typed edit/delete/reaction/media update rows are persisted when WhatsApp supplies them"),
+  createCheck("Media assets", summary.mediaAssets, false, "Typed media metadata rows are persisted when WhatsApp supplies them"),
   createCheck("LID mappings", summary.lidMappings, false, "LID to phone mappings are persisted when WhatsApp supplies them"),
   createCheck("History batches", summary.historySyncBatches, true, "History sync batches are journaled"),
   createCheck("Sync events", summary.syncEvents, true, "Raw sync events are journaled"),
@@ -41,6 +53,9 @@ const result = {
     chats: rows(data.chats.items),
     contacts: rows(data.contacts.items),
     messages: rows(data.messages.items),
+    messageReceipts: rows(data.messageReceipts.items),
+    messageUpdates: rows(data.messageUpdates.items),
+    mediaAssets: rows(data.mediaAssets.items),
     lidMappings: rows(data.lidMappings.items),
     syncEvents: rows(data.syncEvents.items),
   },
@@ -54,6 +69,9 @@ if (options.json) {
   printLatest("Latest history batches", result.latest.historyBatches, ["syncType", "chatCount", "contactCount", "messageCount", "receivedAt"]);
   printLatest("Latest chats", result.latest.chats, ["chatJid", "displayName", "lastMessageAt", "lastSeenAt"]);
   printLatest("Latest messages", result.latest.messages, ["chatJid", "messageId", "text", "timestamp"]);
+  printLatest("Latest message receipts", result.latest.messageReceipts, ["chatJid", "messageId", "participantJid", "receiptType", "timestamp"]);
+  printLatest("Latest message updates", result.latest.messageUpdates, ["chatJid", "messageId", "updateType", "receivedAt"]);
+  printLatest("Latest media assets", result.latest.mediaAssets, ["chatJid", "messageId", "mediaType", "mimetype", "fileName", "localPath"]);
   printLatest("Latest LID mappings", result.latest.lidMappings, ["lidJid", "pnJid", "lastSeenAt"]);
   printLatest("Latest sync events", result.latest.syncEvents, ["eventType", "payloadHash", "receivedAt"]);
 }

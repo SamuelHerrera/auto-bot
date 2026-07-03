@@ -34,8 +34,8 @@ export function MessagesView({
                   onClick={() => onSelectChat(chat.chatJid)}
                 >
                   <span>
-                    <strong>{chat.chatJid}</strong>
-                    <small>{chat.lastText ?? chat.hermesSessionId ?? "No message preview"}</small>
+                    <strong>{chat.displayName ?? chat.phoneNumber ?? chat.chatJid}</strong>
+                    <small>{chat.lastText ?? chat.phoneNumber ?? chat.pnJid ?? chat.chatJid}</small>
                   </span>
                   <span className="chat-meta">
                     <span>{formatTimestamp(chat.updatedAt)}</span>

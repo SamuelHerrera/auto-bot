@@ -14,6 +14,9 @@ const keys = [
   ["contacts", "Contacts"],
   ["chats", "Chats"],
   ["messages", "Messages"],
+  ["messageReceipts", "Message receipts"],
+  ["messageUpdates", "Message updates"],
+  ["mediaAssets", "Media assets"],
   ["lidMappings", "LID mappings"],
   ["historySyncBatches", "History batches"],
   ["syncEvents", "Sync events"],
@@ -27,7 +30,7 @@ const rows = keys.map(([key, label]) => {
     before: beforeCount,
     after: afterCount,
     delta: afterCount - beforeCount,
-    required: key !== "lidMappings",
+    required: !["lidMappings", "messageReceipts", "messageUpdates", "mediaAssets"].includes(key),
   };
 });
 const missingRequired = rows.filter((row) => row.required && row.after === 0);

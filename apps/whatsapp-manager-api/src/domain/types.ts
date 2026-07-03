@@ -227,6 +227,44 @@ export interface WhatsAppStoredMessageRecord {
   receivedAt: string;
 }
 
+export interface WhatsAppMessageReceiptRecord {
+  id: string;
+  accountId: string;
+  chatJid: string;
+  messageId: string;
+  participantJid?: string;
+  receiptType?: string;
+  timestamp?: string;
+  rawJson?: string;
+  receivedAt: string;
+}
+
+export interface WhatsAppMessageUpdateRecord {
+  id: string;
+  accountId: string;
+  chatJid?: string;
+  messageId?: string;
+  updateType: string;
+  rawJson?: string;
+  receivedAt: string;
+}
+
+export interface WhatsAppMediaAssetRecord {
+  id: string;
+  accountId: string;
+  chatJid: string;
+  messageId: string;
+  mediaType: MediaType;
+  mimetype?: string;
+  fileName?: string;
+  caption?: string;
+  url?: string;
+  directPath?: string;
+  localPath?: string;
+  rawJson?: string;
+  receivedAt: string;
+}
+
 export interface WhatsAppLidMappingRecord {
   accountId: string;
   lidJid: string;
@@ -261,6 +299,9 @@ export interface WhatsAppSyncSummary {
   contacts: number;
   chats: number;
   messages: number;
+  messageReceipts: number;
+  messageUpdates: number;
+  mediaAssets: number;
   lidMappings: number;
   historySyncBatches: number;
   syncEvents: number;
@@ -270,6 +311,9 @@ export interface WhatsAppSyncSnapshot {
   contacts: WhatsAppContactRecord[];
   chats: WhatsAppChatRecord[];
   messages: WhatsAppStoredMessageRecord[];
+  messageReceipts: WhatsAppMessageReceiptRecord[];
+  messageUpdates: WhatsAppMessageUpdateRecord[];
+  mediaAssets: WhatsAppMediaAssetRecord[];
   lidMappings: WhatsAppLidMappingRecord[];
   historySyncBatches: WhatsAppHistorySyncBatchRecord[];
   syncEvents: WhatsAppSyncEventRecord[];

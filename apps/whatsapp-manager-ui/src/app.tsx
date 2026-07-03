@@ -2,8 +2,8 @@ import { FormEvent, useCallback, useEffect, useRef, useState } from "react";
 
 import { EmptyState, LinkAccountDialog, LogsView, NumberChooserPanel, NumberWorkspace, SettingsView, TopBar } from "./components";
 import { accountMatchesSearch, findCompletedLinkedAccount, isPendingAccountId } from "./domain/accounts";
-import { buildChatMessages, buildChatSummaries } from "./domain/chats";
-import type { AuditLogRecord, BrandingSettings, DeliveryRecord, NumberRule, NumberRuleAction, NumberRuleMatchType, NumberSubview, RefreshScope, SessionMapping, WhatsAppAccount } from "./domain/models";
+import { buildChatMessages, buildChatSummaries, buildContactDisplayIndex } from "./domain/chats";
+import type { AuditLogRecord, BrandingSettings, DeliveryRecord, NumberRule, NumberRuleAction, NumberRuleMatchType, NumberSubview, RefreshScope, SessionMapping, WhatsAppAccount, WhatsAppContact, WhatsAppLidMapping } from "./domain/models";
 import { useLinkSession } from "./hooks/use-link-session";
 import { useWorkspaceTabs } from "./hooks/use-workspace-tabs";
 import { buildEventUrl, normalizeError, request } from "./services/api-client";
@@ -15,6 +15,8 @@ export function App() {
   const [hasLoadedAccounts, setHasLoadedAccounts] = useState(false);
   const [mappings, setMappings] = useState<SessionMapping[]>([]);
   const [deliveries, setDeliveries] = useState<DeliveryRecord[]>([]);
+  const [contacts, setContacts] = useState<WhatsAppContact[]>([]);
+  const [lidMappings, setLidMappings] = useState<WhatsAppLidMapping[]>([]);
   const [numberRules, setNumberRules] = useState<NumberRule[]>([]);
   const [auditLogs, setAuditLogs] = useState<AuditLogRecord[]>([]);
   const [activeNumberView, setActiveNumberView] = useState<NumberSubview>("home");
@@ -116,10 +118,12 @@ export function App() {
       const shouldRefreshActivity = scopes.includes("activity");
       const shouldRefreshRules = scopes.includes("rules");
       const shouldRefreshLogs = scopes.includes("logs");
-      const [accountResponse, mappingResponse, deliveryResponse, ruleResponse, linkStatus, auditLogResponse] = await Promise.all([
+      const [accountResponse, mappingResponse, deliveryResponse, contactResponse, lidMappingResponse, ruleResponse, linkStatus, auditLogResponse] = await Promise.all([
         shouldRefreshAccounts ? request<{ items: WhatsAppAccount[] }>("/whatsapp/accounts") : Promise.resolve(null),
         shouldRefreshActivity ? request<{ items: SessionMapping[] }>("/sessions") : Promise.resolve(null),
         shouldRefreshActivity ? request<{ items: DeliveryRecord[] }>("/deliveries") : Promise.resolve(null),
+        shouldRefreshActivity ? request<{ items: WhatsAppContact[] }>("/whatsapp/sync/contacts?limit=1000") : Promise.resolve(null),
+        shouldRefreshActivity ? request<{ items: WhatsAppLidMapping[] }>("/whatsapp/sync/lid-mappings?limit=1000") : Promise.resolve(null),
         shouldRefreshRules ? request<{ items: NumberRule[] }>("/number-rules") : Promise.resolve(null),
         shouldRefreshAccounts ? request<WhatsAppAccount>("/whatsapp/status") : Promise.resolve(null),
         shouldRefreshLogs ? request<{ items: AuditLogRecord[] }>("/audit-logs?limit=200") : Promise.resolve(null),
@@ -136,6 +140,12 @@ export function App() {
       }
       if (deliveryResponse) {
         setDeliveries(deliveryResponse.items.filter((delivery) => delivery.chatType === "direct"));
+      }
+      if (contactResponse) {
+        setContacts(contactResponse.items);
+      }
+      if (lidMappingResponse) {
+        setLidMappings(lidMappingResponse.items);
       }
       if (ruleResponse) {
         setNumberRules(ruleResponse.items);
@@ -385,7 +395,11 @@ export function App() {
     .map((accountId) => accounts.find((account) => account.accountId === accountId))
     .filter((account): account is WhatsAppAccount => Boolean(account));
   const activeAccount = accounts.find((account) => account.accountId === activeAccountId) ?? null;
-  const activeChats = buildChatSummaries(activeAccountId, mappings, deliveries);
+  const activeContactDisplayIndex = buildContactDisplayIndex(
+    contacts.filter((contact) => contact.accountId === activeAccountId),
+    lidMappings.filter((mapping) => mapping.accountId === activeAccountId),
+  );
+  const activeChats = buildChatSummaries(activeAccountId, mappings, deliveries, activeContactDisplayIndex);
   const activeAccountDeliveries = deliveries.filter((delivery) => delivery.accountId === activeAccountId);
   const activeAccountMappings = mappings.filter((mapping) => mapping.accountId === activeAccountId);
   const activeChat = activeChats.find((chat) => chat.chatJid === activeChatJid) ?? activeChats[0] ?? null;

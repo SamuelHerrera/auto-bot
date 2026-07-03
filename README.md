@@ -86,6 +86,7 @@ pnpm sync:compare -- --before before.json --after after.json
 - Docker exposes the WhatsApp API on `3000` and the UI dev server on `4173` by default.
 - The WhatsApp manager always uses live Baileys transport and persists auth state under `/opt/data/whatsapp-manager/baileys`.
 - Bridge mappings, processed WhatsApp message IDs, delivery records, and WhatsApp sync tables persist in SQLite at `/opt/data/whatsapp-manager/bridge-state.sqlite` by default.
+- Live WhatsApp media files are retained under `/opt/data/whatsapp-manager/media` by default, and the corresponding sync media row stores the local path.
 - Run `hermes gateway run --force --accept-hooks`; the WhatsApp manager always uses Hermes' native `/api/sessions/{id}/chat` session API. The container creates a persistent internal key at `/opt/data/whatsapp-manager/internal-api-key` and exports it under the compatibility names Hermes and the manager expect.
 - `zerotier-one` is installed, but actual ZeroTier networking inside the container requires `/dev/net/tun` plus extra capabilities; Docker Desktop on this Mac does not provide that.
 - Keep secrets in a local `.env` file, not committed to git.
@@ -111,6 +112,7 @@ VITE_WHATSAPP_MANAGER_UI_TITLE=WhatsApp Account Console
 HERMES_API_BASE_URL=http://127.0.0.1:8642
 HERMES_API_MODEL=hermes-agent
 BAILEYS_STATE_DIR=/opt/data/whatsapp-manager/baileys
+WHATSAPP_MEDIA_DIR=/opt/data/whatsapp-manager/media
 BRIDGE_DATABASE_FILE=/opt/data/whatsapp-manager/bridge-state.sqlite
 BRIDGE_STATE_FILE=
 AUTO_BOT_DATA_DIR=./data

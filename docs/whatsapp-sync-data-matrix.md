@@ -4,23 +4,24 @@ This document tracks the WhatsApp data persisted outside Baileys auth state so a
 
 ## Current Implementation
 
-The manager routes live `messages.upsert` events into Hermes and stores delivery records, processed message keys, session mappings, number rules, account aliases, and audit logs. It also journals WhatsApp sync/update events into dedicated SQLite tables and derives typed contact, chat, message, LID mapping, and history batch rows where the Baileys payload includes those fields.
+The manager routes live `messages.upsert` events into Hermes and stores delivery records, processed message keys, session mappings, number rules, account aliases, and audit logs. It also journals WhatsApp sync/update events into dedicated SQLite tables and derives typed contact, chat, message, receipt, message update, media metadata, LID mapping, and history batch rows where the Baileys payload includes those fields.
 
-A chat row may still show a WhatsApp LID such as `83038931275996@lid` because the UI currently displays the raw chat JID. The durable routing key should remain that raw JID; phone numbers and display names are now stored as enrichment data when WhatsApp supplies them.
+A chat row may still fall back to a WhatsApp LID such as `83038931275996@lid` when WhatsApp has not supplied contact or LID mapping enrichment. The durable routing key remains that raw JID; phone numbers and display names are enrichment data when available.
 
 ## Data Matrix
 
 | Area | Persistence target | Implementation | Corroboration signal |
 | --- | --- | --- | --- |
 | LID / phone mapping | `whatsapp_lid_mappings` | Store `lid_jid`, `pn_jid`, source, raw payload, first/last seen | Query rows after relogin and verify any `@lid` chat has a mapping when WhatsApp supplied one |
-| Contacts | `whatsapp_contacts` | Store contact id, phone number, lid, display names, raw payload | Chat list can resolve display labels without losing raw JID |
+| Contacts | `whatsapp_contacts` plus UI display index | Store contact id, phone number, lid, display names, raw payload | Chat list resolves display labels without losing raw JID |
 | Chats | `whatsapp_chats` | Store chat JID, type, display name, unread count, last message timestamp, archived/muted/pinned flags, raw payload | `/whatsapp/sync/chats` shows synced chats before Hermes routing |
 | Raw messages | `whatsapp_messages` | Store message id, chat JID, sender JID, direction, timestamp, type, text, media summary, raw payload | `/whatsapp/sync/messages` includes historical and live messages independent of delivery records |
 | History sync batches | `whatsapp_history_sync_batches` | Store stable sync id, account id, sync type, counts, progress/status, raw payload | Relogin creates one or more batch rows with processed counts |
 | Event journal | `whatsapp_sync_events` | Store event type, account id, payload hash, raw payload, received time | Every subscribed Baileys sync event leaves an auditable row |
-| Message metadata | `whatsapp_messages.raw_json` | Preserve full message content for edits, deletes, quoted messages, forwarded flags, and ephemeral wrappers | Raw JSON supports follow-up extraction without reconnecting |
-| Media metadata | `whatsapp_messages.media_json` | Store media attachment summaries from message content | Media-bearing messages are searchable even before file download support |
-| Receipts | `whatsapp_sync_events` initially | Journal receipt/update events raw until typed tables are added | Receipt events can be inspected after relogin |
+| Message metadata | `whatsapp_messages.raw_json`, `whatsapp_message_updates` | Preserve full message content and typed lifecycle rows for edits, deletes, reactions, media updates, and wrappers | Raw JSON and `/whatsapp/sync/message-updates` support follow-up extraction without reconnecting |
+| Media metadata | `whatsapp_messages.media_json`, `whatsapp_media_assets` | Store media attachment summaries from message content | Media-bearing messages are searchable and include local file paths when downloaded |
+| Media files | `WHATSAPP_MEDIA_DIR`, `whatsapp_media_assets.local_path`, media raw JSON | Download and retain live WhatsApp media bytes with local path, SHA-256 hash, and byte size | Live media upsert events write files under `/opt/data/whatsapp-manager/media` by default |
+| Receipts | `whatsapp_message_receipts` | Store typed receipt rows by chat/message/participant plus raw payload | `/whatsapp/sync/message-receipts` shows receipt updates after WhatsApp emits them |
 | Reactions | `whatsapp_messages.reaction_json` | Store reaction summary and raw message JSON | Reaction messages are visible outside Hermes delivery records |
 | Groups | `whatsapp_chats`, `whatsapp_contacts`, `whatsapp_sync_events` | Store group chat metadata raw even if routing ignores group messages | Group sync is observable without enabling group routing |
 | Account sync metadata | `whatsapp_sync_events`, `whatsapp_history_sync_batches` | Journal account/device sync events and batch checkpoints | Relogin can compare received sync events with stored rows |
@@ -137,7 +138,7 @@ pnpm sync:compare -- \
   --after data/sync-checks/corroboration-after-relogin.json
 ```
 
-The corroboration script exits with status `2` when required rows are missing for contacts, chats, messages, history batches, or sync events. LID mappings are reported as optional because WhatsApp does not guarantee every account/session emits LID-to-phone mappings.
+The corroboration script exits with status `2` when required rows are missing for contacts, chats, messages, history batches, or sync events. LID mappings, receipts, message updates, and media assets are reported as optional because WhatsApp does not guarantee every account/session emits those categories during a specific relogin window.
 
 To inspect messages for a specific chat:
 
@@ -162,6 +163,9 @@ The script prints raw JSON from:
 - `/whatsapp/sync/lid-mappings`
 - `/whatsapp/sync/events`
 - `/whatsapp/sync/messages`
+- `/whatsapp/sync/message-receipts`
+- `/whatsapp/sync/message-updates`
+- `/whatsapp/sync/media-assets`
 
 ## Important Constraint
 

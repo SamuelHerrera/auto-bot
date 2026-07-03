@@ -35,7 +35,7 @@ export interface AppServices {
 export function buildServices(config: AppConfig): AppServices {
   const hermesAdapter = buildHermesAdapter(config);
   const eventBus = new AppEventBus();
-  const whatsappGateway = new BaileysWhatsAppGateway(config.BAILEYS_STATE_DIR);
+  const whatsappGateway = new BaileysWhatsAppGateway(config.BAILEYS_STATE_DIR, config.WHATSAPP_MEDIA_DIR);
   const bridgeStore = config.BRIDGE_DATABASE_FILE
     ? new SqliteBridgeStateStore(config.BRIDGE_DATABASE_FILE)
     : config.BRIDGE_STATE_FILE

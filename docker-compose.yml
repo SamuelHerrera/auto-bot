@@ -19,6 +19,7 @@ services:
       API_TOKEN: ${WHATSAPP_MANAGER_API_TOKEN:-local-dev-token}
       CORS_ORIGIN: ${WHATSAPP_MANAGER_UI_CORS_ORIGIN:-*}
       BAILEYS_STATE_DIR: ${BAILEYS_STATE_DIR:-/opt/data/whatsapp-manager/baileys}
+      WHATSAPP_MEDIA_DIR: ${WHATSAPP_MEDIA_DIR:-/opt/data/whatsapp-manager/media}
       BRIDGE_DATABASE_FILE: ${BRIDGE_DATABASE_FILE:-/opt/data/whatsapp-manager/bridge-state.sqlite}
       BRIDGE_STATE_FILE: ${BRIDGE_STATE_FILE:-}
       HERMES_API_BASE_URL: ${HERMES_API_BASE_URL:-http://127.0.0.1:8642}

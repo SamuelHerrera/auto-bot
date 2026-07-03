@@ -1384,6 +1384,9 @@ describe("whatsapp-manager-api", () => {
           contacts: 1,
           chats: 1,
           messages: 1,
+          messageReceipts: 0,
+          messageUpdates: 0,
+          mediaAssets: 0,
           lidMappings: 1,
           historySyncBatches: 1,
           syncEvents: 2,
@@ -1606,6 +1609,143 @@ describe("whatsapp-manager-api", () => {
             chatJid: "120363000000000000@g.us",
             chatType: "group",
             displayName: "Array Group",
+          }),
+        ]);
+      } finally {
+        await syncApp.close();
+      }
+    } finally {
+      rmSync(dir, { force: true, recursive: true });
+    }
+  });
+
+  it("persists typed receipt, lifecycle update, and media asset sync rows", async () => {
+    const dir = mkdtempSync(path.join(tmpdir(), "auto-bot-whatsapp-events-sync-"));
+    const syncConfig = loadConfig({
+      ...process.env,
+      API_TOKEN: "test-token",
+      BRIDGE_DATABASE_FILE: path.join(dir, "bridge-state.sqlite"),
+      BRIDGE_STATE_FILE: "",
+      DATABASE_URL: "postgres://postgres:postgres@127.0.0.1:5432/auto_bot",
+      NODE_ENV: "test",
+      PORT: "3000",
+    });
+
+    try {
+      const services = createTestServices(syncConfig);
+      const gateway = services.whatsappGateway as TestWhatsAppGateway;
+      const syncApp = createApp({ config: syncConfig, services });
+
+      try {
+        gateway.injectSyncEvent({
+          accountId: "ops-main",
+          eventType: "messages.upsert",
+          receivedAt: "2026-07-03T12:30:00.000Z",
+          payload: {
+            messages: [
+              {
+                key: {
+                  remoteJid: "83038931275996@lid",
+                  id: "wamid.media.1",
+                  fromMe: false,
+                },
+                messageTimestamp: 1783081200,
+                message: {
+                  imageMessage: {
+                    mimetype: "image/jpeg",
+                    caption: "menu photo",
+                    directPath: "/v/t62.7118/image.enc",
+                  },
+                },
+              },
+            ],
+            type: "notify",
+          },
+        });
+        gateway.injectSyncEvent({
+          accountId: "ops-main",
+          eventType: "message-receipt.update",
+          receivedAt: "2026-07-03T12:30:01.000Z",
+          payload: [
+            {
+              key: {
+                remoteJid: "83038931275996@lid",
+                id: "wamid.media.1",
+              },
+              userJid: "15551234567@s.whatsapp.net",
+              receipt: "read",
+              t: 1783081201,
+            },
+          ],
+        });
+        gateway.injectSyncEvent({
+          accountId: "ops-main",
+          eventType: "messages.delete",
+          receivedAt: "2026-07-03T12:30:02.000Z",
+          payload: {
+            keys: [
+              {
+                remoteJid: "83038931275996@lid",
+                id: "wamid.media.1",
+              },
+            ],
+          },
+        });
+
+        const headers = { authorization: "Bearer test-token" };
+        const summary = await syncApp.inject({
+          method: "GET",
+          url: "/whatsapp/sync/summary?accountId=ops-main",
+          headers,
+        });
+        const receipts = await syncApp.inject({
+          method: "GET",
+          url: "/whatsapp/sync/message-receipts?accountId=ops-main",
+          headers,
+        });
+        const updates = await syncApp.inject({
+          method: "GET",
+          url: "/whatsapp/sync/message-updates?accountId=ops-main",
+          headers,
+        });
+        const mediaAssets = await syncApp.inject({
+          method: "GET",
+          url: "/whatsapp/sync/media-assets?accountId=ops-main",
+          headers,
+        });
+
+        expect(summary.json()).toEqual(
+          expect.objectContaining({
+            messages: 1,
+            messageReceipts: 1,
+            messageUpdates: 1,
+            mediaAssets: 1,
+            syncEvents: 3,
+          }),
+        );
+        expect(receipts.json().items).toEqual([
+          expect.objectContaining({
+            chatJid: "83038931275996@lid",
+            messageId: "wamid.media.1",
+            participantJid: "15551234567@s.whatsapp.net",
+            receiptType: "read",
+          }),
+        ]);
+        expect(updates.json().items).toEqual([
+          expect.objectContaining({
+            chatJid: "83038931275996@lid",
+            messageId: "wamid.media.1",
+            updateType: "messages.delete",
+          }),
+        ]);
+        expect(mediaAssets.json().items).toEqual([
+          expect.objectContaining({
+            chatJid: "83038931275996@lid",
+            messageId: "wamid.media.1",
+            mediaType: "image",
+            mimetype: "image/jpeg",
+            caption: "menu photo",
+            directPath: "/v/t62.7118/image.enc",
           }),
         ]);
       } finally {

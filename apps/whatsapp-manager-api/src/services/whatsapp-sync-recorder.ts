@@ -5,6 +5,9 @@ import type {
   WhatsAppContactRecord,
   WhatsAppHistorySyncBatchRecord,
   WhatsAppLidMappingRecord,
+  WhatsAppMediaAssetRecord,
+  WhatsAppMessageReceiptRecord,
+  WhatsAppMessageUpdateRecord,
   WhatsAppStoredMessageRecord,
   WhatsAppSyncEventRecord,
 } from "../domain/types.js";
@@ -36,6 +39,15 @@ export function recordWhatsAppSyncEvent(store: WhatsAppSyncStore | undefined, ev
   }
   for (const message of extractMessages(event)) {
     store.saveWhatsAppMessage(message);
+  }
+  for (const receipt of extractMessageReceipts(event)) {
+    store.saveWhatsAppMessageReceipt(receipt);
+  }
+  for (const update of extractMessageUpdates(event, payloadHash)) {
+    store.saveWhatsAppMessageUpdate(update);
+  }
+  for (const mediaAsset of extractMediaAssets(event)) {
+    store.saveWhatsAppMediaAsset(mediaAsset);
   }
   for (const mapping of extractLidMappings(event)) {
     store.saveWhatsAppLidMapping(mapping);
@@ -146,6 +158,90 @@ function extractMessages(event: WhatsAppSyncEvent): WhatsAppStoredMessageRecord[
   });
 }
 
+function extractMessageReceipts(event: WhatsAppSyncEvent): WhatsAppMessageReceiptRecord[] {
+  if (event.eventType !== "message-receipt.update") {
+    return [];
+  }
+
+  return readPayloadArray(event.payload).flatMap((item, index) => {
+    const value = asRecord(item);
+    const key = asRecord(value.key);
+    const chatJid = readString(key.remoteJid) ?? readString(value.remoteJid) ?? readString(value.chatJid);
+    const messageId = readString(key.id) ?? readString(value.messageId) ?? readString(value.id);
+    if (!chatJid || !messageId) {
+      return [];
+    }
+
+    const participantJid = readString(value.userJid) ?? readString(value.participant) ?? readString(key.participant);
+    const receiptType = readString(value.receipt) ?? readString(value.type) ?? readString(value.status);
+    const timestamp = normalizeTimestamp(value.t ?? value.timestamp ?? value.receiptTimestamp);
+    return [{
+      id: `${event.accountId}:${chatJid}:${messageId}:${participantJid ?? "unknown"}:${receiptType ?? "receipt"}:${index}`,
+      accountId: event.accountId,
+      chatJid,
+      messageId,
+      ...(participantJid ? { participantJid } : {}),
+      ...(receiptType ? { receiptType } : {}),
+      ...(timestamp ? { timestamp } : {}),
+      rawJson: safeJsonStringify(value),
+      receivedAt: event.receivedAt,
+    }];
+  });
+}
+
+function extractMessageUpdates(event: WhatsAppSyncEvent, payloadHash: string): WhatsAppMessageUpdateRecord[] {
+  const updateTypes = new Set([
+    "messages.update",
+    "messages.delete",
+    "messages.media-update",
+    "messages.reaction",
+  ]);
+  if (!updateTypes.has(event.eventType)) {
+    return [];
+  }
+
+  const items = event.eventType === "messages.delete"
+    ? readDeleteItems(event.payload)
+    : readPayloadArray(event.payload);
+  return items.flatMap((item, index) => {
+    const value = asRecord(item);
+    const key = asRecord(value.key);
+    const chatJid = readString(key.remoteJid) ?? readString(value.jid) ?? readString(value.chatJid);
+    const messageId = readString(key.id) ?? readString(value.messageId) ?? readString(value.id);
+    return [{
+      id: `${event.accountId}:${event.eventType}:${chatJid ?? "unknown"}:${messageId ?? payloadHash}:${index}`,
+      accountId: event.accountId,
+      ...(chatJid ? { chatJid } : {}),
+      ...(messageId ? { messageId } : {}),
+      updateType: event.eventType,
+      rawJson: safeJsonStringify(value),
+      receivedAt: event.receivedAt,
+    }];
+  });
+}
+
+function extractMediaAssets(event: WhatsAppSyncEvent): WhatsAppMediaAssetRecord[] {
+  const messages = readArray(event.payload, "messages");
+  return messages.flatMap((item) => {
+    const message = asRecord(item);
+    const key = asRecord(message.key);
+    const chatJid = readString(key.remoteJid);
+    const messageId = readString(key.id);
+    if (!chatJid || !messageId) {
+      return [];
+    }
+
+    return extractMessageMediaRecords(asRecord(message.message)).map((media, index) => ({
+      id: `${event.accountId}:${chatJid}:${messageId}:${media.mediaType}:${index}`,
+      accountId: event.accountId,
+      chatJid,
+      messageId,
+      ...media,
+      receivedAt: event.receivedAt,
+    }));
+  });
+}
+
 function extractLidMappings(event: WhatsAppSyncEvent): WhatsAppLidMappingRecord[] {
   const candidates = [
     ...readArray(event.payload, "mapping"),
@@ -245,6 +341,50 @@ function extractMessageMedia(message: Record<string, unknown>): Array<Record<str
     ];
 }
 
+function extractMessageMediaRecords(message: Record<string, unknown>): Array<Omit<WhatsAppMediaAssetRecord, "id" | "accountId" | "chatJid" | "messageId" | "receivedAt">> {
+  if (Object.keys(message).length === 0) {
+    return [];
+  }
+
+  const entries: Array<[WhatsAppMediaAssetRecord["mediaType"], Record<string, unknown>]> = [
+    ["image", asRecord(message.imageMessage)],
+    ["video", asRecord(message.videoMessage)],
+    ["audio", asRecord(message.audioMessage)],
+    ["document", asRecord(message.documentMessage)],
+  ];
+  const direct = entries.flatMap(([mediaType, value]) => {
+    if (Object.keys(value).length === 0) {
+      return [];
+    }
+
+    const mimetype = readString(value.mimetype);
+    const fileName = readString(value.fileName);
+    const caption = readString(value.caption);
+    const url = readString(value.url);
+    const directPath = readString(value.directPath);
+    const localPath = readString(value.localPath);
+    return [{
+      mediaType,
+      ...(mimetype ? { mimetype } : {}),
+      ...(fileName ? { fileName } : {}),
+      ...(caption ? { caption } : {}),
+      ...(url ? { url } : {}),
+      ...(directPath ? { directPath } : {}),
+      ...(localPath ? { localPath } : {}),
+      rawJson: safeJsonStringify(value),
+    }];
+  });
+
+  return direct.length
+    ? direct
+    : [
+      ...extractMessageMediaRecords(asRecord(asRecord(message.ephemeralMessage).message)),
+      ...extractMessageMediaRecords(asRecord(asRecord(message.viewOnceMessage).message)),
+      ...extractMessageMediaRecords(asRecord(asRecord(message.viewOnceMessageV2).message)),
+      ...extractMessageMediaRecords(asRecord(asRecord(message.documentWithCaptionMessage).message)),
+    ];
+}
+
 function extractReaction(message: Record<string, unknown>): Record<string, unknown> | undefined {
   const reaction = asRecord(message.reactionMessage);
   const emoji = readString(reaction.text);
@@ -272,6 +412,20 @@ function readArray(payload: unknown, key: string): unknown[] {
 
 function readPayloadArray(payload: unknown): unknown[] {
   return Array.isArray(payload) ? payload : [];
+}
+
+function readDeleteItems(payload: unknown): unknown[] {
+  const value = asRecord(payload);
+  const keys = value.keys;
+  if (Array.isArray(keys)) {
+    return keys.map((key) => ({ key }));
+  }
+
+  if (readString(value.jid) && value.all === true) {
+    return [value];
+  }
+
+  return [];
 }
 
 function asRecord(value: unknown): Record<string, unknown> {

@@ -1,9 +1,12 @@
-import type { ChatMessage, ChatSummary, DeliveryRecord, SessionMapping } from "./models";
+import type { ChatMessage, ChatSummary, DeliveryRecord, SessionMapping, WhatsAppContact, WhatsAppLidMapping } from "./models";
+
+export type ContactDisplayIndex = Map<string, Pick<ChatSummary, "displayName" | "phoneNumber" | "lidJid" | "pnJid">>;
 
 export function buildChatSummaries(
   accountId: string,
   mappings: SessionMapping[],
   deliveries: DeliveryRecord[],
+  contactDisplayIndex: ContactDisplayIndex = new Map(),
 ): ChatSummary[] {
   if (!accountId) {
     return [];
@@ -15,6 +18,7 @@ export function buildChatSummaries(
     chats.set(mapping.chatJid, {
       accountId: mapping.accountId,
       chatJid: mapping.chatJid,
+      ...contactDisplayIndex.get(mapping.chatJid),
       sessionKey: mapping.sessionKey,
       hermesSessionId: mapping.hermesSessionId,
       createdAt: mapping.createdAt,
@@ -32,6 +36,7 @@ export function buildChatSummaries(
     chats.set(delivery.chatJid, {
       accountId: delivery.accountId,
       chatJid: delivery.chatJid,
+      ...contactDisplayIndex.get(delivery.chatJid),
       sessionKey: current?.sessionKey ?? delivery.sessionKey,
       createdAt: current?.createdAt ?? delivery.createdAt,
       updatedAt,
@@ -44,6 +49,45 @@ export function buildChatSummaries(
   }
 
   return [...chats.values()].sort((a, b) => Date.parse(b.updatedAt) - Date.parse(a.updatedAt));
+}
+
+export function buildContactDisplayIndex(
+  contacts: WhatsAppContact[],
+  lidMappings: WhatsAppLidMapping[],
+): ContactDisplayIndex {
+  const index: ContactDisplayIndex = new Map();
+
+  for (const mapping of lidMappings) {
+    const phoneNumber = jidToPhoneNumber(mapping.pnJid);
+    mergeDisplay(index, mapping.lidJid, {
+      lidJid: mapping.lidJid,
+      pnJid: mapping.pnJid,
+      ...(phoneNumber ? { phoneNumber } : {}),
+    });
+    mergeDisplay(index, mapping.pnJid, {
+      lidJid: mapping.lidJid,
+      pnJid: mapping.pnJid,
+      ...(phoneNumber ? { phoneNumber } : {}),
+    });
+  }
+
+  for (const contact of contacts) {
+    const displayName = contact.displayName || contact.notifyName || contact.verifiedName || contact.pushName;
+    const phoneNumber = contact.phoneNumber || jidToPhoneNumber(contact.contactJid) || (contact.lidJid ? index.get(contact.lidJid)?.phoneNumber : undefined);
+    const contactDisplay = {
+      ...(displayName ? { displayName } : {}),
+      ...(phoneNumber ? { phoneNumber } : {}),
+      ...(contact.lidJid ? { lidJid: contact.lidJid } : {}),
+      ...(contact.contactJid.endsWith("@s.whatsapp.net") ? { pnJid: contact.contactJid } : {}),
+    };
+
+    mergeDisplay(index, contact.contactJid, contactDisplay);
+    if (contact.lidJid) {
+      mergeDisplay(index, contact.lidJid, contactDisplay);
+    }
+  }
+
+  return index;
 }
 
 export function countDeliveryMessages(delivery: DeliveryRecord): number {
@@ -85,4 +129,28 @@ function maxTimestamp(left: string | undefined, right: string) {
   }
 
   return Date.parse(left) > Date.parse(right) ? left : right;
+}
+
+function mergeDisplay(
+  index: ContactDisplayIndex,
+  chatJid: string | undefined,
+  update: Pick<ChatSummary, "displayName" | "phoneNumber" | "lidJid" | "pnJid">,
+) {
+  if (!chatJid) {
+    return;
+  }
+
+  index.set(chatJid, {
+    ...index.get(chatJid),
+    ...removeUndefined(update),
+  });
+}
+
+function jidToPhoneNumber(jid: string | undefined) {
+  const phone = jid?.match(/^(\d+)@s\.whatsapp\.net$/)?.[1];
+  return phone || undefined;
+}
+
+function removeUndefined<T extends Record<string, unknown>>(value: T): Partial<T> {
+  return Object.fromEntries(Object.entries(value).filter(([, item]) => item !== undefined)) as Partial<T>;
 }

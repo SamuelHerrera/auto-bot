@@ -60,8 +60,17 @@ if [[ -n "${CHAT_JID}" ]]; then
   print_section "messages for ${CHAT_JID}"
   query "$(with_query "/whatsapp/sync/messages?limit=50&chatJid=$(url_encode "${CHAT_JID}")")"
 else
-  print_section "messages"
-  query "$(with_query "/whatsapp/sync/messages?limit=50")"
+print_section "messages"
+query "$(with_query "/whatsapp/sync/messages?limit=50")"
 fi
+
+print_section "message receipts"
+query "$(with_query "/whatsapp/sync/message-receipts?limit=50")"
+
+print_section "message updates"
+query "$(with_query "/whatsapp/sync/message-updates?limit=50")"
+
+print_section "media assets"
+query "$(with_query "/whatsapp/sync/media-assets?limit=50")"
 
 printf '\n'

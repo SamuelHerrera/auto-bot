@@ -88,7 +88,11 @@ export function HomeView({
             </div>
             <div>
               <dt>Latest chat</dt>
-              <dd>{latestChat ? `${latestChat.chatJid} · ${formatTimestamp(latestChat.updatedAt)}` : "No chat activity"}</dd>
+              <dd>
+                {latestChat
+                  ? `${latestChat.displayName ?? latestChat.phoneNumber ?? latestChat.chatJid} · ${formatTimestamp(latestChat.updatedAt)}`
+                  : "No chat activity"}
+              </dd>
             </div>
           </dl>
         </section>

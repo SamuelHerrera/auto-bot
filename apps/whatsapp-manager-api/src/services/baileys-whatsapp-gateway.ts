@@ -1,12 +1,14 @@
 import makeWASocket, {
   DisconnectReason,
+  downloadMediaMessage,
   type BaileysEventMap,
   type WASocket,
   type WAMessage,
   type WAMessageContent,
   useMultiFileAuthState,
 } from "@whiskeysockets/baileys";
-import { mkdir, readdir, readFile, rename, rm } from "node:fs/promises";
+import { createHash } from "node:crypto";
+import { mkdir, readdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import pino from "pino";
 import type {
@@ -40,7 +42,10 @@ export class BaileysWhatsAppGateway implements WhatsAppGateway {
   private syncHandler: SyncHandler | null = null;
   private lastActiveAccountId: string | null = null;
 
-  constructor(private readonly stateDir: string) {
+  constructor(
+    private readonly stateDir: string,
+    private readonly mediaDir?: string,
+  ) {
     void this.initializePersistedAccounts();
   }
 
@@ -406,6 +411,7 @@ export class BaileysWhatsAppGateway implements WhatsAppGateway {
     _accountId: string,
     event: BaileysEventMap["messages.upsert"],
   ) {
+    await this.downloadMessageMedia(_accountId, event);
     this.emitSyncEvent(_accountId, "messages.upsert", event);
 
     if (!this.inboundHandler) {
@@ -467,6 +473,70 @@ export class BaileysWhatsAppGateway implements WhatsAppGateway {
       payload,
       receivedAt: new Date().toISOString(),
     });
+  }
+
+  private async downloadMessageMedia(accountId: string, event: BaileysEventMap["messages.upsert"]) {
+    const runtime = this.accounts.get(accountId);
+    if (!this.mediaDir || !runtime?.socket) {
+      return;
+    }
+
+    for (const message of event.messages) {
+      const media = findMediaContent(message.message);
+      if (!media || typeof media.content !== "object" || media.content === null) {
+        continue;
+      }
+
+      const mediaContent = media.content as Record<string, unknown>;
+      try {
+        const buffer = await downloadMediaMessage(
+          message,
+          "buffer",
+          {},
+          {
+            logger: pino({ level: "silent" }),
+            reuploadRequest: runtime.socket.updateMediaMessage,
+          },
+        );
+        const fileHash = createHash("sha256").update(buffer).digest("hex");
+        const localPath = await this.writeMediaFile({
+          accountId,
+          chatJid: message.key.remoteJid ?? "unknown-chat",
+          messageId: message.key.id ?? fileHash,
+          mediaType: media.mediaType,
+          ...(typeof mediaContent.mimetype === "string" ? { mimetype: mediaContent.mimetype } : {}),
+          buffer,
+        });
+
+        mediaContent.localPath = localPath;
+        mediaContent.localSha256 = fileHash;
+        mediaContent.localSize = buffer.length;
+      } catch (error) {
+        mediaContent.localDownloadError = error instanceof Error ? error.message : "Media download failed.";
+      }
+    }
+  }
+
+  private async writeMediaFile(input: {
+    accountId: string;
+    chatJid: string;
+    messageId: string;
+    mediaType: WhatsAppMediaAttachment["type"];
+    mimetype?: string;
+    buffer: Buffer;
+  }) {
+    const accountDir = path.join(this.mediaDir!, sanitizePathSegment(input.accountId));
+    await mkdir(accountDir, { recursive: true });
+    const extension = mediaExtension(input.mediaType, input.mimetype);
+    const fileName = [
+      new Date().toISOString().replace(/[:.]/g, "-"),
+      sanitizePathSegment(input.chatJid),
+      sanitizePathSegment(input.messageId),
+      input.mediaType,
+    ].join("-");
+    const localPath = path.join(accountDir, `${fileName}.${extension}`);
+    await writeFile(localPath, input.buffer);
+    return localPath;
   }
 
   private resolveAccount(accountId?: string): BaileysAccountRuntime | null {
@@ -755,6 +825,53 @@ function isBaileysMessage(payload: unknown): payload is WAMessage {
   );
 }
 
+function findMediaContent(content: WAMessageContent | null | undefined): { mediaType: WhatsAppMediaAttachment["type"]; content: unknown } | null {
+  if (!content || typeof content !== "object") {
+    return null;
+  }
+
+  const record = content as Record<string, unknown>;
+  const directEntries: Array<[WhatsAppMediaAttachment["type"], string]> = [
+    ["image", "imageMessage"],
+    ["video", "videoMessage"],
+    ["audio", "audioMessage"],
+    ["document", "documentMessage"],
+  ];
+  for (const [mediaType, key] of directEntries) {
+    const value = record[key];
+    if (value && typeof value === "object") {
+      return { mediaType, content: value };
+    }
+  }
+
+  const nestedEntries = [
+    record.ephemeralMessage,
+    record.viewOnceMessage,
+    record.viewOnceMessageV2,
+    record.documentWithCaptionMessage,
+  ];
+  for (const entry of nestedEntries) {
+    const nestedRecord = entry && typeof entry === "object" ? entry as Record<string, unknown> : {};
+    const match = findMediaContent(nestedRecord.message as WAMessageContent | null | undefined);
+    if (match) {
+      return match;
+    }
+  }
+
+  return null;
+}
+
+function mediaExtension(mediaType: WhatsAppMediaAttachment["type"], mimetype: string | undefined) {
+  if (mimetype) {
+    const subtype = mimetype.split("/")[1]?.split(";")[0]?.trim();
+    if (subtype && /^[a-z0-9.+-]+$/i.test(subtype)) {
+      return subtype.replace("jpeg", "jpg");
+    }
+  }
+
+  return mediaType === "audio" ? "ogg" : mediaType === "document" ? "bin" : mediaType;
+}
+
 function createPendingAccountId(): string {
   return `pending-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 }
@@ -774,5 +891,5 @@ function getBareWhatsAppUserId(userId: string): string | null {
 }
 
 function sanitizePathSegment(value: string): string {
-  return value.replace(/[^a-zA-Z0-9_.-]/g, "_");
+  return value.replace(/[^a-zA-Z0-9_.-]/g, "_").slice(0, 120) || "unknown";
 }

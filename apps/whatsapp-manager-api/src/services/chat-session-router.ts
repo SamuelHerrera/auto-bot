@@ -16,6 +16,9 @@ import type {
   WhatsAppContactRecord,
   WhatsAppHistorySyncBatchRecord,
   WhatsAppLidMappingRecord,
+  WhatsAppMediaAssetRecord,
+  WhatsAppMessageReceiptRecord,
+  WhatsAppMessageUpdateRecord,
   WhatsAppMessageEvent,
   WhatsAppStoredMessageRecord,
   WhatsAppSyncEventRecord,
@@ -339,6 +342,9 @@ export interface WhatsAppSyncStore {
   saveWhatsAppContact(record: WhatsAppContactRecord): void;
   saveWhatsAppChat(record: WhatsAppChatRecord): void;
   saveWhatsAppMessage(record: WhatsAppStoredMessageRecord): void;
+  saveWhatsAppMessageReceipt(record: WhatsAppMessageReceiptRecord): void;
+  saveWhatsAppMessageUpdate(record: WhatsAppMessageUpdateRecord): void;
+  saveWhatsAppMediaAsset(record: WhatsAppMediaAssetRecord): void;
   saveWhatsAppLidMapping(record: WhatsAppLidMappingRecord): void;
   saveWhatsAppHistorySyncBatch(record: WhatsAppHistorySyncBatchRecord): void;
   saveWhatsAppSyncEvent(record: WhatsAppSyncEventRecord): void;
@@ -350,6 +356,21 @@ export interface WhatsAppSyncStore {
     chatJid?: string;
     limit?: number;
   }): WhatsAppStoredMessageRecord[];
+  listWhatsAppMessageReceipts(input?: {
+    accountId?: string;
+    chatJid?: string;
+    limit?: number;
+  }): WhatsAppMessageReceiptRecord[];
+  listWhatsAppMessageUpdates(input?: {
+    accountId?: string;
+    chatJid?: string;
+    limit?: number;
+  }): WhatsAppMessageUpdateRecord[];
+  listWhatsAppMediaAssets(input?: {
+    accountId?: string;
+    chatJid?: string;
+    limit?: number;
+  }): WhatsAppMediaAssetRecord[];
   listWhatsAppLidMappings(accountId?: string, limit?: number): WhatsAppLidMappingRecord[];
   listWhatsAppHistorySyncBatches(accountId?: string, limit?: number): WhatsAppHistorySyncBatchRecord[];
   listWhatsAppSyncEvents(accountId?: string, limit?: number): WhatsAppSyncEventRecord[];
