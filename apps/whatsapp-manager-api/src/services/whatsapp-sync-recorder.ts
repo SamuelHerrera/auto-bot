@@ -61,6 +61,19 @@ export function recordWhatsAppSyncEvent(store: WhatsAppSyncStore | undefined, ev
   }
   changes.messages = extractMessages(event);
   for (const message of changes.messages) {
+    if (event.eventType === "messages.upsert" && !message.fromMe) {
+      const chat = store.incrementWhatsAppChatUnreadForMessage({
+        accountId: message.accountId,
+        chatJid: message.chatJid,
+        chatType: getWhatsAppChatType(message.chatJid),
+        messageId: message.messageId,
+        timestamp: message.timestamp,
+        receivedAt: message.receivedAt,
+      });
+      if (chat) {
+        changes.chats = upsertChatChange(changes.chats, chat);
+      }
+    }
     store.saveWhatsAppMessage(message);
   }
   changes.receipts = extractMessageReceipts(event);
@@ -120,6 +133,13 @@ function extractContacts(event: WhatsAppSyncEvent): WhatsAppContactRecord[] {
   });
 }
 
+function upsertChatChange(chats: WhatsAppChatRecord[], chat: WhatsAppChatRecord) {
+  return [
+    chat,
+    ...chats.filter((item) => item.accountId !== chat.accountId || item.chatJid !== chat.chatJid),
+  ];
+}
+
 function extractChats(event: WhatsAppSyncEvent): WhatsAppChatRecord[] {
   const chats =
     event.eventType === "chats.upsert" || event.eventType === "chats.update" || event.eventType === "groups.upsert" || event.eventType === "groups.update"
@@ -135,7 +155,12 @@ function extractChats(event: WhatsAppSyncEvent): WhatsAppChatRecord[] {
     const lastMessageAt = normalizeTimestamp(value.conversationTimestamp ?? value.t ?? value.lastMessageTimestamp);
     const mutedUntil = normalizeTimestamp(value.muteEndTime);
     const displayName = readString(value.name) ?? readString(value.subject);
-    const unreadCount = readNumber(value.unreadCount);
+    const shouldUseSyncedUnreadCount =
+      event.eventType !== "chats.upsert" &&
+      event.eventType !== "chats.update" &&
+      event.eventType !== "groups.upsert" &&
+      event.eventType !== "groups.update";
+    const unreadCount = shouldUseSyncedUnreadCount ? readNumber(value.unreadCount) : undefined;
     const now = event.receivedAt;
     return [{
       accountId: event.accountId,

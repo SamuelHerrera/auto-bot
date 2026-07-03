@@ -1248,6 +1248,11 @@ export function App() {
   const activeAccountDeliveries = deliveries.filter((delivery) => delivery.accountId === activeAccountId);
   const activeAccountMappings = mappings.filter((mapping) => mapping.accountId === activeAccountId);
   const activeChat = activeChats.find((chat) => chat.chatJid === activeChatJid) ?? null;
+  useEffect(() => {
+    if (activeNumberView === "messages" && activeChat?.unreadCount) {
+      selectChat(activeChat.chatJid);
+    }
+  }, [activeChat?.chatJid, activeChat?.unreadCount, activeNumberView]);
   const activeChatMessages = activeChat
     ? buildChatMessages(
         deliveries.filter((delivery) => delivery.accountId === activeAccountId && delivery.chatJid === activeChat.chatJid),

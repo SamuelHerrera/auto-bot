@@ -451,8 +451,7 @@ button:disabled {
 }
 
 .admin-panel > .number-view-scroll,
-.admin-panel > .branding-form,
-.admin-panel > .postback-settings,
+.admin-panel > .settings-view-scroll,
 .admin-panel > .audit-log-list,
 .admin-panel > .empty-state {
   flex: 1 1 auto;
@@ -623,6 +622,15 @@ button:disabled {
 
 .number-view-scroll {
   min-width: 0;
+}
+
+.settings-header {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.settings-view-scroll {
+  align-content: start;
+  display: grid;
 }
 
 .number-header-actions {
@@ -1911,7 +1919,6 @@ button {
 }
 
 .postback-settings {
-  border-top: 1px solid #e5ebe6;
   display: grid;
   gap: 14px;
   padding: 18px;

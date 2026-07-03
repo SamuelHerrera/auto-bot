@@ -2034,6 +2034,18 @@ describe("whatsapp-manager-api", () => {
       try {
         gateway.injectSyncEvent({
           accountId: "ops-main",
+          eventType: "chats.update",
+          receivedAt: "2026-07-03T12:09:59.000Z",
+          payload: [
+            {
+              id: "83038931275996@lid",
+              unreadCount: 1,
+              conversationTimestamp: 1783080600,
+            },
+          ],
+        });
+        gateway.injectSyncEvent({
+          accountId: "ops-main",
           eventType: "messages.upsert",
           receivedAt: "2026-07-03T12:10:00.000Z",
           payload: {
@@ -2047,6 +2059,60 @@ describe("whatsapp-manager-api", () => {
                 messageTimestamp: 1783080600,
                 message: {
                   conversation: "live hello",
+                },
+              },
+            ],
+            type: "notify",
+          },
+        });
+        gateway.injectSyncEvent({
+          accountId: "ops-main",
+          eventType: "chats.update",
+          receivedAt: "2026-07-03T12:10:00.500Z",
+          payload: [
+            {
+              id: "83038931275996@lid",
+              unreadCount: 1,
+              conversationTimestamp: 1783080601,
+            },
+          ],
+        });
+        gateway.injectSyncEvent({
+          accountId: "ops-main",
+          eventType: "messages.upsert",
+          receivedAt: "2026-07-03T12:10:01.000Z",
+          payload: {
+            messages: [
+              {
+                key: {
+                  remoteJid: "83038931275996@lid",
+                  id: "wamid.live.2",
+                  fromMe: false,
+                },
+                messageTimestamp: 1783080601,
+                message: {
+                  conversation: "second live hello",
+                },
+              },
+            ],
+            type: "notify",
+          },
+        });
+        gateway.injectSyncEvent({
+          accountId: "ops-main",
+          eventType: "messages.upsert",
+          receivedAt: "2026-07-03T12:10:02.000Z",
+          payload: {
+            messages: [
+              {
+                key: {
+                  remoteJid: "83038931275996@lid",
+                  id: "wamid.live.2",
+                  fromMe: false,
+                },
+                messageTimestamp: 1783080601,
+                message: {
+                  conversation: "second live hello",
                 },
               },
             ],
@@ -2075,6 +2141,13 @@ describe("whatsapp-manager-api", () => {
             authorization: "Bearer test-token",
           },
         });
+        const chats = await syncApp.inject({
+          method: "GET",
+          url: "/whatsapp/sync/chats?accountId=ops-main",
+          headers: {
+            authorization: "Bearer test-token",
+          },
+        });
         const sessions = await syncApp.inject({
           method: "GET",
           url: "/sessions?accountId=ops-main",
@@ -2090,19 +2163,32 @@ describe("whatsapp-manager-api", () => {
           },
         });
 
-        expect(messages.json().items).toEqual([
-          expect.objectContaining({
-            chatJid: "83038931275996@lid",
-            messageId: "wamid.live.1",
-            text: "live hello",
-          }),
-        ]);
+        expect(messages.json().items).toEqual(
+          expect.arrayContaining([
+            expect.objectContaining({
+              chatJid: "83038931275996@lid",
+              messageId: "wamid.live.1",
+              text: "live hello",
+            }),
+            expect.objectContaining({
+              chatJid: "83038931275996@lid",
+              messageId: "wamid.live.2",
+              text: "second live hello",
+            }),
+          ]),
+        );
         expect(summary.json()).toEqual(
           expect.objectContaining({
-            messages: 1,
-            syncEvents: 1,
+            messages: 2,
+            syncEvents: 4,
           }),
         );
+        expect(chats.json().items).toEqual([
+          expect.objectContaining({
+            chatJid: "83038931275996@lid",
+            unreadCount: 2,
+          }),
+        ]);
         expect(sessions.json().items).toEqual([
           expect.objectContaining({
             accountId: "ops-main",

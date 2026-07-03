@@ -20,6 +20,7 @@ import type {
   PostbackRunStatus,
   WhatsAppAccountMetadata,
   WhatsAppChatRecord,
+  WhatsAppChatType,
   WhatsAppContactRecord,
   WhatsAppGroupRoutingPolicy,
   WhatsAppHistorySyncBatchRecord,
@@ -1019,6 +1020,48 @@ export class SqliteBridgeStateStore
       .prepare(`SELECT * FROM whatsapp_chats ${clause} ORDER BY COALESCE(last_message_at, last_seen_at) DESC LIMIT ?`)
       .all(...args, safeLimit(limit))
       .map(rowToWhatsAppChat);
+  }
+
+  incrementWhatsAppChatUnreadForMessage(input: {
+    accountId: string;
+    chatJid: string;
+    chatType: WhatsAppChatType;
+    messageId: string;
+    timestamp: string;
+    receivedAt: string;
+  }): WhatsAppChatRecord | undefined {
+    this.db
+      .prepare(`
+        INSERT INTO whatsapp_chats
+          (account_id, chat_jid, chat_type, unread_count, last_message_at, first_seen_at, last_seen_at)
+        SELECT ?, ?, ?, 1, ?, ?, ?
+        WHERE NOT EXISTS (
+          SELECT 1
+          FROM whatsapp_messages
+          WHERE account_id = ? AND chat_jid = ? AND message_id = ?
+        )
+        ON CONFLICT(account_id, chat_jid) DO UPDATE SET
+          chat_type = excluded.chat_type,
+          unread_count = COALESCE(whatsapp_chats.unread_count, 0) + excluded.unread_count,
+          last_message_at = COALESCE(excluded.last_message_at, whatsapp_chats.last_message_at),
+          last_seen_at = excluded.last_seen_at
+      `)
+      .run(
+        input.accountId,
+        input.chatJid,
+        input.chatType,
+        input.timestamp,
+        input.receivedAt,
+        input.receivedAt,
+        input.accountId,
+        input.chatJid,
+        input.messageId,
+      );
+
+    const row = this.db
+      .prepare("SELECT * FROM whatsapp_chats WHERE account_id = ? AND chat_jid = ?")
+      .get(input.accountId, input.chatJid);
+    return row ? rowToWhatsAppChat(row) : undefined;
   }
 
   markWhatsAppChatRead(input: { accountId: string; chatJid: string }): WhatsAppChatRecord | undefined {

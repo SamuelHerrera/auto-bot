@@ -2,9 +2,10 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import type { ChangeEvent, FormEvent } from "react";
 
 import type { BrandingSettings, NumberRule, PostbackAction, PostbackActionRun, PostbackActionType, PostbackMaintenance, RuntimeStatus } from "../domain/models";
-import { IconButton } from "./shared";
+import { IconButton, TabButton } from "./shared";
 
 const titleAutosaveDelayMs = 1200;
+type SettingsSubview = "general" | "postbacks" | "runs";
 
 export function SettingsView({
   branding,
@@ -41,6 +42,7 @@ export function SettingsView({
   onTestPostbackAction: (action: PostbackAction) => void;
   onTogglePostbackAction: (action: PostbackAction, enabled: boolean) => void;
 }) {
+  const [activeView, setActiveView] = useState<SettingsSubview>("general");
   const [draftTitle, setDraftTitle] = useState(branding.title);
   const [draftIconSrc, setDraftIconSrc] = useState(branding.iconSrc);
   const iconInputRef = useRef<HTMLInputElement>(null);
@@ -94,54 +96,83 @@ export function SettingsView({
 
   return (
     <>
-      <section className="branding-form">
-        <div className="branding-preview">
-          <img src={draftIconSrc || defaultBranding.iconSrc} alt="" aria-hidden="true" />
-          <strong>{draftTitle.trim() || defaultBranding.title}</strong>
+      <div className="number-header settings-header">
+        <div className="subnav" aria-label="Settings sections">
+          <TabButton active={activeView === "general"} icon="mdi:tune-variant" onClick={() => setActiveView("general")}>
+            General
+          </TabButton>
+          <TabButton active={activeView === "postbacks"} count={postbackActions.length} icon="mdi:webhook" onClick={() => setActiveView("postbacks")}>
+            Postbacks
+          </TabButton>
+          <TabButton active={activeView === "runs"} count={postbackRuns.length} icon="mdi:history" onClick={() => setActiveView("runs")}>
+            Run History
+          </TabButton>
         </div>
+      </div>
 
-        <label className="field">
-          <span>App title</span>
-          <input
-            value={draftTitle}
-            onChange={(event) => setDraftTitle(event.target.value)}
-            placeholder={defaultBranding.title}
+      <div className="number-view-scroll settings-view-scroll">
+        {activeView === "general" ? (
+          <section className="branding-form">
+            <div className="section-heading-row">
+              <div>
+                <h2>General</h2>
+                <p>Manage the dashboard name, icon, and browser workspace state.</p>
+              </div>
+            </div>
+
+            <div className="branding-preview">
+              <img src={draftIconSrc || defaultBranding.iconSrc} alt="" aria-hidden="true" />
+              <strong>{draftTitle.trim() || defaultBranding.title}</strong>
+            </div>
+
+            <label className="field">
+              <span>App title</span>
+              <input
+                value={draftTitle}
+                onChange={(event) => setDraftTitle(event.target.value)}
+                placeholder={defaultBranding.title}
+              />
+            </label>
+
+            <label className="field">
+              <span>Upload icon</span>
+              <input
+                accept="image/*"
+                ref={iconInputRef}
+                type="file"
+                onChange={uploadIcon}
+              />
+            </label>
+
+            <div className="settings-actions">
+              <IconButton icon="mdi:image-remove-outline" label="Clear icon" type="button" variant="secondary" onClick={clearIcon} disabled={isBusy || draftIconSrc === defaultBranding.iconSrc}>
+                Clear icon
+              </IconButton>
+              <IconButton icon="mdi:tab-remove" label="Reset browser workspace state" type="button" variant="secondary" onClick={onResetWorkspaceState} disabled={isBusy}>
+                Reset workspace
+              </IconButton>
+            </div>
+          </section>
+        ) : null}
+
+        {activeView === "postbacks" ? (
+          <PostbackSettings
+            actions={postbackActions}
+            isBusy={isBusy}
+            maintenance={postbackMaintenance}
+            numberRules={numberRules}
+            runtimeStatus={runtimeStatus}
+            onCleanup={onCleanupPostbackRecords}
+            onCreate={onCreatePostbackAction}
+            onDelete={onDeletePostbackAction}
+            onSave={onSavePostbackAction}
+            onTest={onTestPostbackAction}
+            onToggle={onTogglePostbackAction}
           />
-        </label>
+        ) : null}
 
-        <label className="field">
-          <span>Upload icon</span>
-          <input
-            accept="image/*"
-            ref={iconInputRef}
-            type="file"
-            onChange={uploadIcon}
-          />
-        </label>
-
-        <div className="settings-actions">
-          <IconButton icon="mdi:image-remove-outline" label="Clear icon" type="button" variant="secondary" onClick={clearIcon} disabled={isBusy || draftIconSrc === defaultBranding.iconSrc}>
-            Clear icon
-          </IconButton>
-          <IconButton icon="mdi:tab-remove" label="Reset browser workspace state" type="button" variant="secondary" onClick={onResetWorkspaceState} disabled={isBusy}>
-            Reset workspace
-          </IconButton>
-        </div>
-      </section>
-      <PostbackSettings
-        actions={postbackActions}
-        isBusy={isBusy}
-        maintenance={postbackMaintenance}
-        numberRules={numberRules}
-        runs={postbackRuns}
-        runtimeStatus={runtimeStatus}
-        onCleanup={onCleanupPostbackRecords}
-        onCreate={onCreatePostbackAction}
-        onDelete={onDeletePostbackAction}
-        onSave={onSavePostbackAction}
-        onTest={onTestPostbackAction}
-        onToggle={onTogglePostbackAction}
-      />
+        {activeView === "runs" ? <PostbackRunHistory runs={postbackRuns} /> : null}
+      </div>
     </>
   );
 }
@@ -161,7 +192,6 @@ function PostbackSettings({
   isBusy,
   maintenance,
   numberRules,
-  runs,
   runtimeStatus,
   onCleanup,
   onCreate,
@@ -174,7 +204,6 @@ function PostbackSettings({
   isBusy: boolean;
   maintenance: PostbackMaintenance | null;
   numberRules: NumberRule[];
-  runs: PostbackActionRun[];
   runtimeStatus: RuntimeStatus | null;
   onCleanup: () => void;
   onCreate: (input: PostbackActionDraft) => void;
@@ -191,7 +220,6 @@ function PostbackSettings({
   const [url, setUrl] = useState("");
   const [hermesDeliveryMode, setHermesDeliveryMode] = useState<"api" | "platform">("api");
   const [replyToWhatsApp, setReplyToWhatsApp] = useState(true);
-  const recentRuns = useMemo(() => runs.slice(0, 8), [runs]);
   const editingAction = actions.find((action) => action.id === editingActionId) ?? null;
   const nativeAdapter = runtimeStatus?.hermesNativeAdapter;
   const nativeActions = actions.filter((action) => action.actionType === "hermes" && parseActionConfig(action).deliveryMode === "platform");
@@ -340,9 +368,22 @@ function PostbackSettings({
         ))}
         {actions.length === 0 ? <p className="muted-copy">No postback actions configured.</p> : null}
       </div>
+    </section>
+  );
+}
 
+function PostbackRunHistory({ runs }: { runs: PostbackActionRun[] }) {
+  const recentRuns = useMemo(() => runs.slice(0, 25), [runs]);
+
+  return (
+    <section className="postback-settings">
       <div className="postback-runs">
-        <h3>Recent runs</h3>
+        <div className="section-heading-row">
+          <div>
+            <h2>Run History</h2>
+            <p>Postback runs are execution records for configured postback actions after inbound chat events.</p>
+          </div>
+        </div>
         {recentRuns.map((run) => (
           <div className={`postback-run postback-run-${run.status}`} key={run.id}>
             <span>{run.actionName}</span>
@@ -350,7 +391,7 @@ function PostbackSettings({
             <small>{run.accountId} | {run.chatJid}</small>
           </div>
         ))}
-        {recentRuns.length === 0 ? <p className="muted-copy">No postback runs yet.</p> : null}
+        {recentRuns.length === 0 ? <p className="muted-copy">No postback actions have run yet.</p> : null}
       </div>
     </section>
   );
