@@ -8,7 +8,7 @@ import type { AuditLogFilter, AuditLogRecord } from "../domain/models";
 import { EmptyState, TabButton } from "./shared";
 
 const logPageSize = 40;
-const estimatedLogRowHeight = 43;
+const estimatedLogRowHeight = 38;
 const virtualOverscan = 360;
 const logSentinelHeight = 24;
 
@@ -184,6 +184,7 @@ function VirtualLogRow({
 }) {
   const rowRef = useRef<HTMLDetailsElement | null>(null);
   const display = getAuditLogDisplay(entry);
+  const summary = getAuditLogSummary(display.title, display.description);
 
   useEffect(() => {
     const row = rowRef.current;
@@ -215,10 +216,7 @@ function VirtualLogRow({
         <span className={`audit-log-icon audit-log-icon-${entry.outcome}`}>
           <Icon icon={display.icon} aria-hidden="true" />
         </span>
-        <span className="audit-log-main">
-          <strong>{display.title}</strong>
-          <small>{display.description}</small>
-        </span>
+        <span className="audit-log-main">{summary}</span>
         <time>{formatTimestamp(entry.createdAt)}</time>
       </summary>
       <div className="audit-log-detail">
@@ -244,6 +242,19 @@ function VirtualLogRow({
       </div>
     </details>
   );
+}
+
+function getAuditLogSummary(title: string, description: string) {
+  const trimmedDescription = description.trim();
+  if (!trimmedDescription) {
+    return title;
+  }
+
+  return `${title}: ${lowercaseFirst(trimmedDescription.replace(/[.?!]$/, ""))}.`;
+}
+
+function lowercaseFirst(value: string) {
+  return value.charAt(0).toLowerCase() + value.slice(1);
 }
 
 function buildVirtualLogLayout(

@@ -54,7 +54,10 @@ export function TopBar({
     <header className="topbar">
       <div className="brand-lockup">
         <img src={branding.iconSrc} alt="" aria-hidden="true" />
-        <h1>{branding.title}</h1>
+        <span className="brand-title-wrap" tabIndex={0} aria-label={branding.title}>
+          <h1>{branding.title}</h1>
+          <span className="brand-title-tooltip">{branding.title}</span>
+        </span>
       </div>
       <WorkspaceTabs
         activeTabId={activeTabId}

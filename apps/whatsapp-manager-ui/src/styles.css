@@ -59,7 +59,7 @@ button:disabled {
   align-items: center;
   display: grid;
   gap: 16px;
-  grid-template-columns: minmax(180px, auto) minmax(0, 1fr) auto;
+  grid-template-columns: minmax(180px, auto) minmax(300px, 1fr) auto;
   justify-content: space-between;
   min-height: 58px;
   min-width: 0;
@@ -79,6 +79,13 @@ button:disabled {
   flex: 0 0 auto;
   height: 34px;
   width: 34px;
+}
+
+.brand-title-wrap {
+  display: block;
+  max-width: min(150px, 15vw);
+  min-width: 0;
+  position: relative;
 }
 
 .topbar-actions {
@@ -157,6 +164,33 @@ button:disabled {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.brand-title-tooltip {
+  background: #17211d;
+  border-radius: 6px;
+  color: #ffffff;
+  font-size: 0.78rem;
+  font-weight: 700;
+  inline-size: max-content;
+  left: 0;
+  line-height: 1.25;
+  max-width: min(360px, calc(100vw - 32px));
+  opacity: 0;
+  padding: 8px 10px;
+  pointer-events: none;
+  position: absolute;
+  top: calc(100% + 8px);
+  transform: translateY(-2px);
+  transition: opacity 120ms ease, transform 120ms ease;
+  white-space: normal;
+  z-index: 30;
+}
+
+.brand-title-wrap:hover .brand-title-tooltip,
+.brand-title-wrap:focus .brand-title-tooltip {
+  opacity: 1;
+  transform: translateY(0);
 }
 
 .eyebrow,
@@ -1652,8 +1686,14 @@ button {
 }
 
 .audit-log-main {
-  display: grid;
+  display: block;
+  font-size: 0.86rem;
+  font-weight: 400;
+  line-height: 1.3;
   min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .audit-log-row time {
@@ -1661,19 +1701,6 @@ button {
   white-space: nowrap;
 }
 
-.audit-log-main strong,
-.audit-log-main small {
-  display: block;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.audit-log-main strong {
-  font-size: 0.9rem;
-}
-
-.audit-log-main small,
 .audit-log-row time {
   color: #66746c;
   font-size: 0.78rem;
@@ -1979,29 +2006,6 @@ button {
 
   .metric-row {
     border-bottom: 1px solid #e5ebe6;
-  }
-}
-
-@media (max-width: 900px) {
-  .topbar {
-    align-items: center;
-    gap: 10px 12px;
-    grid-template-columns: minmax(0, 1fr) auto;
-  }
-
-  .workspace-tabs {
-    grid-column: 1 / -1;
-    grid-row: 2;
-    width: 100%;
-  }
-
-  .topbar-actions {
-    display: grid;
-    grid-column: 2;
-    grid-row: 1;
-    grid-template-columns: auto auto auto;
-    justify-content: end;
-    width: auto;
   }
 }
 

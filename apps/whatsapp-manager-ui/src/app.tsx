@@ -323,8 +323,16 @@ export function App() {
   }
 
   async function saveBranding(nextBranding: BrandingSettings) {
+    const normalizedBranding = normalizeBranding(nextBranding);
+    if (branding.title === normalizedBranding.title && branding.iconSrc === normalizedBranding.iconSrc) {
+      return;
+    }
+
     await runAction(async () => {
-      const normalizedBranding = normalizeBranding(nextBranding);
+      if (branding.title === normalizedBranding.title && branding.iconSrc === normalizedBranding.iconSrc) {
+        return;
+      }
+
       setBranding(normalizedBranding);
       localStorage.setItem(brandingStorageKeys.title, normalizedBranding.title);
       localStorage.setItem(brandingStorageKeys.iconSrc, normalizedBranding.iconSrc);
@@ -341,24 +349,6 @@ export function App() {
         }),
       });
       setStatusMessage("Branding updated.");
-    });
-  }
-
-  async function resetBranding() {
-    await runAction(async () => {
-      const defaultBranding = { title: defaultAppTitle, iconSrc: defaultAppIcon };
-      setBranding(defaultBranding);
-      localStorage.removeItem(brandingStorageKeys.title);
-      localStorage.removeItem(brandingStorageKeys.iconSrc);
-      await request<AuditLogRecord>("/audit-logs", {
-        method: "POST",
-        body: JSON.stringify({
-          action: "ui-branding.reset",
-          resourceType: "ui-settings",
-          resourceId: "branding",
-        }),
-      });
-      setStatusMessage("Branding reset.");
     });
   }
 
@@ -442,7 +432,6 @@ export function App() {
               branding={branding}
               defaultBranding={{ title: defaultAppTitle, iconSrc: defaultAppIcon }}
               isBusy={isBusy}
-              onReset={() => void resetBranding()}
               onSave={(nextBranding) => void saveBranding(nextBranding)}
             />
           ) : null}

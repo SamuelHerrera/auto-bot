@@ -140,14 +140,14 @@ export function getAuditLogDisplay(entry: AuditLogRecord): AuditLogDisplay {
     case "ui-branding.update":
       return {
         icon: "mdi:image-edit-outline",
-        title: "App branding was updated",
-        description: `The UI title is now "${detailString(entry, "title") ?? "custom"}"${detailBoolean(entry, "customIcon") ? " with a custom icon." : "."}`,
+        title: "App branding updated",
+        description: `title set to "${detailString(entry, "title") ?? "custom"}"${detailBoolean(entry, "customIcon") ? " with custom icon" : ""}.`,
       };
     case "ui-branding.reset":
       return {
         icon: "mdi:restore",
-        title: "App branding was reset",
-        description: "The default title and icon were restored.",
+        title: "App branding reset",
+        description: "default title and icon restored.",
       };
     default:
       return {
