@@ -3,9 +3,11 @@ import {
   type AccountMetadataStore,
   type AuditLogStore,
   type BridgeDeliveryStore,
+  type HermesPlatformEventStore,
   InMemoryChatSessionRouter,
   type ManagerChatMetadataStore,
   type NumberRuleStore,
+  type PostbackActionStore,
   type WhatsAppSyncStore,
 } from "./services/chat-session-router.js";
 import {
@@ -19,6 +21,7 @@ import { AppEventBus } from "./services/event-bus.js";
 import { evaluateNumberRules, recordBlockedNumberDelivery } from "./services/number-rules.js";
 import type { WhatsAppGateway } from "./services/whatsapp-service.js";
 import { recordWhatsAppSyncEvent } from "./services/whatsapp-sync-recorder.js";
+import { PostbackActionDispatcher } from "./services/postback-actions.js";
 import type { AuditLogInput, DeliveryRecord, NumberRuleRecord, WhatsAppAccountStatus } from "./domain/types.js";
 
 export interface AppServices {
@@ -31,6 +34,9 @@ export interface AppServices {
   accountMetadataStore?: AccountMetadataStore;
   managerChatMetadataStore?: ManagerChatMetadataStore;
   whatsappSyncStore?: WhatsAppSyncStore;
+  postbackActionStore?: PostbackActionStore;
+  hermesPlatformEventStore?: HermesPlatformEventStore;
+  postbackDispatcher?: PostbackActionDispatcher;
   eventBus: AppEventBus;
 }
 
@@ -39,7 +45,10 @@ export function buildServices(config: AppConfig): AppServices {
   const eventBus = new AppEventBus();
   const whatsappGateway = new BaileysWhatsAppGateway(config.BAILEYS_STATE_DIR, config.WHATSAPP_MEDIA_DIR);
   const bridgeStore = config.BRIDGE_DATABASE_FILE
-    ? new SqliteBridgeStateStore(config.BRIDGE_DATABASE_FILE)
+    ? new SqliteBridgeStateStore(config.BRIDGE_DATABASE_FILE, {
+      runRetentionDays: config.POSTBACK_RUN_RETENTION_DAYS,
+      platformEventRetentionDays: config.HERMES_PLATFORM_EVENT_RETENTION_DAYS,
+    })
     : config.BRIDGE_STATE_FILE
       ? new FileBridgeStateStore(config.BRIDGE_STATE_FILE)
       : undefined;
@@ -48,6 +57,28 @@ export function buildServices(config: AppConfig): AppServices {
     bridgeStore,
     bridgeStore instanceof SqliteBridgeStateStore ? bridgeStore : undefined,
   );
+  const postbackActionStore = bridgeStore instanceof SqliteBridgeStateStore ? bridgeStore : undefined;
+  const hermesPlatformEventStore = bridgeStore instanceof SqliteBridgeStateStore ? bridgeStore : undefined;
+  const deliveryStore = bridgeStore instanceof SqliteBridgeStateStore ? bridgeStore : undefined;
+  const postbackDispatcher = new PostbackActionDispatcher({
+    ...(postbackActionStore ? { store: postbackActionStore } : {}),
+    ...(hermesPlatformEventStore ? { hermesPlatformEventStore } : {}),
+    router,
+    onHermesReply: async (event, reply) => {
+      const delivery = await sendReplyWithDeliveryRecord({
+        ...(deliveryStore ? { deliveryStore } : {}),
+        event,
+        text: reply.outputText,
+        whatsappGateway,
+      });
+      eventBus.publish("activity", {
+        accountId: event.accountId,
+        chatJid: event.chatJid,
+        source: "delivery",
+        deliveries: [delivery],
+      });
+    },
+  });
 
   function recordAuditLog(input: AuditLogInput) {
     if (bridgeStore instanceof SqliteBridgeStateStore) {
@@ -89,7 +120,6 @@ export function buildServices(config: AppConfig): AppServices {
   });
 
   whatsappGateway.onInboundMessage(async (event) => {
-    const deliveryStore = bridgeStore instanceof SqliteBridgeStateStore ? bridgeStore : undefined;
     const numberRuleStore = bridgeStore instanceof SqliteBridgeStateStore ? bridgeStore : undefined;
     const decision = evaluateNumberRules(numberRuleStore, event);
     if (!decision.allowed) {
@@ -110,6 +140,31 @@ export function buildServices(config: AppConfig): AppServices {
         chatJid: event.chatJid,
         source: "delivery",
         deliveries: [delivery],
+      });
+      return;
+    }
+
+    const configuredActions = postbackActionStore
+      ?.listPostbackActions({ accountId: event.accountId, chatJid: event.chatJid })
+      .filter((action) => action.enabled && action.trigger === "inbound_message") ?? [];
+    if (configuredActions.length > 0) {
+      const runs = await postbackDispatcher.dispatchInboundMessage(event);
+      eventBus.publish("activity", {
+        accountId: event.accountId,
+        chatJid: event.chatJid,
+        source: "postback",
+        postbackRuns: runs,
+      });
+      recordAuditLog({
+        action: "message.inbound",
+        resourceType: "whatsapp-message",
+        resourceId: event.messageId,
+        details: {
+          accountId: event.accountId,
+          chatJid: event.chatJid,
+          postbackActions: runs.length,
+          failedPostbackActions: runs.filter((run) => run.status === "failed").length,
+        },
       });
       return;
     }
@@ -214,6 +269,9 @@ export function buildServices(config: AppConfig): AppServices {
     ...(bridgeStore instanceof SqliteBridgeStateStore ? { accountMetadataStore: bridgeStore } : {}),
     ...(bridgeStore instanceof SqliteBridgeStateStore ? { managerChatMetadataStore: bridgeStore } : {}),
     ...(bridgeStore instanceof SqliteBridgeStateStore ? { whatsappSyncStore: bridgeStore } : {}),
+    ...(postbackActionStore ? { postbackActionStore } : {}),
+    ...(hermesPlatformEventStore ? { hermesPlatformEventStore } : {}),
+    postbackDispatcher,
   };
 }
 

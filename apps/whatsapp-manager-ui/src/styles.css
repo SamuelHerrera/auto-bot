@@ -93,6 +93,7 @@ button:disabled {
   display: flex;
   flex: 0 0 auto;
   gap: 10px;
+  min-width: 0;
 }
 
 .topbar-actions .secondary-button,
@@ -258,8 +259,13 @@ button:disabled {
 
 .status-indicator-dot {
   border-radius: 999px;
+  flex: 0 0 auto;
   height: 10px;
   width: 10px;
+}
+
+.status-indicator-text {
+  display: none;
 }
 
 .status-indicator-live {
@@ -283,10 +289,31 @@ button:disabled {
 .status-indicator-error {
   background: #fff3f1;
   border-color: #f2c4bd;
+  border-radius: 8px;
+  gap: 8px;
+  height: auto;
+  justify-content: flex-start;
+  line-height: 1.25;
+  max-width: min(720px, 52vw);
+  min-height: 28px;
+  padding: 6px 10px;
+  width: auto;
 }
 
 .status-indicator-error .status-indicator-dot {
   background: #c54b3d;
+}
+
+.status-indicator-error .status-indicator-text {
+  color: #8f3127;
+  display: block;
+  font-size: 0.78rem;
+  font-weight: 750;
+  max-height: 5.1em;
+  overflow: auto;
+  overflow-wrap: anywhere;
+  scrollbar-width: thin;
+  white-space: normal;
 }
 
 .status-tooltip {
@@ -297,7 +324,7 @@ button:disabled {
   font-weight: 700;
   inline-size: max-content;
   line-height: 1.25;
-  max-width: min(360px, calc(100vw - 32px));
+  max-width: min(760px, calc(100vw - 32px));
   opacity: 0;
   padding: 8px 10px;
   pointer-events: none;
@@ -308,6 +335,10 @@ button:disabled {
   transition: opacity 120ms ease, transform 120ms ease;
   white-space: normal;
   z-index: 30;
+}
+
+.status-indicator-error .status-tooltip {
+  display: none;
 }
 
 .status-indicator:hover .status-tooltip,
@@ -421,6 +452,7 @@ button:disabled {
 
 .admin-panel > .number-view-scroll,
 .admin-panel > .branding-form,
+.admin-panel > .postback-settings,
 .admin-panel > .audit-log-list,
 .admin-panel > .empty-state {
   flex: 1 1 auto;
@@ -1878,6 +1910,187 @@ button {
   padding: 8px;
 }
 
+.postback-settings {
+  border-top: 1px solid #e5ebe6;
+  display: grid;
+  gap: 14px;
+  padding: 18px;
+}
+
+.section-heading-row {
+  align-items: start;
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.section-heading-row h2,
+.postback-runs h3 {
+  font-size: 1rem;
+  margin: 0;
+}
+
+.section-heading-row p,
+.muted-copy {
+  color: #66746c;
+  font-size: 0.88rem;
+  margin: 4px 0 0;
+}
+
+.postback-status-grid {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(2, minmax(180px, 1fr));
+}
+
+.postback-status {
+  background: #f7faf8;
+  border: 1px solid #e5ebe6;
+  border-radius: 8px;
+  display: grid;
+  gap: 6px;
+  padding: 12px;
+}
+
+.postback-status strong,
+.postback-status span,
+.postback-status small {
+  min-width: 0;
+}
+
+.postback-status-ok {
+  border-color: rgba(46, 125, 85, 0.45);
+}
+
+.postback-status-warn {
+  border-color: rgba(176, 119, 42, 0.5);
+}
+
+.postback-warning-list {
+  background: rgba(176, 119, 42, 0.08);
+  border: 1px solid rgba(176, 119, 42, 0.5);
+  border-radius: 8px;
+  display: grid;
+  gap: 6px;
+  padding: 10px 12px;
+}
+
+.postback-warning-list p {
+  margin: 0;
+}
+
+.postback-form {
+  border: 1px solid #e5ebe6;
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(2, minmax(180px, 1fr));
+  padding: 12px;
+}
+
+.postback-form .field,
+.postback-form .toggle-row {
+  gap: 6px;
+}
+
+.postback-form input,
+.postback-form select {
+  min-height: 38px;
+  padding: 8px 10px;
+}
+
+.postback-url-field,
+.postback-form .settings-actions {
+  grid-column: 1 / -1;
+}
+
+.toggle-row {
+  align-items: center;
+  color: #344139;
+  display: inline-flex;
+  font-size: 0.9rem;
+  font-weight: 700;
+  gap: 8px;
+}
+
+.toggle-row input,
+.switch-label input {
+  width: auto;
+}
+
+.postback-list {
+  display: grid;
+  gap: 8px;
+}
+
+.postback-row {
+  align-items: center;
+  border: 1px solid #e5ebe6;
+  display: grid;
+  gap: 10px;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  padding: 10px 12px;
+}
+
+.postback-row div {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.postback-row span,
+.postback-run small {
+  color: #66746c;
+  font-size: 0.82rem;
+  overflow-wrap: anywhere;
+}
+
+.switch-label {
+  align-items: center;
+  color: #344139;
+  display: inline-flex;
+  font-size: 0.84rem;
+  font-weight: 750;
+  gap: 7px;
+}
+
+.postback-row-actions {
+  display: inline-flex;
+  gap: 6px;
+}
+
+.postback-row-actions .icon-button {
+  min-height: 34px;
+  min-width: 34px;
+  padding: 7px;
+}
+
+.postback-runs {
+  display: grid;
+  gap: 8px;
+}
+
+.postback-run {
+  align-items: center;
+  border-left: 3px solid #9aa8a0;
+  display: grid;
+  gap: 4px 10px;
+  grid-template-columns: minmax(0, 1fr) auto;
+  padding: 8px 10px;
+  background: #fafbfa;
+}
+
+.postback-run small {
+  grid-column: 1 / -1;
+}
+
+.postback-run-success {
+  border-left-color: #168a55;
+}
+
+.postback-run-failed {
+  border-left-color: #c24b3b;
+}
+
 .log-filterbar {
   align-items: center;
   border-bottom: 1px solid #e5ebe6;
@@ -2293,7 +2506,8 @@ button {
   .home-grid,
   .chat-workspace,
   .summary-strip,
-  .rule-form {
+  .rule-form,
+  .postback-form {
     grid-template-columns: 1fr;
   }
 
@@ -2356,6 +2570,7 @@ button {
   .inline-form,
   .account-row,
   .rule-row,
+  .postback-row,
   .audit-log-row,
   .branding-preview,
   .table-row,

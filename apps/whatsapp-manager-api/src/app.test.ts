@@ -13,6 +13,7 @@ import { evaluateNumberRules, recordBlockedNumberDelivery } from "./services/num
 import { recordWhatsAppSyncEvent } from "./services/whatsapp-sync-recorder.js";
 import { AppEventBus } from "./services/event-bus.js";
 import { HermesApiAdapter, type HermesAdapter } from "./services/hermes-adapter.js";
+import { PostbackActionDispatcher } from "./services/postback-actions.js";
 import { FileBridgeStateStore } from "./services/bridge-state-store.js";
 import { InMemoryChatSessionRouter } from "./services/chat-session-router.js";
 import { SqliteBridgeStateStore } from "./services/sqlite-bridge-state-store.js";
@@ -262,6 +263,431 @@ describe("whatsapp-manager-api", () => {
     } finally {
       await aliasApp.close();
       rmSync(dir, { force: true, recursive: true });
+    }
+  });
+
+  it("creates postback actions and records Hermes action runs", async () => {
+    const dir = mkdtempSync(path.join(tmpdir(), "auto-bot-postbacks-"));
+    const postbackConfig = loadConfig({
+      ...process.env,
+      API_TOKEN: "test-token",
+      BRIDGE_DATABASE_FILE: path.join(dir, "bridge-state.sqlite"),
+      BRIDGE_STATE_FILE: "",
+      DATABASE_URL: "postgres://postgres:postgres@127.0.0.1:5432/auto_bot",
+      NODE_ENV: "test",
+      PORT: "3000",
+    });
+    const postbackApp = createApp({
+      config: postbackConfig,
+      services: createTestServices(postbackConfig),
+    });
+
+    try {
+      const createResponse = await postbackApp.inject({
+        method: "POST",
+        url: "/postback-actions",
+        headers: {
+          authorization: "Bearer test-token",
+        },
+        payload: {
+          name: "Hermes inbound",
+          actionType: "hermes",
+          trigger: "inbound_message",
+          accountId: "ops-main",
+          config: {
+            replyToWhatsApp: true,
+          },
+        },
+      });
+
+      expect(createResponse.statusCode).toBe(200);
+      expect(createResponse.json()).toEqual(expect.objectContaining({
+        name: "Hermes inbound",
+        actionType: "hermes",
+        accountId: "ops-main",
+      }));
+      const actionId = createResponse.json().id;
+
+      const testResponse = await postbackApp.inject({
+        method: "POST",
+        url: `/postback-actions/${encodeURIComponent(actionId)}/test`,
+        headers: {
+          authorization: "Bearer test-token",
+        },
+        payload: {
+          event: {
+            accountId: "ops-main",
+            chatJid: "12345@s.whatsapp.net",
+            messageId: "wamid.postback.test",
+            text: "test postback",
+          },
+        },
+      });
+
+      expect(testResponse.statusCode).toBe(200);
+      expect(testResponse.json()).toEqual(expect.objectContaining({
+        actionName: "Hermes inbound",
+        actionType: "hermes",
+        status: "success",
+      }));
+
+      const inboundResponse = await postbackApp.inject({
+        method: "POST",
+        url: "/messages/inbound",
+        headers: {
+          authorization: "Bearer test-token",
+        },
+        payload: {
+          accountId: "ops-main",
+          chatJid: "12345@s.whatsapp.net",
+          messageId: "wamid.postback.1",
+          text: "trigger postback",
+        },
+      });
+
+      expect(inboundResponse.statusCode).toBe(200);
+      expect(inboundResponse.json().postbackRuns).toEqual([
+        expect.objectContaining({
+          actionName: "Hermes inbound",
+          actionType: "hermes",
+          status: "success",
+        }),
+      ]);
+
+      const runsResponse = await postbackApp.inject({
+        method: "GET",
+        url: "/postback-action-runs",
+        headers: {
+          authorization: "Bearer test-token",
+        },
+      });
+
+      expect(runsResponse.statusCode).toBe(200);
+      expect(runsResponse.json().items).toEqual(expect.arrayContaining([
+        expect.objectContaining({
+          actionName: "Hermes inbound",
+          inboundMessageId: "wamid.postback.1",
+          status: "success",
+        }),
+        expect.objectContaining({
+          actionName: "Hermes inbound",
+          inboundMessageId: "wamid.postback.test",
+          status: "success",
+        }),
+      ]));
+    } finally {
+      await postbackApp.close();
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("queues Hermes platform events and accepts native adapter replies", async () => {
+    const dir = mkdtempSync(path.join(tmpdir(), "auto-bot-hermes-platform-"));
+    const platformConfig = loadConfig({
+      ...process.env,
+      API_TOKEN: "test-token",
+      BRIDGE_DATABASE_FILE: path.join(dir, "bridge-state.sqlite"),
+      BRIDGE_STATE_FILE: "",
+      DATABASE_URL: "postgres://postgres:postgres@127.0.0.1:5432/auto_bot",
+      NODE_ENV: "test",
+      PORT: "3000",
+    });
+    const services = createTestServices(platformConfig);
+    const platformApp = createApp({
+      config: platformConfig,
+      services,
+    });
+
+    try {
+      await platformApp.inject({
+        method: "POST",
+        url: "/postback-actions",
+        headers: {
+          authorization: "Bearer test-token",
+        },
+        payload: {
+          name: "Native Hermes",
+          actionType: "hermes",
+          trigger: "inbound_message",
+          config: {
+            deliveryMode: "platform",
+          },
+        },
+      });
+
+      const inboundResponse = await platformApp.inject({
+        method: "POST",
+        url: "/messages/inbound",
+        headers: {
+          authorization: "Bearer test-token",
+        },
+        payload: {
+          accountId: "ops-main",
+          chatJid: "12345@s.whatsapp.net",
+          messageId: "wamid.platform.1",
+          text: "native adapter input",
+        },
+      });
+
+      expect(inboundResponse.statusCode).toBe(200);
+      expect(inboundResponse.json().postbackRuns).toEqual([
+        expect.objectContaining({
+          actionName: "Native Hermes",
+          status: "success",
+        }),
+      ]);
+
+      const eventsResponse = await platformApp.inject({
+        method: "GET",
+        url: "/hermes/platform/events?cursor=0",
+        headers: {
+          authorization: "Bearer test-token",
+        },
+      });
+
+      expect(eventsResponse.statusCode).toBe(200);
+      expect(eventsResponse.json()).toEqual({
+        items: [
+          expect.objectContaining({
+            sequence: 1,
+            accountId: "ops-main",
+            chatJid: "12345@s.whatsapp.net",
+            messageId: "wamid.platform.1",
+            text: "native adapter input",
+          }),
+        ],
+        nextCursor: "1",
+      });
+
+      const replyResponse = await platformApp.inject({
+        method: "POST",
+        url: "/hermes/platform/replies",
+        headers: {
+          authorization: "Bearer test-token",
+        },
+        payload: {
+          accountId: "ops-main",
+          chatJid: "12345@s.whatsapp.net",
+          inboundMessageId: "wamid.platform.1",
+          text: "native adapter response",
+        },
+      });
+
+      expect(replyResponse.statusCode).toBe(200);
+      expect((services.whatsappGateway as TestWhatsAppGateway).getSentMessages()).toEqual([
+        expect.objectContaining({
+          accountId: "ops-main",
+          chatId: "12345@s.whatsapp.net",
+          text: "native adapter response",
+        }),
+      ]);
+    } finally {
+      await platformApp.close();
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("routes external gateway inbound through native platform postbacks and fake adapter replies", async () => {
+    const dir = mkdtempSync(path.join(tmpdir(), "auto-bot-native-e2e-"));
+    const nativeConfig = loadConfig({
+      ...process.env,
+      API_TOKEN: "test-token",
+      BRIDGE_DATABASE_FILE: path.join(dir, "bridge-state.sqlite"),
+      BRIDGE_STATE_FILE: "",
+      DATABASE_URL: "postgres://postgres:postgres@127.0.0.1:5432/auto_bot",
+      NODE_ENV: "test",
+      PORT: "3000",
+    });
+    const services = createTestServices(nativeConfig);
+    const nativeApp = createApp({
+      config: nativeConfig,
+      services,
+    });
+    const gateway = services.whatsappGateway as TestWhatsAppGateway;
+
+    try {
+      await gateway.initializeAccount("ops-main");
+
+      await nativeApp.inject({
+        method: "POST",
+        url: "/number-rules",
+        headers: { authorization: "Bearer test-token" },
+        payload: {
+          accountId: "ops-main",
+          action: "allow",
+          matchType: "exact",
+          pattern: "12345@s.whatsapp.net",
+          label: "test allow",
+        },
+      });
+
+      await nativeApp.inject({
+        method: "POST",
+        url: "/postback-actions",
+        headers: { authorization: "Bearer test-token" },
+        payload: {
+          name: "Native fake adapter",
+          actionType: "hermes",
+          trigger: "inbound_message",
+          accountId: "ops-main",
+          chatJid: "12345@s.whatsapp.net",
+          config: {
+            deliveryMode: "platform",
+          },
+        },
+      });
+
+      await gateway.injectInboundMessage({
+        accountId: "ops-main",
+        chatJid: "12345@s.whatsapp.net",
+        messageId: "wamid.external.native.1",
+        text: "external native input",
+      });
+
+      const eventsResponse = await nativeApp.inject({
+        method: "GET",
+        url: "/hermes/platform/events?cursor=0",
+        headers: { authorization: "Bearer test-token" },
+      });
+      expect(eventsResponse.statusCode).toBe(200);
+      expect(eventsResponse.json().items).toEqual([
+        expect.objectContaining({
+          sequence: 1,
+          messageId: "wamid.external.native.1",
+          text: "external native input",
+        }),
+      ]);
+
+      const replyResponse = await nativeApp.inject({
+        method: "POST",
+        url: "/hermes/platform/replies",
+        headers: { authorization: "Bearer test-token" },
+        payload: {
+          accountId: "ops-main",
+          chatJid: "12345@s.whatsapp.net",
+          inboundMessageId: "wamid.external.native.1",
+          text: "fake native reply",
+        },
+      });
+
+      expect(replyResponse.statusCode).toBe(200);
+      expect(gateway.getSentMessages()).toEqual([
+        expect.objectContaining({
+          accountId: "ops-main",
+          chatId: "12345@s.whatsapp.net",
+          text: "fake native reply",
+        }),
+      ]);
+    } finally {
+      await nativeApp.close();
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("reports runtime status and cleans old postback records", async () => {
+    const dir = mkdtempSync(path.join(tmpdir(), "auto-bot-postback-maintenance-"));
+    const maintenanceConfig = loadConfig({
+      ...process.env,
+      API_TOKEN: "test-token",
+      BRIDGE_DATABASE_FILE: path.join(dir, "bridge-state.sqlite"),
+      BRIDGE_STATE_FILE: "",
+      DATABASE_URL: "postgres://postgres:postgres@127.0.0.1:5432/auto_bot",
+      HERMES_PLATFORM_EVENT_RETENTION_DAYS: "7",
+      NODE_ENV: "test",
+      PORT: "3000",
+      POSTBACK_RUN_RETENTION_DAYS: "30",
+      WHATSAPP_MANAGER_ALLOWED_USERS: "",
+      WHATSAPP_MANAGER_ALLOW_ALL_USERS: "true",
+      WHATSAPP_MANAGER_API_TOKEN: "test-token",
+      WHATSAPP_MANAGER_API_URL: "http://127.0.0.1:3000",
+    });
+    const services = createTestServices(maintenanceConfig);
+    const maintenanceApp = createApp({
+      config: maintenanceConfig,
+      services,
+    });
+    const store = services.postbackActionStore!;
+
+    try {
+      store.savePostbackActionRun({
+        id: "old-run",
+        actionId: "action-1",
+        actionName: "old",
+        actionType: "hermes",
+        accountId: "ops-main",
+        chatJid: "12345@s.whatsapp.net",
+        inboundMessageId: "old-message",
+        status: "success",
+        attempts: 1,
+        createdAt: "2026-05-01T00:00:00.000Z",
+        updatedAt: "2026-05-01T00:00:00.000Z",
+      });
+      store.savePostbackActionRun({
+        id: "new-run",
+        actionId: "action-1",
+        actionName: "new",
+        actionType: "hermes",
+        accountId: "ops-main",
+        chatJid: "12345@s.whatsapp.net",
+        inboundMessageId: "new-message",
+        status: "success",
+        attempts: 1,
+        createdAt: "2026-07-02T00:00:00.000Z",
+        updatedAt: "2026-07-02T00:00:00.000Z",
+      });
+      services.hermesPlatformEventStore!.appendHermesPlatformEvent({
+        accountId: "ops-main",
+        chatJid: "12345@s.whatsapp.net",
+        chatType: "direct",
+        senderJid: "12345@s.whatsapp.net",
+        sessionKey: "whatsapp:ops-main:direct:12345@s.whatsapp.net",
+        messageId: "platform-old",
+        chatId: "12345@s.whatsapp.net",
+        senderId: "12345@s.whatsapp.net",
+        text: "old event",
+        timestamp: "2026-05-01T00:00:00.000Z",
+      });
+
+      const statusResponse = await maintenanceApp.inject({
+        method: "GET",
+        url: "/runtime/status",
+        headers: { authorization: "Bearer test-token" },
+      });
+      expect(statusResponse.statusCode).toBe(200);
+      expect(statusResponse.json().hermesNativeAdapter).toEqual(expect.objectContaining({
+        ready: true,
+        apiUrlConfigured: true,
+        apiTokenConfigured: true,
+      }));
+
+      const cleanupResponse = await maintenanceApp.inject({
+        method: "POST",
+        url: "/postback-maintenance/cleanup",
+        headers: { authorization: "Bearer test-token" },
+        payload: {
+          runRetentionDays: 30,
+          platformEventRetentionDays: 7,
+        },
+      });
+
+      expect(cleanupResponse.statusCode).toBe(200);
+      expect(cleanupResponse.json().result).toEqual({
+        deletedRuns: 1,
+        deletedPlatformEvents: 0,
+      });
+      expect(store.getPostbackActionRun("old-run")).toBeNull();
+      expect(store.getPostbackActionRun("new-run")).toEqual(expect.objectContaining({ id: "new-run" }));
+      expect(store.cleanupPostbackRecords?.({
+        runRetentionDays: 0,
+        platformEventRetentionDays: 1,
+        now: new Date("2026-07-10T00:00:00.000Z"),
+      })).toEqual({
+        deletedRuns: 0,
+        deletedPlatformEvents: 1,
+      });
+    } finally {
+      await maintenanceApp.close();
+      rmSync(dir, { recursive: true, force: true });
     }
   });
 
@@ -2056,6 +2482,21 @@ function createTestServices(config: AppConfig): AppServices {
     bridgeStore,
     bridgeStore instanceof SqliteBridgeStateStore ? bridgeStore : undefined,
   );
+  const postbackActionStore = bridgeStore instanceof SqliteBridgeStateStore ? bridgeStore : undefined;
+  const hermesPlatformEventStore = bridgeStore instanceof SqliteBridgeStateStore ? bridgeStore : undefined;
+  const postbackDispatcher = new PostbackActionDispatcher({
+    ...(postbackActionStore ? { store: postbackActionStore } : {}),
+    ...(hermesPlatformEventStore ? { hermesPlatformEventStore } : {}),
+    router,
+    onHermesReply: async (event, reply) => {
+      await sendReplyWithDeliveryRecord({
+        ...(postbackActionStore ? { deliveryStore: postbackActionStore } : {}),
+        event,
+        text: reply.outputText,
+        whatsappGateway,
+      });
+    },
+  });
 
   function recordAuditLog(input: AuditLogInput) {
     if (bridgeStore instanceof SqliteBridgeStateStore) {
@@ -2098,6 +2539,31 @@ function createTestServices(config: AppConfig): AppServices {
         },
       });
       eventBus.publish("activity");
+      return;
+    }
+
+    const configuredActions = postbackActionStore
+      ?.listPostbackActions({ accountId: event.accountId, chatJid: event.chatJid })
+      .filter((action) => action.enabled && action.trigger === "inbound_message") ?? [];
+    if (configuredActions.length > 0) {
+      const runs = await postbackDispatcher.dispatchInboundMessage(event);
+      eventBus.publish("activity", {
+        accountId: event.accountId,
+        chatJid: event.chatJid,
+        source: "postback",
+        postbackRuns: runs,
+      });
+      recordAuditLog({
+        action: "message.inbound",
+        resourceType: "whatsapp-message",
+        resourceId: event.messageId,
+        details: {
+          accountId: event.accountId,
+          chatJid: event.chatJid,
+          postbackActions: runs.length,
+          failedPostbackActions: runs.filter((run) => run.status === "failed").length,
+        },
+      });
       return;
     }
 
@@ -2152,6 +2618,9 @@ function createTestServices(config: AppConfig): AppServices {
     ...(bridgeStore instanceof SqliteBridgeStateStore ? { accountMetadataStore: bridgeStore } : {}),
     ...(bridgeStore instanceof SqliteBridgeStateStore ? { managerChatMetadataStore: bridgeStore } : {}),
     ...(bridgeStore instanceof SqliteBridgeStateStore ? { whatsappSyncStore: bridgeStore } : {}),
+    ...(postbackActionStore ? { postbackActionStore } : {}),
+    ...(hermesPlatformEventStore ? { hermesPlatformEventStore } : {}),
+    postbackDispatcher,
   };
 }
 

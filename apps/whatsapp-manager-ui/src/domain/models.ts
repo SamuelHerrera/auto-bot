@@ -2,7 +2,9 @@ export type AccountStatus = "disconnected" | "connecting" | "connected";
 export type NumberSubview = "home" | "messages" | "rules" | "failures";
 export type NumberRuleAction = "allow" | "deny";
 export type NumberRuleMatchType = "all" | "exact" | "regex";
-export type RefreshScope = "accounts" | "directory" | "activity" | "chat" | "rules" | "logs";
+export type RefreshScope = "accounts" | "directory" | "activity" | "chat" | "rules" | "logs" | "postbacks";
+export type PostbackActionType = "hermes" | "http";
+export type PostbackRunStatus = "pending" | "success" | "failed" | "ignored";
 export type AuditLogOutcome = "success" | "failure" | "ignored";
 export type AuditLogFilter = "all" | AuditLogOutcome;
 
@@ -161,6 +163,61 @@ export interface NumberRule {
   enabled: boolean;
   createdAt: string;
   updatedAt: string;
+}
+
+export interface PostbackAction {
+  id: string;
+  name: string;
+  enabled: boolean;
+  trigger: "inbound_message";
+  actionType: PostbackActionType;
+  accountId?: string;
+  chatJid?: string;
+  configJson: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface PostbackActionRun {
+  id: string;
+  actionId: string;
+  actionName: string;
+  actionType: PostbackActionType;
+  accountId: string;
+  chatJid: string;
+  inboundMessageId: string;
+  status: PostbackRunStatus;
+  attempts: number;
+  requestJson?: string;
+  responseStatus?: number;
+  responseBody?: string;
+  error?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface PostbackMaintenance {
+  retention: {
+    postbackRunRetentionDays: number;
+    hermesPlatformEventRetentionDays: number;
+  };
+  stats: {
+    postbackActionRuns: number;
+    hermesPlatformEvents: number;
+    oldestPostbackActionRun?: string;
+    oldestHermesPlatformEvent?: string;
+  };
+}
+
+export interface RuntimeStatus {
+  hermesNativeAdapter: {
+    enabled: string;
+    apiUrlConfigured: boolean;
+    apiTokenConfigured: boolean;
+    allowAllUsers: boolean;
+    allowedUsersConfigured: boolean;
+    ready: boolean;
+  };
 }
 
 export interface ChatSummary {

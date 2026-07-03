@@ -14,6 +14,13 @@ const configSchema = z.object({
   BRIDGE_STATE_FILE: z.string().default(""),
   HERMES_API_BASE_URL: z.string().url().default("http://127.0.0.1:8642"),
   HERMES_API_MODEL: z.string().default("hermes-agent"),
+  POSTBACK_RUN_RETENTION_DAYS: z.coerce.number().int().nonnegative().default(30),
+  HERMES_PLATFORM_EVENT_RETENTION_DAYS: z.coerce.number().int().nonnegative().default(7),
+  WHATSAPP_MANAGER_NATIVE_ADAPTER_ENABLED: z.string().default("auto"),
+  WHATSAPP_MANAGER_API_URL: z.string().default(""),
+  WHATSAPP_MANAGER_API_TOKEN: z.string().default(""),
+  WHATSAPP_MANAGER_ALLOW_ALL_USERS: z.string().default(""),
+  WHATSAPP_MANAGER_ALLOWED_USERS: z.string().default(""),
 });
 
 type ParsedConfig = z.infer<typeof configSchema>;

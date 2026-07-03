@@ -39,9 +39,13 @@ RUN apt-get update \
 COPY ssh/sshd_config /etc/ssh/sshd_config
 COPY ssh/auto-bot-env.sh /etc/profile.d/auto-bot-env.sh
 COPY scripts/docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
+COPY scripts/auto-bot-services.sh /usr/local/bin/auto-bot-services
+COPY integrations/hermes-whatsapp-platform-adapter /opt/hermes/plugins/platforms/whatsapp_manager
 
 RUN chmod 0644 /etc/profile.d/auto-bot-env.sh \
-    && chmod 0755 /usr/local/bin/docker-entrypoint.sh
+    && chmod 0755 /usr/local/bin/docker-entrypoint.sh \
+    && chmod 0755 /usr/local/bin/auto-bot-services \
+    && chmod -R a+rX /opt/hermes/plugins/platforms/whatsapp_manager
 
 ENTRYPOINT ["/usr/local/bin/docker-entrypoint.sh"]
-CMD ["bash"]
+CMD ["auto-bot-services"]

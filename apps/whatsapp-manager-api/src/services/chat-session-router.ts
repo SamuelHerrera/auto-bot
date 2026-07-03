@@ -4,11 +4,15 @@ import type {
   ChatSessionMapping,
   DeliveryRecord,
   GroupRoutingPolicyRecord,
+  HermesPlatformEventRecord,
   HermesSession,
   InboundMessageResult,
   ManagerChatMetadata,
   NumberRuleInput,
   NumberRuleRecord,
+  PostbackActionInput,
+  PostbackActionRecord,
+  PostbackActionRunRecord,
   WhatsAppAccountMetadata,
   WhatsAppChatId,
   WhatsAppChatType,
@@ -336,6 +340,32 @@ export interface AuditLogStore {
   listAuditLogs(limit?: number): AuditLogRecord[];
   recordAuditLog(input: AuditLogInput): AuditLogRecord;
   coalesceAuditLog?(input: AuditLogInput, windowMs: number): AuditLogRecord;
+}
+
+export interface PostbackActionStore {
+  listPostbackActions(input?: { accountId?: string; chatJid?: string }): PostbackActionRecord[];
+  getPostbackAction(id: string): PostbackActionRecord | null;
+  createPostbackAction(input: PostbackActionInput): PostbackActionRecord;
+  updatePostbackAction(id: string, input: Partial<PostbackActionInput>): PostbackActionRecord | null;
+  deletePostbackAction(id: string): boolean;
+  listPostbackActionRuns(input?: { actionId?: string; accountId?: string; chatJid?: string; limit?: number }): PostbackActionRunRecord[];
+  getPostbackActionRun(id: string): PostbackActionRunRecord | null;
+  savePostbackActionRun(record: PostbackActionRunRecord): void;
+  cleanupPostbackRecords?(input: { runRetentionDays?: number; platformEventRetentionDays?: number; now?: Date }): {
+    deletedRuns: number;
+    deletedPlatformEvents: number;
+  };
+  getPostbackMaintenanceStats?(): {
+    postbackActionRuns: number;
+    hermesPlatformEvents: number;
+    oldestPostbackActionRun?: string;
+    oldestHermesPlatformEvent?: string;
+  };
+}
+
+export interface HermesPlatformEventStore {
+  appendHermesPlatformEvent(event: WhatsAppMessageEvent): HermesPlatformEventRecord;
+  listHermesPlatformEvents(input?: { afterSequence?: number; limit?: number }): HermesPlatformEventRecord[];
 }
 
 export interface AccountMetadataStore {

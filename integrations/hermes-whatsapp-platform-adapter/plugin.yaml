@@ -1,0 +1,39 @@
+name: whatsapp-manager-platform
+label: WhatsApp Manager
+kind: platform
+version: 0.1.0
+description: >
+  Hermes gateway adapter for WhatsApp Manager. Polls the manager's
+  native platform event queue and delivers Hermes replies back through
+  the manager's WhatsApp gateway.
+author: auto-bot
+requires_env:
+  - name: WHATSAPP_MANAGER_API_URL
+    description: "WhatsApp Manager API base URL, e.g. http://127.0.0.1:3000"
+    prompt: "WhatsApp Manager API URL"
+    password: false
+  - name: WHATSAPP_MANAGER_API_TOKEN
+    description: "Bearer token used by the WhatsApp Manager API"
+    prompt: "WhatsApp Manager API token"
+    password: true
+optional_env:
+  - name: WHATSAPP_MANAGER_POLL_INTERVAL
+    description: "Polling interval in seconds for native platform events"
+    prompt: "Poll interval seconds"
+    password: false
+  - name: WHATSAPP_MANAGER_PAGE_SIZE
+    description: "Maximum events fetched per poll"
+    prompt: "Page size"
+    password: false
+  - name: WHATSAPP_MANAGER_ALLOWED_USERS
+    description: "Comma-separated WhatsApp sender IDs allowed to talk to Hermes"
+    prompt: "Allowed WhatsApp senders"
+    password: false
+  - name: WHATSAPP_MANAGER_ALLOW_ALL_USERS
+    description: "Allow any WhatsApp Manager sender to talk to Hermes"
+    prompt: "Allow all senders? (true/false)"
+    password: false
+  - name: WHATSAPP_MANAGER_HOME_CHANNEL
+    description: "Optional default chat in accountId:chatJid form for cron and startup notices"
+    prompt: "Home channel"
+    password: false

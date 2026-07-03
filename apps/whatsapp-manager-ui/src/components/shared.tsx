@@ -79,8 +79,10 @@ export function StatusIndicator({ detail, tone }: { detail: string; tone: "live"
       aria-live="polite"
       role="status"
       tabIndex={0}
+      title={detail}
     >
       <span className="status-indicator-dot" />
+      <span className="status-indicator-text">{detail}</span>
       <span className="status-tooltip">{detail}</span>
     </span>
   );

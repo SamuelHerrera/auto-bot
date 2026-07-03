@@ -8,10 +8,16 @@ import type {
   ChatSessionMapping,
   DeliveryRecord,
   GroupRoutingPolicyRecord,
+  HermesPlatformEventRecord,
   HermesSession,
   ManagerChatMetadata,
   NumberRuleInput,
   NumberRuleRecord,
+  PostbackActionInput,
+  PostbackActionRecord,
+  PostbackActionRunRecord,
+  PostbackActionType,
+  PostbackRunStatus,
   WhatsAppAccountMetadata,
   WhatsAppChatRecord,
   WhatsAppContactRecord,
@@ -19,6 +25,7 @@ import type {
   WhatsAppHistorySyncBatchRecord,
   WhatsAppLidMappingRecord,
   WhatsAppMediaAssetRecord,
+  WhatsAppMessageEvent,
   WhatsAppMessageCountRecord,
   WhatsAppMessageReceiptRecord,
   WhatsAppMessageUpdateRecord,
@@ -33,8 +40,10 @@ import type {
   ChatSessionRouterSnapshot,
   ChatSessionRouterStore,
   GroupRoutingPolicyStore,
+  HermesPlatformEventStore,
   ManagerChatMetadataStore,
   NumberRuleStore,
+  PostbackActionStore,
   WhatsAppSyncStore,
 } from "./chat-session-router.js";
 
@@ -43,15 +52,21 @@ export class SqliteBridgeStateStore
     ChatSessionRouterStore,
     BridgeDeliveryStore,
     GroupRoutingPolicyStore,
+    HermesPlatformEventStore,
     NumberRuleStore,
     AuditLogStore,
     AccountMetadataStore,
     ManagerChatMetadataStore,
+    PostbackActionStore,
     WhatsAppSyncStore
 {
   private readonly db: DatabaseSync;
+  private readonly runRetentionDays: number;
+  private readonly platformEventRetentionDays: number;
 
-  constructor(filePath: string) {
+  constructor(filePath: string, options: { runRetentionDays?: number; platformEventRetentionDays?: number } = {}) {
+    this.runRetentionDays = options.runRetentionDays ?? 30;
+    this.platformEventRetentionDays = options.platformEventRetentionDays ?? 7;
     mkdirSync(path.dirname(filePath), { recursive: true });
     this.db = new DatabaseSync(filePath);
     this.db.exec("PRAGMA journal_mode = WAL");
@@ -466,6 +481,269 @@ export class SqliteBridgeStateStore
       ...existingRecord,
       ...(details ? { details } : {}),
     };
+  }
+
+  listPostbackActions(input: { accountId?: string; chatJid?: string } = {}): PostbackActionRecord[] {
+    const filters: string[] = [];
+    const args: string[] = [];
+    if (input.accountId?.trim()) {
+      filters.push("(account_id IS NULL OR account_id = ?)");
+      args.push(input.accountId.trim());
+    }
+    if (input.chatJid?.trim()) {
+      filters.push("(chat_jid IS NULL OR chat_jid = ?)");
+      args.push(input.chatJid.trim());
+    }
+    const clause = filters.length ? `WHERE ${filters.join(" AND ")}` : "";
+    return this.db
+      .prepare(`SELECT * FROM postback_actions ${clause} ORDER BY updated_at DESC`)
+      .all(...args)
+      .map(rowToPostbackAction);
+  }
+
+  getPostbackAction(id: string): PostbackActionRecord | null {
+    const row = this.db.prepare("SELECT * FROM postback_actions WHERE id = ?").get(id);
+    return row ? rowToPostbackAction(row) : null;
+  }
+
+  createPostbackAction(input: PostbackActionInput): PostbackActionRecord {
+    const now = new Date().toISOString();
+    const record: PostbackActionRecord = {
+      id: randomUUID(),
+      name: input.name.trim(),
+      enabled: input.enabled ?? true,
+      trigger: input.trigger ?? "inbound_message",
+      actionType: input.actionType,
+      ...(input.accountId?.trim() ? { accountId: input.accountId.trim() } : {}),
+      ...(input.chatJid?.trim() ? { chatJid: input.chatJid.trim() } : {}),
+      configJson: JSON.stringify(input.config ?? {}),
+      createdAt: now,
+      updatedAt: now,
+    };
+
+    this.db
+      .prepare(`
+        INSERT INTO postback_actions
+          (id, name, enabled, trigger, action_type, account_id, chat_jid, config_json, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `)
+      .run(
+        record.id,
+        record.name,
+        record.enabled ? 1 : 0,
+        record.trigger,
+        record.actionType,
+        record.accountId ?? null,
+        record.chatJid ?? null,
+        record.configJson,
+        record.createdAt,
+        record.updatedAt,
+      );
+
+    return record;
+  }
+
+  updatePostbackAction(id: string, input: Partial<PostbackActionInput>): PostbackActionRecord | null {
+    const existing = this.getPostbackAction(id);
+    if (!existing) {
+      return null;
+    }
+
+    const record: PostbackActionRecord = {
+      ...existing,
+      ...(input.name !== undefined ? { name: input.name.trim() } : {}),
+      ...(input.enabled !== undefined ? { enabled: input.enabled } : {}),
+      ...(input.trigger !== undefined ? { trigger: input.trigger } : {}),
+      ...(input.actionType !== undefined ? { actionType: input.actionType } : {}),
+      ...(input.config !== undefined ? { configJson: JSON.stringify(input.config) } : {}),
+      updatedAt: new Date().toISOString(),
+    };
+    if (input.accountId !== undefined) {
+      if (input.accountId.trim()) {
+        record.accountId = input.accountId.trim();
+      } else {
+        delete record.accountId;
+      }
+    }
+    if (input.chatJid !== undefined) {
+      if (input.chatJid.trim()) {
+        record.chatJid = input.chatJid.trim();
+      } else {
+        delete record.chatJid;
+      }
+    }
+
+    this.db
+      .prepare(`
+        UPDATE postback_actions
+        SET name = ?,
+            enabled = ?,
+            trigger = ?,
+            action_type = ?,
+            account_id = ?,
+            chat_jid = ?,
+            config_json = ?,
+            updated_at = ?
+        WHERE id = ?
+      `)
+      .run(
+        record.name,
+        record.enabled ? 1 : 0,
+        record.trigger,
+        record.actionType,
+        record.accountId ?? null,
+        record.chatJid ?? null,
+        record.configJson,
+        record.updatedAt,
+        id,
+      );
+
+    return record;
+  }
+
+  deletePostbackAction(id: string): boolean {
+    const result = this.db.prepare("DELETE FROM postback_actions WHERE id = ?").run(id);
+    return result.changes > 0;
+  }
+
+  listPostbackActionRuns(
+    input: { actionId?: string; accountId?: string; chatJid?: string; limit?: number } = {},
+  ): PostbackActionRunRecord[] {
+    const filters: string[] = [];
+    const args: string[] = [];
+    if (input.actionId?.trim()) {
+      filters.push("action_id = ?");
+      args.push(input.actionId.trim());
+    }
+    if (input.accountId?.trim()) {
+      filters.push("account_id = ?");
+      args.push(input.accountId.trim());
+    }
+    if (input.chatJid?.trim()) {
+      filters.push("chat_jid = ?");
+      args.push(input.chatJid.trim());
+    }
+    const clause = filters.length ? `WHERE ${filters.join(" AND ")}` : "";
+    return this.db
+      .prepare(`SELECT * FROM postback_action_runs ${clause} ORDER BY created_at DESC LIMIT ?`)
+      .all(...args, safeLimit(input.limit))
+      .map(rowToPostbackActionRun);
+  }
+
+  getPostbackActionRun(id: string): PostbackActionRunRecord | null {
+    const row = this.db.prepare("SELECT * FROM postback_action_runs WHERE id = ?").get(id);
+    return row ? rowToPostbackActionRun(row) : null;
+  }
+
+  savePostbackActionRun(record: PostbackActionRunRecord): void {
+    this.db
+      .prepare(`
+        INSERT INTO postback_action_runs
+          (id, action_id, action_name, action_type, account_id, chat_jid, inbound_message_id, status, attempts, request_json, response_status, response_body, error, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(id) DO UPDATE SET
+          status = excluded.status,
+          attempts = excluded.attempts,
+          request_json = excluded.request_json,
+          response_status = excluded.response_status,
+          response_body = excluded.response_body,
+          error = excluded.error,
+          updated_at = excluded.updated_at
+      `)
+      .run(
+        record.id,
+        record.actionId,
+        record.actionName,
+        record.actionType,
+        record.accountId,
+        record.chatJid,
+        record.inboundMessageId,
+        record.status,
+        record.attempts,
+        record.requestJson ?? null,
+        record.responseStatus ?? null,
+        record.responseBody ?? null,
+        record.error ?? null,
+        record.createdAt,
+        record.updatedAt,
+      );
+  }
+
+  cleanupPostbackRecords(input: { runRetentionDays?: number; platformEventRetentionDays?: number; now?: Date } = {}) {
+    const now = input.now ?? new Date();
+    const runRetentionDays = input.runRetentionDays ?? this.runRetentionDays;
+    const platformEventRetentionDays = input.platformEventRetentionDays ?? this.platformEventRetentionDays;
+    return {
+      deletedRuns: cleanupByCreatedAt(this.db, "postback_action_runs", runRetentionDays, now),
+      deletedPlatformEvents: cleanupByCreatedAt(this.db, "hermes_platform_events", platformEventRetentionDays, now),
+    };
+  }
+
+  getPostbackMaintenanceStats() {
+    const runStats = this.db
+      .prepare("SELECT COUNT(*) AS count, MIN(created_at) AS oldest FROM postback_action_runs")
+      .get() as { count: number; oldest?: string | null };
+    const eventStats = this.db
+      .prepare("SELECT COUNT(*) AS count, MIN(created_at) AS oldest FROM hermes_platform_events")
+      .get() as { count: number; oldest?: string | null };
+    return {
+      postbackActionRuns: Number(runStats.count ?? 0),
+      hermesPlatformEvents: Number(eventStats.count ?? 0),
+      ...(runStats.oldest ? { oldestPostbackActionRun: String(runStats.oldest) } : {}),
+      ...(eventStats.oldest ? { oldestHermesPlatformEvent: String(eventStats.oldest) } : {}),
+    };
+  }
+
+  appendHermesPlatformEvent(event: WhatsAppMessageEvent): HermesPlatformEventRecord {
+    const createdAt = new Date().toISOString();
+    const payloadJson = JSON.stringify(event);
+    const result = this.db
+      .prepare(`
+        INSERT INTO hermes_platform_events
+          (account_id, chat_jid, chat_type, sender_jid, session_key, message_id, participant_jid, text, timestamp, payload_json, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `)
+      .run(
+        event.accountId,
+        event.chatJid,
+        event.chatType,
+        event.senderJid,
+        event.sessionKey,
+        event.messageId,
+        event.participantJid ?? null,
+        event.text,
+        event.timestamp,
+        payloadJson,
+        createdAt,
+      );
+
+    return {
+      sequence: Number(result.lastInsertRowid),
+      accountId: event.accountId,
+      chatJid: event.chatJid,
+      chatType: event.chatType,
+      senderJid: event.senderJid,
+      sessionKey: event.sessionKey,
+      messageId: event.messageId,
+      ...(event.participantJid ? { participantJid: event.participantJid } : {}),
+      text: event.text,
+      timestamp: event.timestamp,
+      payloadJson,
+      createdAt,
+    };
+  }
+
+  listHermesPlatformEvents(input: { afterSequence?: number; limit?: number } = {}): HermesPlatformEventRecord[] {
+    return this.db
+      .prepare(`
+        SELECT *
+        FROM hermes_platform_events
+        WHERE sequence > ?
+        ORDER BY sequence ASC
+        LIMIT ?
+      `)
+      .all(input.afterSequence ?? 0, safeLimit(input.limit))
+      .map(rowToHermesPlatformEvent);
   }
 
   saveWhatsAppContact(record: WhatsAppContactRecord): void {
@@ -928,6 +1206,61 @@ export class SqliteBridgeStateStore
       CREATE INDEX IF NOT EXISTS audit_logs_created_at_idx
         ON audit_logs(created_at DESC);
 
+      CREATE TABLE IF NOT EXISTS postback_actions (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        enabled INTEGER NOT NULL,
+        trigger TEXT NOT NULL,
+        action_type TEXT NOT NULL,
+        account_id TEXT,
+        chat_jid TEXT,
+        config_json TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      );
+
+      CREATE INDEX IF NOT EXISTS postback_actions_trigger_idx
+        ON postback_actions(trigger, enabled, account_id, chat_jid);
+
+      CREATE TABLE IF NOT EXISTS postback_action_runs (
+        id TEXT PRIMARY KEY,
+        action_id TEXT NOT NULL,
+        action_name TEXT NOT NULL,
+        action_type TEXT NOT NULL,
+        account_id TEXT NOT NULL,
+        chat_jid TEXT NOT NULL,
+        inbound_message_id TEXT NOT NULL,
+        status TEXT NOT NULL,
+        attempts INTEGER NOT NULL,
+        request_json TEXT,
+        response_status INTEGER,
+        response_body TEXT,
+        error TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      );
+
+      CREATE INDEX IF NOT EXISTS postback_action_runs_lookup_idx
+        ON postback_action_runs(account_id, chat_jid, created_at DESC);
+
+      CREATE TABLE IF NOT EXISTS hermes_platform_events (
+        sequence INTEGER PRIMARY KEY AUTOINCREMENT,
+        account_id TEXT NOT NULL,
+        chat_jid TEXT NOT NULL,
+        chat_type TEXT NOT NULL,
+        sender_jid TEXT NOT NULL,
+        session_key TEXT NOT NULL,
+        message_id TEXT NOT NULL,
+        participant_jid TEXT,
+        text TEXT NOT NULL,
+        timestamp TEXT NOT NULL,
+        payload_json TEXT NOT NULL,
+        created_at TEXT NOT NULL
+      );
+
+      CREATE INDEX IF NOT EXISTS hermes_platform_events_sequence_idx
+        ON hermes_platform_events(sequence);
+
       CREATE TABLE IF NOT EXISTS whatsapp_contacts (
         account_id TEXT NOT NULL,
         contact_jid TEXT NOT NULL,
@@ -1072,6 +1405,7 @@ export class SqliteBridgeStateStore
     `);
     this.ensureColumn("delivery_records", "inbound_text", "TEXT");
     this.ensureColumn("delivery_records", "failure_stage", "TEXT");
+    this.cleanupPostbackRecords();
     this.cleanupBlockedNumberRuleDeliveries();
   }
 
@@ -1215,6 +1549,61 @@ function rowToAuditLog(row: unknown): AuditLogRecord {
     ...(value.resource_type ? { resourceType: String(value.resource_type) } : {}),
     ...(value.resource_id ? { resourceId: String(value.resource_id) } : {}),
     ...(detailsJson ? { details: parseDetailsJson(detailsJson) } : {}),
+    createdAt: String(value.created_at),
+  };
+}
+
+function rowToPostbackAction(row: unknown): PostbackActionRecord {
+  const value = row as Record<string, string | number | null>;
+  return {
+    id: String(value.id),
+    name: String(value.name),
+    enabled: Boolean(value.enabled),
+    trigger: String(value.trigger) as PostbackActionRecord["trigger"],
+    actionType: String(value.action_type) as PostbackActionRecord["actionType"],
+    ...(value.account_id ? { accountId: String(value.account_id) } : {}),
+    ...(value.chat_jid ? { chatJid: String(value.chat_jid) } : {}),
+    configJson: String(value.config_json ?? "{}"),
+    createdAt: String(value.created_at),
+    updatedAt: String(value.updated_at),
+  };
+}
+
+function rowToPostbackActionRun(row: unknown): PostbackActionRunRecord {
+  const value = row as Record<string, string | number | null>;
+  return {
+    id: String(value.id),
+    actionId: String(value.action_id),
+    actionName: String(value.action_name),
+    actionType: String(value.action_type) as PostbackActionRunRecord["actionType"],
+    accountId: String(value.account_id),
+    chatJid: String(value.chat_jid),
+    inboundMessageId: String(value.inbound_message_id),
+    status: String(value.status) as PostbackActionRunRecord["status"],
+    attempts: Number(value.attempts),
+    ...(value.request_json ? { requestJson: String(value.request_json) } : {}),
+    ...(value.response_status !== null && value.response_status !== undefined ? { responseStatus: Number(value.response_status) } : {}),
+    ...(value.response_body ? { responseBody: String(value.response_body) } : {}),
+    ...(value.error ? { error: String(value.error) } : {}),
+    createdAt: String(value.created_at),
+    updatedAt: String(value.updated_at),
+  };
+}
+
+function rowToHermesPlatformEvent(row: unknown): HermesPlatformEventRecord {
+  const value = row as Record<string, string | number | null>;
+  return {
+    sequence: Number(value.sequence),
+    accountId: String(value.account_id),
+    chatJid: String(value.chat_jid),
+    chatType: String(value.chat_type) as HermesPlatformEventRecord["chatType"],
+    senderJid: String(value.sender_jid),
+    sessionKey: String(value.session_key),
+    messageId: String(value.message_id),
+    ...(value.participant_jid ? { participantJid: String(value.participant_jid) } : {}),
+    text: String(value.text),
+    timestamp: String(value.timestamp),
+    payloadJson: String(value.payload_json),
     createdAt: String(value.created_at),
   };
 }
@@ -1394,6 +1783,14 @@ function syncWhereClause(input: { accountId?: string; chatJid?: string }) {
 
 function safeLimit(limit: number | undefined) {
   return Math.min(Math.max(Math.trunc(limit ?? 200), 1), 1000);
+}
+
+function cleanupByCreatedAt(db: DatabaseSync, tableName: "postback_action_runs" | "hermes_platform_events", retentionDays: number, now: Date) {
+  if (!Number.isFinite(retentionDays) || retentionDays <= 0) {
+    return 0;
+  }
+  const cutoff = new Date(now.getTime() - Math.trunc(retentionDays) * 24 * 60 * 60 * 1000).toISOString();
+  return Number(db.prepare(`DELETE FROM ${tableName} WHERE created_at < ?`).run(cutoff).changes);
 }
 
 function parseDetailsJson(value: string): Record<string, unknown> {

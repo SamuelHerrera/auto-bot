@@ -8,7 +8,16 @@ import {
   sendReplyWithDeliveryRecord,
   type AppServices,
 } from "./build-services.js";
-import type { AuditLogInput, NumberRuleInput, WhatsAppAccountMetadata, WhatsAppAccountStatus } from "./domain/types.js";
+import type {
+  AuditLogInput,
+  NumberRuleInput,
+  PostbackActionInput,
+  PostbackActionRecord,
+  WhatsAppMessageEvent,
+  WhatsAppAccountMetadata,
+  WhatsAppAccountStatus,
+} from "./domain/types.js";
+import { getWhatsAppChatType, getWhatsAppSessionKey } from "./domain/types.js";
 import { evaluateNumberRules, recordBlockedNumberDelivery } from "./services/number-rules.js";
 import type { RoutingInput } from "./services/chat-session-router.js";
 
@@ -453,6 +462,240 @@ export function createApp({ config, services = buildServices(config) }: CreateAp
     return reply.code(204).send();
   });
 
+  app.get<{ Querystring: { accountId?: string; chatJid?: string } }>("/postback-actions", async (request) => ({
+    items: services.postbackActionStore?.listPostbackActions({
+      ...(request.query.accountId ? { accountId: request.query.accountId } : {}),
+      ...(request.query.chatJid ? { chatJid: request.query.chatJid } : {}),
+    }) ?? [],
+  }));
+
+  app.post<{ Body: unknown }>("/postback-actions", async (request, reply) => {
+    if (!services.postbackActionStore) {
+      return reply.code(503).send({ error: "Postback action storage is not configured" });
+    }
+
+    const input = parsePostbackActionInput(request.body);
+    const action = services.postbackActionStore.createPostbackAction(input);
+    services.eventBus.publish("postbacks", { actions: [action] });
+    audit({
+      action: "postback-action.create",
+      resourceType: "postback-action",
+      resourceId: action.id,
+      details: {
+        actionType: action.actionType,
+        accountId: action.accountId ?? null,
+        chatJid: action.chatJid ?? null,
+      },
+    });
+    return action;
+  });
+
+  app.put<{ Params: { actionId: string }; Body: unknown }>("/postback-actions/:actionId", async (request, reply) => {
+    if (!services.postbackActionStore) {
+      return reply.code(503).send({ error: "Postback action storage is not configured" });
+    }
+
+    const actionId = decodeURIComponent(request.params.actionId);
+    const existing = services.postbackActionStore.getPostbackAction(actionId);
+    if (!existing) {
+      return reply.code(404).send({ error: "Postback action not found" });
+    }
+
+    const action = services.postbackActionStore.updatePostbackAction(actionId, parsePostbackActionInput(request.body, existing));
+    services.eventBus.publish("postbacks", { actions: action ? [action] : [] });
+    audit({
+      action: "postback-action.update",
+      resourceType: "postback-action",
+      resourceId: actionId,
+      details: {
+        before: existing,
+        after: action,
+      },
+    });
+    return action;
+  });
+
+  app.delete<{ Params: { actionId: string } }>("/postback-actions/:actionId", async (request, reply) => {
+    if (!services.postbackActionStore) {
+      return reply.code(503).send({ error: "Postback action storage is not configured" });
+    }
+
+    const actionId = decodeURIComponent(request.params.actionId);
+    const existing = services.postbackActionStore.getPostbackAction(actionId);
+    if (!existing) {
+      return reply.code(404).send({ error: "Postback action not found" });
+    }
+
+    services.postbackActionStore.deletePostbackAction(actionId);
+    services.eventBus.publish("postbacks", { deletedActionIds: [actionId] });
+    audit({
+      action: "postback-action.delete",
+      resourceType: "postback-action",
+      resourceId: actionId,
+      details: {
+        actionType: existing.actionType,
+        accountId: existing.accountId ?? null,
+        chatJid: existing.chatJid ?? null,
+      },
+    });
+    return reply.code(204).send();
+  });
+
+  app.post<{ Params: { actionId: string }; Body: unknown }>("/postback-actions/:actionId/test", async (request, reply) => {
+    if (!services.postbackActionStore || !services.postbackDispatcher) {
+      return reply.code(503).send({ error: "Postback action execution is not configured" });
+    }
+
+    const actionId = decodeURIComponent(request.params.actionId);
+    const action = services.postbackActionStore.getPostbackAction(actionId);
+    if (!action) {
+      return reply.code(404).send({ error: "Postback action not found" });
+    }
+
+    const event = parsePostbackTestEventInput(request.body, action);
+    const run = await services.postbackDispatcher.executeAction(action, event);
+    services.eventBus.publish("postbacks", { runs: [run] });
+    audit({
+      action: "postback-action.test",
+      outcome: run.status === "failed" ? "failure" : "success",
+      resourceType: "postback-action",
+      resourceId: action.id,
+      details: {
+        actionType: action.actionType,
+        accountId: event.accountId,
+        chatJid: event.chatJid,
+        status: run.status,
+      },
+    });
+    return run;
+  });
+
+  app.get<{ Querystring: { actionId?: string; accountId?: string; chatJid?: string; limit?: string } }>("/postback-action-runs", async (request) => ({
+    items: services.postbackActionStore?.listPostbackActionRuns({
+      ...(request.query.actionId ? { actionId: request.query.actionId } : {}),
+      ...(request.query.accountId ? { accountId: request.query.accountId } : {}),
+      ...(request.query.chatJid ? { chatJid: request.query.chatJid } : {}),
+      limit: readLimit(request.query.limit, 200),
+    }) ?? [],
+  }));
+
+  app.get("/postback-maintenance", async () => ({
+    retention: {
+      postbackRunRetentionDays: config.POSTBACK_RUN_RETENTION_DAYS,
+      hermesPlatformEventRetentionDays: config.HERMES_PLATFORM_EVENT_RETENTION_DAYS,
+    },
+    stats: services.postbackActionStore?.getPostbackMaintenanceStats?.() ?? {
+      postbackActionRuns: 0,
+      hermesPlatformEvents: 0,
+    },
+  }));
+
+  app.post<{ Body: unknown }>("/postback-maintenance/cleanup", async (request) => {
+    const input = parsePostbackMaintenanceCleanupInput(request.body, config);
+    const result = services.postbackActionStore?.cleanupPostbackRecords?.(input) ?? {
+      deletedRuns: 0,
+      deletedPlatformEvents: 0,
+    };
+    const stats = services.postbackActionStore?.getPostbackMaintenanceStats?.() ?? {
+      postbackActionRuns: 0,
+      hermesPlatformEvents: 0,
+    };
+    audit({
+      action: "postback-maintenance.cleanup",
+      resourceType: "postback-action",
+      details: {
+        ...input,
+        ...result,
+      },
+    });
+    services.eventBus.publish("postbacks", { maintenance: { result, stats } });
+    return { result, stats };
+  });
+
+  app.get("/runtime/status", async () => ({
+    hermesNativeAdapter: {
+      enabled: config.WHATSAPP_MANAGER_NATIVE_ADAPTER_ENABLED,
+      apiUrlConfigured: Boolean(config.WHATSAPP_MANAGER_API_URL.trim()),
+      apiTokenConfigured: Boolean(config.WHATSAPP_MANAGER_API_TOKEN.trim()),
+      allowAllUsers: isTruthyConfig(config.WHATSAPP_MANAGER_ALLOW_ALL_USERS),
+      allowedUsersConfigured: Boolean(config.WHATSAPP_MANAGER_ALLOWED_USERS.trim()),
+      ready:
+        config.WHATSAPP_MANAGER_NATIVE_ADAPTER_ENABLED !== "0" &&
+        Boolean(config.WHATSAPP_MANAGER_API_URL.trim()) &&
+        Boolean(config.WHATSAPP_MANAGER_API_TOKEN.trim()) &&
+        (isTruthyConfig(config.WHATSAPP_MANAGER_ALLOW_ALL_USERS) || Boolean(config.WHATSAPP_MANAGER_ALLOWED_USERS.trim())),
+    },
+  }));
+
+  app.get<{ Querystring: { cursor?: string; limit?: string } }>("/hermes/platform/events", async (request, reply) => {
+    if (!services.hermesPlatformEventStore) {
+      return reply.code(503).send({ error: "Hermes platform event storage is not configured" });
+    }
+
+    const afterSequence = readCursor(request.query.cursor);
+    const items = services.hermesPlatformEventStore.listHermesPlatformEvents({
+      afterSequence,
+      limit: readLimit(request.query.limit, 100),
+    });
+    const nextCursor = items.length > 0 ? String(items[items.length - 1]!.sequence) : String(afterSequence);
+    return {
+      items: items.map((item) => ({
+        sequence: item.sequence,
+        accountId: item.accountId,
+        chatJid: item.chatJid,
+        chatType: item.chatType,
+        senderJid: item.senderJid,
+        sessionKey: item.sessionKey,
+        messageId: item.messageId,
+        ...(item.participantJid ? { participantJid: item.participantJid } : {}),
+        text: item.text,
+        timestamp: item.timestamp,
+      })),
+      nextCursor,
+    };
+  });
+
+  app.post<{ Body: unknown }>("/hermes/platform/replies", async (request, reply) => {
+    const input = parseHermesPlatformReplyInput(request.body);
+    const chatType = input.chatType ?? getWhatsAppChatType(input.chatJid);
+    const sessionKey = input.sessionKey ?? getWhatsAppSessionKey({
+      accountId: input.accountId,
+      chatJid: input.chatJid,
+      chatType,
+      ...(input.participantJid ? { participantJid: input.participantJid } : {}),
+    });
+    const delivery = await sendReplyWithDeliveryRecord({
+      ...(services.deliveryStore ? { deliveryStore: services.deliveryStore } : {}),
+      event: {
+        accountId: input.accountId,
+        chatJid: input.chatJid,
+        chatType,
+        chatId: input.chatJid,
+        messageId: input.inboundMessageId ?? `hermes-platform:${Date.now()}`,
+        sessionKey,
+      },
+      text: input.text,
+      whatsappGateway: services.whatsappGateway,
+    });
+    services.eventBus.publish("activity", {
+      accountId: input.accountId,
+      chatJid: input.chatJid,
+      source: "delivery",
+      deliveries: [delivery],
+    });
+    audit({
+      action: "hermes-platform.reply",
+      resourceType: "whatsapp-message",
+      resourceId: input.chatJid,
+      details: {
+        accountId: input.accountId,
+        chatJid: input.chatJid,
+        textLength: input.text.length,
+      },
+    });
+    return { status: "sent", delivery };
+  });
+
   app.post<{ Params: { deliveryId: string } }>("/deliveries/:deliveryId/retry", async (request, reply) => {
     const record = services.deliveryStore?.getDelivery(decodeURIComponent(request.params.deliveryId));
     if (!record) {
@@ -656,6 +899,31 @@ export function createApp({ config, services = buildServices(config) }: CreateAp
       return { ignored: true, reason: "number-rule" };
     }
 
+    const configuredActions = services.postbackActionStore
+      ?.listPostbackActions({ accountId: event.accountId, chatJid: event.chatJid })
+      .filter((action) => action.enabled && action.trigger === "inbound_message") ?? [];
+    if (configuredActions.length > 0 && services.postbackDispatcher) {
+      const runs = await services.postbackDispatcher.dispatchInboundMessage(event);
+      services.eventBus.publish("activity", {
+        accountId: event.accountId,
+        chatJid: event.chatJid,
+        source: "postback",
+        postbackRuns: runs,
+      });
+      audit({
+        action: "message.inbound",
+        resourceType: "whatsapp-message",
+        resourceId: event.messageId,
+        details: {
+          accountId: event.accountId,
+          chatJid: event.chatJid,
+          postbackActions: runs.length,
+          failedPostbackActions: runs.filter((run) => run.status === "failed").length,
+        },
+      });
+      return { duplicate: false, postbackRuns: runs };
+    }
+
     const result = await services.router.handleInboundMessage(event);
     services.eventBus.publish("activity", {
       accountId: event.accountId,
@@ -733,6 +1001,165 @@ function parseNumberRuleInput(body: unknown, existing?: NumberRuleInput): Number
     pattern: matchType === "all" ? "" : pattern.trim(),
     ...(label ? { label } : {}),
     enabled,
+  };
+}
+
+function parsePostbackActionInput(body: unknown, existing?: PostbackActionInput | { configJson?: string }): PostbackActionInput {
+  if (!body || typeof body !== "object") {
+    throw badRequest("Postback action payload must be an object");
+  }
+
+  const value = body as Record<string, unknown>;
+  const fallbackConfig = existing && "configJson" in existing && existing.configJson
+    ? parseJsonObject(existing.configJson)
+    : "config" in (existing ?? {})
+      ? (existing as PostbackActionInput).config
+      : {};
+  const name = readString(value.name, "name" in (existing ?? {}) ? (existing as PostbackActionInput).name : "").trim();
+  const actionType = readString(value.actionType, "actionType" in (existing ?? {}) ? (existing as PostbackActionInput).actionType : "");
+  const trigger = readString(value.trigger, "trigger" in (existing ?? {}) && (existing as PostbackActionInput).trigger ? (existing as PostbackActionInput).trigger! : "inbound_message");
+  const enabled = typeof value.enabled === "boolean"
+    ? value.enabled
+    : "enabled" in (existing ?? {}) && typeof (existing as PostbackActionInput).enabled === "boolean"
+      ? (existing as PostbackActionInput).enabled
+      : undefined;
+  const accountId = readString(value.accountId, "accountId" in (existing ?? {}) ? (existing as PostbackActionInput).accountId ?? "" : "").trim();
+  const chatJid = readString(value.chatJid, "chatJid" in (existing ?? {}) ? (existing as PostbackActionInput).chatJid ?? "" : "").trim();
+  const config = value.config && typeof value.config === "object" && !Array.isArray(value.config)
+    ? value.config as Record<string, unknown>
+    : fallbackConfig ?? {};
+
+  if (!name) {
+    throw badRequest("name is required");
+  }
+  if (actionType !== "hermes" && actionType !== "http") {
+    throw badRequest("actionType must be hermes or http");
+  }
+  if (trigger !== "inbound_message") {
+    throw badRequest("trigger must be inbound_message");
+  }
+  if (actionType === "http" && !readString(config.url, "").trim()) {
+    throw badRequest("HTTP postback actions require config.url");
+  }
+
+  return {
+    name,
+    actionType,
+    trigger,
+    ...(enabled !== undefined ? { enabled } : {}),
+    ...(accountId ? { accountId } : {}),
+    ...(chatJid ? { chatJid } : {}),
+    config,
+  };
+}
+
+function parsePostbackMaintenanceCleanupInput(body: unknown, config: AppConfig) {
+  const value = body && typeof body === "object" && !Array.isArray(body) ? body as Record<string, unknown> : {};
+  return {
+    runRetentionDays: readRetentionDays(value.runRetentionDays, config.POSTBACK_RUN_RETENTION_DAYS),
+    platformEventRetentionDays: readRetentionDays(value.platformEventRetentionDays, config.HERMES_PLATFORM_EVENT_RETENTION_DAYS),
+  };
+}
+
+function readRetentionDays(value: unknown, fallback: number) {
+  if (value === undefined || value === null || value === "") {
+    return fallback;
+  }
+  const parsed = Number(value);
+  if (!Number.isInteger(parsed) || parsed < 0) {
+    throw badRequest("retention days must be a non-negative integer");
+  }
+  return parsed;
+}
+
+function parsePostbackTestEventInput(body: unknown, action: PostbackActionRecord): WhatsAppMessageEvent {
+  const value = body && typeof body === "object" && !Array.isArray(body)
+    ? body as Record<string, unknown>
+    : {};
+  const eventValue = value.event && typeof value.event === "object" && !Array.isArray(value.event)
+    ? value.event as Record<string, unknown>
+    : value;
+  const accountId = readString(eventValue.accountId, action.accountId ?? "test-account").trim();
+  const chatJid = readString(eventValue.chatJid, action.chatJid ?? "15551234567@s.whatsapp.net").trim();
+  const chatType = readString(eventValue.chatType, getWhatsAppChatType(chatJid));
+  const participantJid = readString(eventValue.participantJid, "").trim();
+  const text = readString(eventValue.text, "Postback test message").trim();
+  const messageId = readString(eventValue.messageId, `postback-test:${Date.now()}`).trim();
+  const senderJid = readString(eventValue.senderJid, chatJid).trim();
+
+  if (!accountId) {
+    throw badRequest("test event accountId is required");
+  }
+  if (!chatJid) {
+    throw badRequest("test event chatJid is required");
+  }
+  if (chatType !== "direct" && chatType !== "group") {
+    throw badRequest("test event chatType must be direct or group");
+  }
+  if (!text) {
+    throw badRequest("test event text is required");
+  }
+
+  const sessionKey = getWhatsAppSessionKey({
+    accountId,
+    chatJid,
+    chatType,
+    ...(participantJid ? { participantJid } : {}),
+  });
+
+  return {
+    accountId,
+    chatJid,
+    chatType,
+    senderJid,
+    sessionKey,
+    messageId,
+    ...(participantJid ? { participantJid } : {}),
+    chatId: chatJid,
+    senderId: senderJid,
+    text,
+    timestamp: readString(eventValue.timestamp, new Date().toISOString()),
+  };
+}
+
+function parseHermesPlatformReplyInput(body: unknown) {
+  if (!body || typeof body !== "object") {
+    throw badRequest("Hermes platform reply payload must be an object");
+  }
+
+  const value = body as Record<string, unknown>;
+  const accountId = readString(value.accountId, "").trim();
+  const chatJid = readString(value.chatJid, "").trim();
+  const text = readString(value.text, "").trim();
+  const chatType = readString(value.chatType, "");
+  const participantJid = readString(value.participantJid, "").trim();
+  const sessionKey = readString(value.sessionKey, "").trim();
+  const inboundMessageId = readString(value.inboundMessageId, "").trim() ||
+    (value.metadata && typeof value.metadata === "object" && !Array.isArray(value.metadata)
+      ? readString((value.metadata as Record<string, unknown>).inboundMessageId, "").trim()
+      : "");
+
+  if (!accountId) {
+    throw badRequest("accountId is required");
+  }
+  if (!chatJid) {
+    throw badRequest("chatJid is required");
+  }
+  if (!text) {
+    throw badRequest("text is required");
+  }
+  if (chatType && chatType !== "direct" && chatType !== "group") {
+    throw badRequest("chatType must be direct or group");
+  }
+
+  return {
+    accountId,
+    chatJid,
+    text,
+    ...(chatType ? { chatType: chatType as "direct" | "group" } : {}),
+    ...(participantJid ? { participantJid } : {}),
+    ...(sessionKey ? { sessionKey } : {}),
+    ...(inboundMessageId ? { inboundMessageId } : {}),
   };
 }
 
@@ -839,6 +1266,20 @@ function readLimit(value: string | undefined, max = 500) {
   return Math.min(Math.max(parsed, 1), max);
 }
 
+function readCursor(value: string | undefined) {
+  const parsed = Number.parseInt(value ?? "", 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : 0;
+}
+
+function parseJsonObject(value: string): Record<string, unknown> {
+  try {
+    const parsed = JSON.parse(value);
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed as Record<string, unknown> : {};
+  } catch {
+    return {};
+  }
+}
+
 function emptyWhatsAppSyncSummary() {
   return {
     contacts: 0,
@@ -901,6 +1342,10 @@ function parseCorsOrigin(value: string) {
   }
 
   return origins;
+}
+
+function isTruthyConfig(value: string) {
+  return ["1", "true", "yes", "on"].includes(value.trim().toLowerCase());
 }
 
 interface SessionQuery {

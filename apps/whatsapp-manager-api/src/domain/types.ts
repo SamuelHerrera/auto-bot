@@ -8,6 +8,9 @@ export type MediaType = "image" | "video" | "audio" | "document";
 export type NumberRuleAction = "allow" | "deny";
 export type NumberRuleMatchType = "all" | "exact" | "regex";
 export type AuditLogOutcome = "success" | "failure" | "ignored";
+export type PostbackActionType = "hermes" | "http";
+export type PostbackTrigger = "inbound_message";
+export type PostbackRunStatus = "pending" | "success" | "failed" | "ignored";
 export type WhatsAppSyncEventType =
   | "messaging-history.set"
   | "messaging-history.status"
@@ -190,6 +193,62 @@ export interface AuditLogInput {
   resourceType?: string;
   resourceId?: string;
   details?: Record<string, unknown>;
+}
+
+export interface PostbackActionRecord {
+  id: string;
+  name: string;
+  enabled: boolean;
+  trigger: PostbackTrigger;
+  actionType: PostbackActionType;
+  accountId?: string;
+  chatJid?: WhatsAppChatId;
+  configJson: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface PostbackActionInput {
+  name: string;
+  enabled?: boolean;
+  trigger?: PostbackTrigger;
+  actionType: PostbackActionType;
+  accountId?: string;
+  chatJid?: WhatsAppChatId;
+  config?: Record<string, unknown>;
+}
+
+export interface PostbackActionRunRecord {
+  id: string;
+  actionId: string;
+  actionName: string;
+  actionType: PostbackActionType;
+  accountId: string;
+  chatJid: WhatsAppChatId;
+  inboundMessageId: string;
+  status: PostbackRunStatus;
+  attempts: number;
+  requestJson?: string;
+  responseStatus?: number;
+  responseBody?: string;
+  error?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface HermesPlatformEventRecord {
+  sequence: number;
+  accountId: string;
+  chatJid: WhatsAppChatId;
+  chatType: WhatsAppChatType;
+  senderJid: string;
+  sessionKey: string;
+  messageId: string;
+  participantJid?: string;
+  text: string;
+  timestamp: string;
+  payloadJson: string;
+  createdAt: string;
 }
 
 export interface WhatsAppContactRecord {

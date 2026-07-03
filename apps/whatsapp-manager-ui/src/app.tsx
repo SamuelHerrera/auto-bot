@@ -1,6 +1,7 @@
 import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { EmptyState, LinkAccountDialog, LogsView, NumberChooserPanel, NumberWorkspace, SettingsView, TopBar } from "./components";
+import type { PostbackActionDraft } from "./components/settings-view";
 import { accountMatchesSearch, findCompletedLinkedAccount, isPendingAccountId } from "./domain/accounts";
 import { buildChatMessages, buildChatSummaries, buildContactDisplayIndex } from "./domain/chats";
 import type {
@@ -12,7 +13,11 @@ import type {
   NumberRuleAction,
   NumberRuleMatchType,
   NumberSubview,
+  PostbackMaintenance,
+  PostbackAction,
+  PostbackActionRun,
   RefreshScope,
+  RuntimeStatus,
   SessionMapping,
   WhatsAppAccount,
   WhatsAppContact,
@@ -56,6 +61,10 @@ export function App() {
   const [messageUpdates, setMessageUpdates] = useState<WhatsAppMessageUpdate[]>([]);
   const [mediaAssets, setMediaAssets] = useState<WhatsAppMediaAsset[]>([]);
   const [numberRules, setNumberRules] = useState<NumberRule[]>([]);
+  const [postbackActions, setPostbackActions] = useState<PostbackAction[]>([]);
+  const [postbackRuns, setPostbackRuns] = useState<PostbackActionRun[]>([]);
+  const [postbackMaintenance, setPostbackMaintenance] = useState<PostbackMaintenance | null>(null);
+  const [runtimeStatus, setRuntimeStatus] = useState<RuntimeStatus | null>(null);
   const [auditLogs, setAuditLogs] = useState<AuditLogRecord[]>([]);
   const [activeNumberView, setActiveNumberView] = useState<NumberSubview>("home");
   const [accountSearch, setAccountSearch] = useState("");
@@ -145,7 +154,7 @@ export function App() {
     }
 
     hasRequestedInitialDataRef.current = true;
-    void refreshData(false, false, ["accounts", "rules", "logs"]);
+    void refreshData(false, false, ["accounts", "rules", "logs", "postbacks"]);
   }, []);
 
   useEffect(() => {
@@ -179,6 +188,13 @@ export function App() {
       if (isLogsTabOpenRef.current) {
         queueRefreshData(["logs"]);
       }
+    });
+    events.addEventListener("postbacks", (event) => {
+      if (applyPostbacksEvent(event)) {
+        return;
+      }
+
+      queueRefreshData(["postbacks"]);
     });
     events.addEventListener("sync", () => {
       queueRefreshData(["accounts", "directory", "activity", "chat", "rules", "logs"]);
@@ -274,7 +290,7 @@ export function App() {
   async function refreshData(
     showMessage = true,
     showBusy = true,
-    scopes: RefreshScope[] = ["accounts", "directory", "activity", "rules", "logs"],
+    scopes: RefreshScope[] = ["accounts", "directory", "activity", "rules", "logs", "postbacks"],
   ) {
     if (showBusy) {
       setIsBusy(true);
@@ -292,6 +308,7 @@ export function App() {
       const shouldRefreshChat = scopes.includes("chat") && activeNumberViewRef.current === "messages" && Boolean(chatAccountId && chatJid);
       const shouldRefreshRules = scopes.includes("rules");
       const shouldRefreshLogs = scopes.includes("logs");
+      const shouldRefreshPostbacks = scopes.includes("postbacks");
       const directoryAccountQuery = shouldRefreshDirectory ? toQueryString({ accountId: directoryAccountId }) : "";
       const activityAccountQuery = shouldRefreshActivity ? toQueryString({ accountId: activityAccountId }) : "";
       const chatQuery = shouldRefreshChat ? toQueryString({ accountId: chatAccountId, chatJid }) : "";
@@ -311,6 +328,10 @@ export function App() {
         ruleResponse,
         linkStatus,
         auditLogResponse,
+        postbackActionResponse,
+        postbackRunResponse,
+        postbackMaintenanceResponse,
+        runtimeStatusResponse,
       ] = await Promise.all([
         shouldRefreshAccounts ? request<{ items: WhatsAppAccount[] }>("/whatsapp/accounts") : Promise.resolve(null),
         shouldRefreshDirectory ? request<{ items: SessionMapping[] }>(`/sessions?${directoryAccountQuery}`) : Promise.resolve(null),
@@ -327,6 +348,10 @@ export function App() {
         shouldRefreshRules ? request<{ items: NumberRule[] }>("/number-rules") : Promise.resolve(null),
         shouldRefreshAccounts ? request<WhatsAppAccount>("/whatsapp/status") : Promise.resolve(null),
         shouldRefreshLogs ? request<{ items: AuditLogRecord[] }>("/audit-logs?limit=200") : Promise.resolve(null),
+        shouldRefreshPostbacks ? request<{ items: PostbackAction[] }>("/postback-actions") : Promise.resolve(null),
+        shouldRefreshPostbacks ? request<{ items: PostbackActionRun[] }>("/postback-action-runs?limit=100") : Promise.resolve(null),
+        shouldRefreshPostbacks ? request<PostbackMaintenance>("/postback-maintenance") : Promise.resolve(null),
+        shouldRefreshPostbacks ? request<RuntimeStatus>("/runtime/status") : Promise.resolve(null),
       ]);
 
       const refreshedAccounts = accountResponse?.items;
@@ -373,6 +398,18 @@ export function App() {
       }
       if (auditLogResponse) {
         setAuditLogs(auditLogResponse.items);
+      }
+      if (postbackActionResponse) {
+        setPostbackActions(postbackActionResponse.items);
+      }
+      if (postbackRunResponse) {
+        setPostbackRuns(postbackRunResponse.items);
+      }
+      if (postbackMaintenanceResponse) {
+        setPostbackMaintenance(postbackMaintenanceResponse);
+      }
+      if (runtimeStatusResponse) {
+        setRuntimeStatus(runtimeStatusResponse);
       }
       const currentAccounts = refreshedAccounts ?? accountsRef.current;
       const currentLinkingStatus = linkingStatusRef.current;
@@ -437,6 +474,7 @@ export function App() {
     const receiptsPayload = readArray<WhatsAppMessageReceipt>(details.receipts);
     const updatesPayload = readArray<WhatsAppMessageUpdate>(details.updates);
     const mediaAssetsPayload = readArray<WhatsAppMediaAsset>(details.mediaAssets);
+    const postbackRunsPayload = readArray<PostbackActionRun>(details.postbackRuns);
 
     const hasPayload =
       deliveriesPayload.length > 0 ||
@@ -447,7 +485,8 @@ export function App() {
       messagesPayload.length > 0 ||
       receiptsPayload.length > 0 ||
       updatesPayload.length > 0 ||
-      mediaAssetsPayload.length > 0;
+      mediaAssetsPayload.length > 0 ||
+      postbackRunsPayload.length > 0;
 
     if (!hasPayload) {
       return false;
@@ -476,6 +515,9 @@ export function App() {
     }
     if (mediaAssetsPayload.length > 0) {
       setMediaAssets((current) => upsertByKey(current, mediaAssetsPayload, (asset) => asset.id));
+    }
+    if (postbackRunsPayload.length > 0) {
+      setPostbackRuns((current) => sortPostbackRuns(upsertByKey(current, postbackRunsPayload, (run) => run.id)).slice(0, 100));
     }
     if (messagesPayload.length > 0) {
       let addedMessages: WhatsAppSyncedMessage[] = [];
@@ -651,6 +693,39 @@ export function App() {
     }
 
     return true;
+  }
+
+  function applyPostbacksEvent(event: Event) {
+    const appEvent = parseAppSseEvent(event);
+    const details = appEvent?.details;
+    if (!details) {
+      return false;
+    }
+
+    const actionsPayload = readArray<PostbackAction>(details.actions);
+    const runsPayload = readArray<PostbackActionRun>(details.runs ?? details.postbackRuns);
+    const deletedActionIds = readStringArray(details.deletedActionIds);
+    const hasPayload = actionsPayload.length > 0 || runsPayload.length > 0 || deletedActionIds.length > 0;
+    if (!hasPayload) {
+      return false;
+    }
+
+    if (actionsPayload.length > 0) {
+      setPostbackActions((current) => upsertByKey(current, actionsPayload, (action) => action.id));
+    }
+    if (deletedActionIds.length > 0) {
+      const deletedActionIdSet = new Set(deletedActionIds);
+      setPostbackActions((current) => current.filter((action) => !deletedActionIdSet.has(action.id)));
+    }
+    if (runsPayload.length > 0) {
+      setPostbackRuns((current) => sortPostbackRuns(upsertByKey(current, runsPayload, (run) => run.id)).slice(0, 100));
+    }
+
+    return true;
+  }
+
+  function sortPostbackRuns(runs: PostbackActionRun[]) {
+    return [...runs].sort((left, right) => Date.parse(right.createdAt) - Date.parse(left.createdAt));
   }
 
   function sortAuditLogs(logs: AuditLogRecord[]) {
@@ -930,6 +1005,136 @@ export function App() {
     });
   }
 
+  async function createPostbackAction(draft: PostbackActionDraft) {
+    await runAction(async () => {
+      const action = await request<PostbackAction>("/postback-actions", {
+        method: "POST",
+        body: JSON.stringify({
+          name: draft.name,
+          actionType: draft.actionType,
+          trigger: "inbound_message",
+          enabled: true,
+          accountId: draft.accountId || undefined,
+          chatJid: draft.chatJid || undefined,
+          config: buildPostbackConfig(draft),
+        }),
+      });
+      setPostbackActions((current) => upsertByKey(current, [action], (item) => item.id));
+      setStatusMessage("Postback action saved.");
+    });
+  }
+
+  async function savePostbackAction(action: PostbackAction, draft: PostbackActionDraft) {
+    await runAction(async () => {
+      const updated = await request<PostbackAction>(`/postback-actions/${encodeURIComponent(action.id)}`, {
+        method: "PUT",
+        body: JSON.stringify({
+          name: draft.name,
+          actionType: draft.actionType,
+          trigger: "inbound_message",
+          enabled: action.enabled,
+          accountId: draft.accountId || undefined,
+          chatJid: draft.chatJid || undefined,
+          config: buildPostbackConfig(draft),
+        }),
+      });
+      setPostbackActions((current) => upsertByKey(current, [updated], (item) => item.id));
+      setStatusMessage("Postback action saved.");
+    });
+  }
+
+  async function testPostbackAction(action: PostbackAction) {
+    await runAction(async () => {
+      const run = await request<PostbackActionRun>(`/postback-actions/${encodeURIComponent(action.id)}/test`, {
+        method: "POST",
+        body: JSON.stringify({
+          event: {
+            accountId: action.accountId || activeAccountId || accounts[0]?.accountId || "test-account",
+            chatJid: action.chatJid || activeChatJid || "15551234567@s.whatsapp.net",
+            text: "Postback test message",
+          },
+        }),
+      });
+      setPostbackRuns((current) => sortPostbackRuns(upsertByKey(current, [run], (item) => item.id)).slice(0, 100));
+      setStatusMessage(run.status === "failed" ? "Postback test failed." : "Postback test completed.");
+    });
+  }
+
+  function buildPostbackConfig(draft: PostbackActionDraft) {
+    return draft.actionType === "http"
+      ? {
+          url: draft.url,
+          method: "POST",
+          payloadTemplate: {
+            accountId: "{{event.accountId}}",
+            chatJid: "{{event.chatJid}}",
+            messageId: "{{event.messageId}}",
+            text: "{{event.text}}",
+            timestamp: "{{event.timestamp}}",
+          },
+        }
+      : {
+          deliveryMode: draft.hermesDeliveryMode,
+          replyToWhatsApp: draft.hermesDeliveryMode === "platform" ? false : draft.replyToWhatsApp,
+        };
+  }
+
+  async function togglePostbackAction(action: PostbackAction, enabled: boolean) {
+    await runAction(async () => {
+      const updated = await request<PostbackAction>(`/postback-actions/${encodeURIComponent(action.id)}`, {
+        method: "PUT",
+        body: JSON.stringify({
+          name: action.name,
+          actionType: action.actionType,
+          trigger: action.trigger,
+          enabled,
+          accountId: action.accountId,
+          chatJid: action.chatJid,
+          config: parsePostbackConfig(action.configJson),
+        }),
+      });
+      setPostbackActions((current) => upsertByKey(current, [updated], (item) => item.id));
+      setStatusMessage(enabled ? "Postback action enabled." : "Postback action disabled.");
+    });
+  }
+
+  async function deletePostbackAction(actionId: string) {
+    await runAction(async () => {
+      await request<void>(`/postback-actions/${encodeURIComponent(actionId)}`, {
+        method: "DELETE",
+      });
+      setPostbackActions((current) => current.filter((action) => action.id !== actionId));
+      setStatusMessage("Postback action deleted.");
+    });
+  }
+
+  async function cleanupPostbackRecords() {
+    await runAction(async () => {
+      const response = await request<{ result: { deletedRuns: number; deletedPlatformEvents: number }; stats: PostbackMaintenance["stats"] }>("/postback-maintenance/cleanup", {
+        method: "POST",
+        body: JSON.stringify({}),
+      });
+      setPostbackMaintenance((current) => ({
+        retention: current?.retention ?? {
+          postbackRunRetentionDays: 30,
+          hermesPlatformEventRetentionDays: 7,
+        },
+        stats: response.stats,
+      }));
+      await refreshData(false, true, ["postbacks"]);
+      setStatusMessage(`Postback cleanup removed ${response.result.deletedRuns} runs and ${response.result.deletedPlatformEvents} platform events.`);
+    });
+  }
+
+  function parsePostbackConfig(configJson: string) {
+    try {
+      const parsed = JSON.parse(configJson);
+      return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : {};
+    } catch {
+      return {};
+    }
+  }
+
   async function runAction(action: () => Promise<void>) {
     setIsBusy(true);
     setErrorMessage("");
@@ -1049,7 +1254,18 @@ export function App() {
               branding={branding}
               defaultBranding={{ title: defaultAppTitle, iconSrc: defaultAppIcon }}
               isBusy={isBusy}
+              postbackActions={postbackActions}
+              postbackMaintenance={postbackMaintenance}
+              postbackRuns={postbackRuns}
+              numberRules={numberRules}
+              runtimeStatus={runtimeStatus}
+              onCreatePostbackAction={(draft) => void createPostbackAction(draft)}
+              onDeletePostbackAction={(actionId) => void deletePostbackAction(actionId)}
+              onCleanupPostbackRecords={() => void cleanupPostbackRecords()}
+              onSavePostbackAction={(action, draft) => void savePostbackAction(action, draft)}
               onSave={(nextBranding) => void saveBranding(nextBranding)}
+              onTestPostbackAction={(action) => void testPostbackAction(action)}
+              onTogglePostbackAction={(action, enabled) => void togglePostbackAction(action, enabled)}
             />
           ) : null}
 
