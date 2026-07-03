@@ -1519,6 +1519,37 @@ button {
   justify-content: flex-end;
 }
 
+.message-row-event {
+  justify-content: center;
+}
+
+.message-event-banner {
+  align-items: center;
+  background: rgba(255, 255, 255, 0.74);
+  border: 1px solid #d7e3dc;
+  border-radius: 7px;
+  color: #526058;
+  display: flex;
+  font-size: 0.78rem;
+  gap: 10px;
+  justify-content: space-between;
+  line-height: 1.25;
+  max-width: min(760px, 92%);
+  min-width: min(420px, 92%);
+  padding: 5px 8px;
+}
+
+.message-event-banner span {
+  overflow-wrap: anywhere;
+}
+
+.message-event-banner time {
+  color: #738078;
+  flex: 0 0 auto;
+  font-size: 0.7rem;
+  white-space: nowrap;
+}
+
 .message-bubble {
   background: #ffffff;
   border: 1px solid rgba(214, 224, 217, 0.9);

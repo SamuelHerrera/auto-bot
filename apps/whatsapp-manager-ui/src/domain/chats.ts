@@ -190,6 +190,7 @@ export function buildChatMessages(
           id: `${delivery.id}:inbound`,
           direction: "inbound",
           text: delivery.inboundText,
+          kind: "message",
           status: delivery.status,
           timestamp: delivery.createdAt,
           source: "delivery",
@@ -201,6 +202,7 @@ export function buildChatMessages(
           id: `${delivery.id}:outbound`,
           direction: "outbound",
           text: delivery.outboundText,
+          kind: "message",
           status: delivery.status,
           timestamp: delivery.updatedAt,
           source: "delivery",
@@ -213,17 +215,12 @@ export function buildChatMessages(
   const syncMessages = syncedMessages.map((message): ChatMessage => {
     const media = mediaByMessage.get(message.messageId) ?? [];
     const reaction = parseJsonRecord(message.reactionJson);
-    const fallbackText = media.length
-      ? media.map((item) => item.caption || item.fileName || `${item.mediaType} attachment`).join(", ")
-      : reaction?.emoji && reaction?.targetMessageId
-        ? `${reaction.emoji} reacted to ${reaction.targetMessageId}`
-        : message.messageType
-          ? `[${message.messageType}]`
-          : "[message]";
+    const display = getSyncedMessageDisplay(message, media, reaction);
     return {
       id: `sync:${message.accountId}:${message.chatJid}:${message.messageId}`,
       direction: message.fromMe ? "outbound" : "inbound",
-      text: message.text?.trim() || fallbackText,
+      text: display.text,
+      kind: display.kind,
       timestamp: message.timestamp,
       source: "sync",
       ...(message.messageType ? { messageType: message.messageType } : {}),
@@ -316,6 +313,49 @@ function parseJsonRecord(value: string | undefined): Record<string, unknown> | n
   } catch {
     return null;
   }
+}
+
+function getSyncedMessageDisplay(
+  message: WhatsAppSyncedMessage,
+  media: WhatsAppMediaAsset[],
+  reaction: Record<string, unknown> | null,
+): Pick<ChatMessage, "kind" | "text"> {
+  const text = message.text?.trim();
+  if (text) {
+    return { kind: "message", text };
+  }
+
+  if (media.length) {
+    return {
+      kind: "message",
+      text: media.map((item) => item.caption || item.fileName || `${item.mediaType} attachment`).join(", "),
+    };
+  }
+
+  if (typeof reaction?.emoji === "string" && typeof reaction?.targetMessageId === "string") {
+    return { kind: "event", text: `${reaction.emoji} reaction to a synced message` };
+  }
+
+  const raw = parseJsonRecord(message.rawJson);
+  const stubType = typeof raw?.messageStubType === "string" ? raw.messageStubType : undefined;
+  if (stubType === "E2E_ENCRYPTED") {
+    return { kind: "event", text: "Encrypted history placeholder. WhatsApp synced the message key, but not readable content." };
+  }
+
+  if (message.messageType === "protocolMessage") {
+    return { kind: "event", text: "Protocol sync event. WhatsApp metadata, not a chat message." };
+  }
+
+  if (message.messageType === "messageContextInfo") {
+    return { kind: "event", text: "Device/context sync event. WhatsApp metadata, not readable chat text." };
+  }
+
+  return {
+    kind: "event",
+    text: message.messageType
+      ? `${message.messageType} sync event. No readable message body was provided.`
+      : "History placeholder. WhatsApp synced this message record without readable content.",
+  };
 }
 
 function messagesOverlap(left: ChatMessage, right: ChatMessage) {

@@ -172,6 +172,7 @@ export interface ChatMessage {
   id: string;
   direction: "inbound" | "outbound";
   text: string;
+  kind: "message" | "event";
   status?: DeliveryRecord["status"];
   timestamp: string;
   source: "delivery" | "sync";

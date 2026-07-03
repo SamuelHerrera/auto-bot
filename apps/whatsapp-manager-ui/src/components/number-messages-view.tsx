@@ -67,31 +67,41 @@ export function MessagesView({
                   />
                 ) : (
                   activeChatMessages.map((message) => (
-                    <article key={message.id} className={`message-row message-row-${message.direction}`}>
-                      <div className="message-bubble">
-                        {message.media?.length ? (
-                          <div className="message-media-stack">
-                            {message.media.map((item) => (
-                              <span key={item.id} className="message-media-chip">
-                                {item.mediaType}
-                                {item.localPath ? " saved" : ""}
-                              </span>
-                            ))}
-                          </div>
-                        ) : null}
-                        <p>{message.text}</p>
-                        {message.updates?.length ? (
-                          <div className="message-update-line">
-                            {message.updates.map((update) => update.updateType).join(", ")}
-                          </div>
-                        ) : null}
-                        <footer>
+                    <article
+                      key={message.id}
+                      className={`message-row message-row-${message.kind === "event" ? "event" : message.direction}`}
+                    >
+                      {message.kind === "event" ? (
+                        <div className="message-event-banner">
+                          <span>{message.text}</span>
                           <time>{formatTimestamp(message.timestamp)}</time>
-                          {message.status ? <span className={`delivery-status delivery-status-${message.status}`}>{message.status}</span> : null}
-                          {message.receipts?.length ? <span>{latestReceiptLabel(message)}</span> : null}
-                        </footer>
-                        {message.record && "error" in message.record && message.record.error ? <p className="error-text">{message.record.error}</p> : null}
-                      </div>
+                        </div>
+                      ) : (
+                        <div className="message-bubble">
+                          {message.media?.length ? (
+                            <div className="message-media-stack">
+                              {message.media.map((item) => (
+                                <span key={item.id} className="message-media-chip">
+                                  {item.mediaType}
+                                  {item.localPath ? " saved" : ""}
+                                </span>
+                              ))}
+                            </div>
+                          ) : null}
+                          <p>{message.text}</p>
+                          {message.updates?.length ? (
+                            <div className="message-update-line">
+                              {message.updates.map((update) => update.updateType).join(", ")}
+                            </div>
+                          ) : null}
+                          <footer>
+                            <time>{formatTimestamp(message.timestamp)}</time>
+                            {message.status ? <span className={`delivery-status delivery-status-${message.status}`}>{message.status}</span> : null}
+                            {message.receipts?.length ? <span>{latestReceiptLabel(message)}</span> : null}
+                          </footer>
+                          {message.record && "error" in message.record && message.record.error ? <p className="error-text">{message.record.error}</p> : null}
+                        </div>
+                      )}
                     </article>
                   ))
                 )}
