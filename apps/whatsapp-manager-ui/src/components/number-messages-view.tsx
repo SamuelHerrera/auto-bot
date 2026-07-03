@@ -24,8 +24,9 @@ export function MessagesView({
 }) {
   const [chatListMode, setChatListMode] = useState<"main" | "archived">("main");
   const messageListRef = useRef<HTMLDivElement | null>(null);
-  const activeChats = chats.filter((chat) => !chat.managerArchived);
-  const archivedChats = chats.filter((chat) => chat.managerArchived);
+  const interactedChats = chats.filter((chat) => chat.messageCount > 0);
+  const activeChats = interactedChats.filter((chat) => !chat.managerArchived);
+  const archivedChats = interactedChats.filter((chat) => chat.managerArchived);
   const isShowingArchived = chatListMode === "archived";
   const visibleChats = isShowingArchived ? archivedChats : activeChats;
   const visibleActiveChat = activeChat && visibleChats.some((chat) => chat.chatJid === activeChat.chatJid) ? activeChat : null;

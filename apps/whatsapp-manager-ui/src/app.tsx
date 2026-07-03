@@ -972,6 +972,35 @@ export function App() {
     });
   }
 
+  function selectChat(chatJid: string) {
+    setActiveChatJid(chatJid);
+    const chat = activeChats.find((item) => item.chatJid === chatJid);
+    if (!chat?.unreadCount) {
+      return;
+    }
+
+    setSyncedChats((current) =>
+      current.map((item) =>
+        item.accountId === chat.accountId && item.chatJid === chat.chatJid
+          ? { ...item, unreadCount: 0 }
+          : item,
+      ),
+    );
+    void request<WhatsAppSyncedChat>("/whatsapp/sync/chats/read", {
+      method: "PATCH",
+      body: JSON.stringify({
+        accountId: chat.accountId,
+        chatJid: chat.chatJid,
+      }),
+    })
+      .then((updatedChat) => {
+        setSyncedChats((current) => upsertByKey(current, [updatedChat], accountChatKey));
+      })
+      .catch((error) => {
+        setErrorMessage(normalizeError(error));
+      });
+  }
+
   async function saveBranding(nextBranding: BrandingSettings) {
     const normalizedBranding = normalizeBranding(nextBranding);
     if (branding.title === normalizedBranding.title && branding.iconSrc === normalizedBranding.iconSrc) {
@@ -1327,7 +1356,7 @@ export function App() {
               onMatchTypeChange={setRuleMatchType}
               onPatternChange={setRulePattern}
               onRetry={(deliveryId) => void retryDelivery(deliveryId)}
-              onSelectChat={setActiveChatJid}
+              onSelectChat={selectChat}
               onSetChatArchived={(chat, archived) => void updateManagerChatArchive(chat, archived)}
               onViewChange={setActiveNumberView}
               pattern={rulePattern}

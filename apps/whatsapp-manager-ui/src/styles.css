@@ -2567,6 +2567,38 @@ button {
     grid-row: 1;
   }
 
+  .topbar:has(.status-indicator-error) {
+    align-items: stretch;
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .topbar:has(.status-indicator-error) .brand-lockup {
+    grid-column: 1;
+    grid-row: 1;
+  }
+
+  .topbar:has(.status-indicator-error) .topbar-actions {
+    grid-column: 1;
+    grid-row: 2;
+    grid-template-columns: minmax(0, 1fr) auto auto;
+    width: 100%;
+  }
+
+  .topbar:has(.status-indicator-error) .workspace-tabs {
+    grid-column: 1;
+    grid-row: 3;
+  }
+
+  .topbar:has(.status-indicator-error) .status-indicator-error {
+    max-width: none;
+    width: 100%;
+  }
+
+  .topbar:has(.status-indicator-error) .status-indicator-error .status-indicator-text {
+    max-height: none;
+    overflow: visible;
+  }
+
   .inline-form,
   .account-row,
   .rule-row,

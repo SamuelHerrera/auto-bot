@@ -1934,6 +1934,34 @@ describe("whatsapp-manager-api", () => {
             chatJid: "83038931275996@lid",
             displayName: "Test Customer",
             chatType: "direct",
+            unreadCount: 2,
+          }),
+        ]);
+        const readChat = await syncApp.inject({
+          method: "PATCH",
+          url: "/whatsapp/sync/chats/read",
+          headers,
+          payload: {
+            accountId: "ops-main",
+            chatJid: "83038931275996@lid",
+          },
+        });
+        const chatsAfterRead = await syncApp.inject({
+          method: "GET",
+          url: "/whatsapp/sync/chats?accountId=ops-main",
+          headers,
+        });
+        expect(readChat.statusCode).toBe(200);
+        expect(readChat.json()).toEqual(
+          expect.objectContaining({
+            chatJid: "83038931275996@lid",
+            unreadCount: 0,
+          }),
+        );
+        expect(chatsAfterRead.json().items).toEqual([
+          expect.objectContaining({
+            chatJid: "83038931275996@lid",
+            unreadCount: 0,
           }),
         ]);
         expect(messages.json().items).toEqual([

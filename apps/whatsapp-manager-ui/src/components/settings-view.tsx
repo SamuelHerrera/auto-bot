@@ -19,6 +19,7 @@ export function SettingsView({
   onCleanupPostbackRecords,
   onCreatePostbackAction,
   onDeletePostbackAction,
+  onResetWorkspaceState,
   onSavePostbackAction,
   onTestPostbackAction,
   onTogglePostbackAction,
@@ -35,6 +36,7 @@ export function SettingsView({
   onCleanupPostbackRecords: () => void;
   onCreatePostbackAction: (input: PostbackActionDraft) => void;
   onDeletePostbackAction: (actionId: string) => void;
+  onResetWorkspaceState: () => void;
   onSavePostbackAction: (action: PostbackAction, input: PostbackActionDraft) => void;
   onTestPostbackAction: (action: PostbackAction) => void;
   onTogglePostbackAction: (action: PostbackAction, enabled: boolean) => void;
@@ -120,6 +122,9 @@ export function SettingsView({
         <div className="settings-actions">
           <IconButton icon="mdi:image-remove-outline" label="Clear icon" type="button" variant="secondary" onClick={clearIcon} disabled={isBusy || draftIconSrc === defaultBranding.iconSrc}>
             Clear icon
+          </IconButton>
+          <IconButton icon="mdi:tab-remove" label="Reset browser workspace state" type="button" variant="secondary" onClick={onResetWorkspaceState} disabled={isBusy}>
+            Reset workspace
           </IconButton>
         </div>
       </section>

@@ -1021,6 +1021,22 @@ export class SqliteBridgeStateStore
       .map(rowToWhatsAppChat);
   }
 
+  markWhatsAppChatRead(input: { accountId: string; chatJid: string }): WhatsAppChatRecord | undefined {
+    const now = new Date().toISOString();
+    this.db
+      .prepare(`
+        UPDATE whatsapp_chats
+        SET unread_count = 0, last_seen_at = ?
+        WHERE account_id = ? AND chat_jid = ?
+      `)
+      .run(now, input.accountId, input.chatJid);
+
+    const row = this.db
+      .prepare("SELECT * FROM whatsapp_chats WHERE account_id = ? AND chat_jid = ?")
+      .get(input.accountId, input.chatJid);
+    return row ? rowToWhatsAppChat(row) : undefined;
+  }
+
   listWhatsAppMessages(input: { accountId?: string; chatJid?: string; limit?: number } = {}): WhatsAppStoredMessageRecord[] {
     const filters: string[] = [];
     const args: string[] = [];

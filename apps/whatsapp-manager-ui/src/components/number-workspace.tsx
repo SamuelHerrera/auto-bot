@@ -73,6 +73,7 @@ export function NumberWorkspace({
   rules: NumberRule[];
 }) {
   const [isAliasDialogOpen, setIsAliasDialogOpen] = useState(false);
+  const mainInteractedChatCount = chats.filter((chat) => !chat.managerArchived && chat.messageCount > 0).length;
 
   if (!account) {
     return <EmptyState title="Number unavailable" description="Select another number from the left rail." />;
@@ -85,7 +86,7 @@ export function NumberWorkspace({
           <TabButton active={activeView === "home"} icon="mdi:view-dashboard-outline" onClick={() => onViewChange("home")}>
             Home
           </TabButton>
-          <TabButton active={activeView === "messages"} count={chats.length} icon="mdi:message-text-outline" onClick={() => onViewChange("messages")}>
+          <TabButton active={activeView === "messages"} count={mainInteractedChatCount} icon="mdi:message-text-outline" onClick={() => onViewChange("messages")}>
             Messages
           </TabButton>
           <TabButton active={activeView === "rules"} count={rules.length} icon="mdi:shield-check-outline" onClick={() => onViewChange("rules")}>

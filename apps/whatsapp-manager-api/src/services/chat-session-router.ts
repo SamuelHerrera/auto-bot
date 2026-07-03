@@ -388,6 +388,7 @@ export interface WhatsAppSyncStore {
   saveWhatsAppLidMapping(record: WhatsAppLidMappingRecord): void;
   saveWhatsAppHistorySyncBatch(record: WhatsAppHistorySyncBatchRecord): void;
   saveWhatsAppSyncEvent(record: WhatsAppSyncEventRecord): void;
+  markWhatsAppChatRead(input: { accountId: string; chatJid: string }): WhatsAppChatRecord | undefined;
   getWhatsAppSyncSummary(accountId?: string): WhatsAppSyncSummary;
   listWhatsAppContacts(accountId?: string, limit?: number): WhatsAppContactRecord[];
   listWhatsAppChats(accountId?: string, limit?: number): WhatsAppChatRecord[];

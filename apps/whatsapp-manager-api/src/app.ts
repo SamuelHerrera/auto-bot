@@ -313,6 +313,36 @@ export function createApp({ config, services = buildServices(config) }: CreateAp
     ) ?? [],
   }));
 
+  app.patch<{ Body: unknown }>("/whatsapp/sync/chats/read", async (request, reply) => {
+    if (!services.whatsappSyncStore) {
+      return reply.code(503).send({ error: "WhatsApp sync storage is not configured" });
+    }
+
+    const input = parseSyncedChatReadInput(request.body);
+    const chat = services.whatsappSyncStore.markWhatsAppChatRead(input);
+    if (!chat) {
+      return reply.code(404).send({ error: "WhatsApp chat was not found" });
+    }
+
+    services.eventBus.publish("activity", {
+      accountId: chat.accountId,
+      chatJid: chat.chatJid,
+      source: "whatsapp-sync",
+      chats: [chat],
+    });
+    audit({
+      action: "whatsapp-chat.mark-read",
+      resourceType: "whatsapp-chat",
+      resourceId: `${chat.accountId}:${chat.chatJid}`,
+      details: {
+        accountId: chat.accountId,
+        chatJid: chat.chatJid,
+        unreadCount: chat.unreadCount ?? 0,
+      },
+    });
+    return chat;
+  });
+
   app.get<{ Querystring: SyncListQuery & { chatJid?: string } }>("/whatsapp/sync/messages", async (request) => ({
     items: services.whatsappSyncStore?.listWhatsAppMessages({
       limit: readLimit(request.query.limit, 1000),
@@ -1198,6 +1228,27 @@ function parseManagerChatMetadataInput(body: unknown) {
     accountId,
     chatJid,
     archived: value.archived,
+  };
+}
+
+function parseSyncedChatReadInput(body: unknown) {
+  if (!body || typeof body !== "object") {
+    throw badRequest("Synced chat payload must be an object");
+  }
+
+  const value = body as Record<string, unknown>;
+  const accountId = readString(value.accountId, "").trim();
+  const chatJid = readString(value.chatJid, "").trim();
+  if (!accountId) {
+    throw badRequest("accountId is required");
+  }
+  if (!chatJid) {
+    throw badRequest("chatJid is required");
+  }
+
+  return {
+    accountId,
+    chatJid,
   };
 }
 

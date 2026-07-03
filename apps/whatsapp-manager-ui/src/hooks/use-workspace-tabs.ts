@@ -85,6 +85,13 @@ export function useWorkspaceTabs({
       (activeTabId === "logs" && isLogsTabOpen) ||
       (isActiveAccountTab && availableAccountIds.has(activeTabId));
 
+    if (!activeTabId && preferredAccountId) {
+      setActiveTabId(preferredAccountId);
+      setActiveAccountId(preferredAccountId);
+      onAccountViewReset();
+      return;
+    }
+
     if (!isActiveTabAvailable) {
       const nextTabId = preferredAccountId || getFallbackTabId(repairedOpenTabs, isSettingsTabOpen, isLogsTabOpen);
       setActiveTabId(nextTabId);
