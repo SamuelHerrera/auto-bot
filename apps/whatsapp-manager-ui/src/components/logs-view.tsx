@@ -184,7 +184,7 @@ function VirtualLogRow({
 }) {
   const rowRef = useRef<HTMLDetailsElement | null>(null);
   const display = getAuditLogDisplay(entry);
-  const summary = getAuditLogSummary(display.title, display.description);
+  const summary = display.summary ?? getAuditLogSummary(display.title, display.description);
 
   useEffect(() => {
     const row = rowRef.current;

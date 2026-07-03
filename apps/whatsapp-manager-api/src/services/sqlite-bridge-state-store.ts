@@ -376,6 +376,40 @@ export class SqliteBridgeStateStore
     return record;
   }
 
+  coalesceAuditLog(input: AuditLogInput, windowMs: number): AuditLogRecord {
+    const actor = input.actor?.trim() || "system";
+    const outcome = input.outcome ?? "success";
+    const cutoff = new Date(Date.now() - Math.max(windowMs, 0)).toISOString();
+    const existing = this.db
+      .prepare(`
+        SELECT * FROM audit_logs
+        WHERE action = ?
+          AND actor = ?
+          AND outcome = ?
+          AND COALESCE(resource_type, '') = COALESCE(?, '')
+          AND COALESCE(resource_id, '') = COALESCE(?, '')
+          AND created_at >= ?
+        ORDER BY created_at DESC
+        LIMIT 1
+      `)
+      .get(input.action, actor, outcome, input.resourceType ?? null, input.resourceId ?? null, cutoff);
+
+    if (!existing) {
+      return this.recordAuditLog(input);
+    }
+
+    const existingRecord = rowToAuditLog(existing);
+    const details = mergeAuditDetails(existingRecord.details, input.details);
+    this.db
+      .prepare("UPDATE audit_logs SET details_json = ? WHERE id = ?")
+      .run(details ? JSON.stringify(details) : null, existingRecord.id);
+
+    return {
+      ...existingRecord,
+      ...(details ? { details } : {}),
+    };
+  }
+
   private migrate() {
     this.db.exec(`
       CREATE TABLE IF NOT EXISTS hermes_sessions (
@@ -588,6 +622,33 @@ function parseDetailsJson(value: string): Record<string, unknown> {
   } catch {
     return {};
   }
+}
+
+function mergeAuditDetails(
+  existing: Record<string, unknown> | undefined,
+  incoming: Record<string, unknown> | undefined,
+): Record<string, unknown> | undefined {
+  if (!existing && !incoming) {
+    return undefined;
+  }
+
+  const merged = {
+    ...(existing ?? {}),
+    ...(incoming ?? {}),
+  };
+  if (existing && Object.prototype.hasOwnProperty.call(existing, "previousTitle")) {
+    merged.previousTitle = existing.previousTitle;
+  }
+  if (existing && Object.prototype.hasOwnProperty.call(existing, "previousCustomIcon")) {
+    merged.previousCustomIcon = existing.previousCustomIcon;
+  }
+  merged.changeCount = readChangeCount(existing) + 1;
+  return merged;
+}
+
+function readChangeCount(details: Record<string, unknown> | undefined) {
+  const value = details?.changeCount;
+  return typeof value === "number" && Number.isFinite(value) ? value : 1;
 }
 
 function requiredString(row: Record<string, unknown>, key: string): string {

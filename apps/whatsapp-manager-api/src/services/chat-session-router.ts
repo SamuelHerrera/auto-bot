@@ -320,6 +320,7 @@ export interface NumberRuleStore {
 export interface AuditLogStore {
   listAuditLogs(limit?: number): AuditLogRecord[];
   recordAuditLog(input: AuditLogInput): AuditLogRecord;
+  coalesceAuditLog?(input: AuditLogInput, windowMs: number): AuditLogRecord;
 }
 
 export interface AccountMetadataStore {

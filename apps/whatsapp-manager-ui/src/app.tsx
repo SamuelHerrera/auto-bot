@@ -336,6 +336,7 @@ export function App() {
       setBranding(normalizedBranding);
       localStorage.setItem(brandingStorageKeys.title, normalizedBranding.title);
       localStorage.setItem(brandingStorageKeys.iconSrc, normalizedBranding.iconSrc);
+      const brandingAccountId = activeAccountId || accounts[0]?.accountId;
       await request<AuditLogRecord>("/audit-logs", {
         method: "POST",
         body: JSON.stringify({
@@ -343,6 +344,9 @@ export function App() {
           resourceType: "ui-settings",
           resourceId: "branding",
           details: {
+            ...(brandingAccountId ? { accountId: brandingAccountId } : {}),
+            previousTitle: branding.title,
+            previousCustomIcon: branding.iconSrc !== defaultAppIcon,
             title: normalizedBranding.title,
             customIcon: normalizedBranding.iconSrc !== defaultAppIcon,
           },

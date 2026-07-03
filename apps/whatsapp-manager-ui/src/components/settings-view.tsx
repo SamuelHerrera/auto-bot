@@ -4,7 +4,7 @@ import type { ChangeEvent } from "react";
 import type { BrandingSettings } from "../domain/models";
 import { IconButton } from "./shared";
 
-const titleAutosaveDelayMs = 600;
+const titleAutosaveDelayMs = 1200;
 
 export function SettingsView({
   branding,

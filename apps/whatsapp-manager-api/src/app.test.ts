@@ -916,6 +916,93 @@ describe("whatsapp-manager-api", () => {
     }
   });
 
+  it("coalesces rapid branding audit updates", async () => {
+    const dir = mkdtempSync(path.join(tmpdir(), "auto-bot-branding-audit-logs-"));
+    const auditConfig = loadConfig({
+      ...process.env,
+      API_TOKEN: "test-token",
+      BRIDGE_DATABASE_FILE: path.join(dir, "bridge-state.sqlite"),
+      BRIDGE_STATE_FILE: "",
+      DATABASE_URL: "postgres://postgres:postgres@127.0.0.1:5432/auto_bot",
+      NODE_ENV: "test",
+      PORT: "3000",
+    });
+
+    try {
+      const services = createTestServices(auditConfig);
+      app = createApp({ config: auditConfig, services });
+
+      const first = await app.inject({
+        method: "POST",
+        url: "/audit-logs",
+        headers: {
+          authorization: "Bearer test-token",
+        },
+        payload: {
+          action: "ui-branding.update",
+          resourceType: "ui-settings",
+          resourceId: "branding",
+          details: {
+            accountId: "ops-main",
+            previousTitle: "Auto Bot",
+            title: "Samuel",
+            previousCustomIcon: false,
+            customIcon: true,
+          },
+        },
+      });
+
+      const second = await app.inject({
+        method: "POST",
+        url: "/audit-logs",
+        headers: {
+          authorization: "Bearer test-token",
+        },
+        payload: {
+          action: "ui-branding.update",
+          resourceType: "ui-settings",
+          resourceId: "branding",
+          details: {
+            accountId: "ops-main",
+            previousTitle: "Samuel",
+            title: "Samuel kitchen",
+            previousCustomIcon: true,
+            customIcon: true,
+          },
+        },
+      });
+
+      expect(first.statusCode).toBe(200);
+      expect(second.statusCode).toBe(200);
+      expect(second.json()).toEqual(
+        expect.objectContaining({
+          id: first.json().id,
+          details: expect.objectContaining({
+            accountId: "ops-main",
+            previousTitle: "Auto Bot",
+            title: "Samuel kitchen",
+            previousCustomIcon: false,
+            customIcon: true,
+            changeCount: 2,
+          }),
+        }),
+      );
+
+      const logs = await app.inject({
+        method: "GET",
+        url: "/audit-logs?limit=10",
+        headers: {
+          authorization: "Bearer test-token",
+        },
+      });
+
+      expect(logs.statusCode).toBe(200);
+      expect(logs.json().items).toHaveLength(1);
+    } finally {
+      rmSync(dir, { force: true, recursive: true });
+    }
+  });
+
   it("blocks denied gateway numbers before creating Hermes sessions", async () => {
     const dir = mkdtempSync(path.join(tmpdir(), "auto-bot-number-rules-deny-"));
     const rulesConfig = loadConfig({

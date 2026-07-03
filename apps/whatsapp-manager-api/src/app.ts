@@ -12,6 +12,8 @@ import type { AuditLogInput, NumberRuleInput } from "./domain/types.js";
 import { evaluateNumberRules, recordBlockedNumberDelivery } from "./services/number-rules.js";
 import type { RoutingInput } from "./services/chat-session-router.js";
 
+const brandingAuditCoalesceWindowMs = 15_000;
+
 interface CreateAppOptions {
   config: AppConfig;
   services?: AppServices;
@@ -23,13 +25,15 @@ export function createApp({ config, services = buildServices(config) }: CreateAp
   });
 
   function audit(input: AuditLogInput) {
-    const record = services.auditLogStore?.recordAuditLog(input) ?? {
-      id: "ephemeral",
-      actor: input.actor?.trim() || "system",
-      outcome: input.outcome ?? "success",
-      createdAt: new Date().toISOString(),
-      ...input,
-    };
+    const record = shouldCoalesceAuditLog(input) && services.auditLogStore?.coalesceAuditLog
+      ? services.auditLogStore.coalesceAuditLog(input, brandingAuditCoalesceWindowMs)
+      : (services.auditLogStore?.recordAuditLog(input) ?? {
+        id: "ephemeral",
+        actor: input.actor?.trim() || "system",
+        outcome: input.outcome ?? "success",
+        createdAt: new Date().toISOString(),
+        ...input,
+      });
     app.log.info({ audit: record }, "audit event");
     services.eventBus.publish("logs");
     return record;
@@ -646,6 +650,10 @@ function parseAuditLogInput(body: unknown): AuditLogInput {
     ...(readString(value.resourceId, "").trim() ? { resourceId: readString(value.resourceId, "").trim() } : {}),
     ...(details ? { details } : {}),
   };
+}
+
+function shouldCoalesceAuditLog(input: AuditLogInput) {
+  return input.action === "ui-branding.update" && input.outcome !== "failure";
 }
 
 function readString(value: unknown, fallback: string) {

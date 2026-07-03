@@ -4,6 +4,7 @@ export interface AuditLogDisplay {
   icon: string;
   title: string;
   description: string;
+  summary?: string;
 }
 
 export function auditLogMatchesFilters(entry: AuditLogRecord, outcomeFilter: AuditLogFilter, search: string) {
@@ -138,16 +139,13 @@ export function getAuditLogDisplay(entry: AuditLogRecord): AuditLogDisplay {
     case "message.inbound":
       return describeInboundMessage(entry);
     case "ui-branding.update":
-      return {
-        icon: "mdi:image-edit-outline",
-        title: "App branding updated",
-        description: `title set to "${detailString(entry, "title") ?? "custom"}"${detailBoolean(entry, "customIcon") ? " with custom icon" : ""}.`,
-      };
+      return describeBrandingUpdate(entry);
     case "ui-branding.reset":
       return {
         icon: "mdi:restore",
         title: "App branding reset",
         description: "default title and icon restored.",
+        summary: `Default title and icon restored · ${describeAuditAccount(entry)}`,
       };
     default:
       return {
@@ -156,6 +154,41 @@ export function getAuditLogDisplay(entry: AuditLogRecord): AuditLogDisplay {
         description: describeFallback(entry),
       };
   }
+}
+
+function describeBrandingUpdate(entry: AuditLogRecord): AuditLogDisplay {
+  const title = detailString(entry, "title") ?? "custom";
+  const previousTitle = detailString(entry, "previousTitle");
+  const hasCustomIcon = detailBoolean(entry, "customIcon");
+  const previousCustomIcon = detailBoolean(entry, "previousCustomIcon");
+  const changeCount = detailNumber(entry, "changeCount");
+  const titleSummary = previousTitle && previousTitle !== title
+    ? `Changed title from "${previousTitle}" to "${title}"`
+    : `Set title to "${title}"`;
+  const iconSummary = describeIconChange(previousCustomIcon, hasCustomIcon);
+  return {
+    icon: "mdi:image-edit-outline",
+    title: "App branding updated",
+    description: `${titleSummary}${iconSummary ? ` and ${iconSummary}` : ""}.`,
+    summary: [
+      titleSummary,
+      iconSummary,
+      describeAuditAccount(entry),
+      changeCount && changeCount > 1 ? `${changeCount} autosaves grouped` : "",
+    ].filter(Boolean).join(" · "),
+  };
+}
+
+function describeIconChange(previousCustomIcon: boolean | undefined, hasCustomIcon: boolean | undefined) {
+  if (typeof hasCustomIcon !== "boolean") {
+    return "";
+  }
+
+  if (typeof previousCustomIcon === "boolean" && previousCustomIcon !== hasCustomIcon) {
+    return hasCustomIcon ? "added custom icon" : "restored default icon";
+  }
+
+  return hasCustomIcon ? "custom icon" : "";
 }
 
 function describeInboundMessage(entry: AuditLogRecord): AuditLogDisplay {
@@ -202,6 +235,19 @@ function describeRuleAccount(entry: AuditLogRecord) {
   const after = detailObject(entry, "after");
   const before = detailObject(entry, "before");
   return stringFromObject(after, "accountId") ?? stringFromObject(before, "accountId") ?? "the account";
+}
+
+function describeAuditAccount(entry: AuditLogRecord) {
+  const accountId = detailString(entry, "accountId");
+  if (accountId) {
+    return accountId;
+  }
+
+  if (entry.resourceType === "whatsapp-account" && entry.resourceId) {
+    return entry.resourceId;
+  }
+
+  return "All accounts";
 }
 
 function describeFallback(entry: AuditLogRecord) {
