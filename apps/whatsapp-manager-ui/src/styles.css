@@ -1595,7 +1595,7 @@ button {
   cursor: pointer;
   display: grid;
   gap: 10px;
-  grid-template-columns: auto minmax(0, 1fr) auto auto;
+  grid-template-columns: auto minmax(0, 1fr) auto;
   list-style: none;
   min-height: 42px;
   padding: 6px 16px;
@@ -1649,6 +1649,11 @@ button {
 .audit-log-main {
   display: grid;
   min-width: 0;
+}
+
+.audit-log-row time {
+  justify-self: end;
+  white-space: nowrap;
 }
 
 .audit-log-main strong,

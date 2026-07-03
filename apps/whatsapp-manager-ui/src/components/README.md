@@ -10,7 +10,9 @@ This folder holds render-focused React components for the WhatsApp manager UI.
 
 ## Current shape
 
-- `number-workspace.tsx` contains the account workspace tabs: home, messages, rules, failures, and the alias dialog.
+- `app-shell.tsx` contains the top bar and workspace tab strip.
+- `number-workspace.tsx` contains the account workspace shell and alias dialog.
+- `number-home-view.tsx`, `number-messages-view.tsx`, `number-rules-view.tsx`, and `number-failures-view.tsx` contain the per-account tab bodies.
 - `panels.tsx` contains app-level overlay panels for number selection and QR linking.
 - `settings-view.tsx` and `logs-view.tsx` are standalone workspace tabs.
 - `shared.tsx` contains small primitives reused by the app shell and views.
@@ -20,3 +22,4 @@ This folder holds render-focused React components for the WhatsApp manager UI.
 - Many CSS classes are shared through `../styles.css`; rename classes only with a browser pass.
 - `LinkAccountDialog` relies on `qrcode.react` and should continue to render QR payloads without transforming them.
 - `LogsView` owns its local filters because they are display-only and do not affect app-level state.
+- `TopBar` is intentionally prop-driven so the tab lifecycle can stay in `../hooks/use-workspace-tabs.ts`.

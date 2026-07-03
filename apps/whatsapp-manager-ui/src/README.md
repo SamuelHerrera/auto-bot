@@ -4,11 +4,11 @@ The UI uses a shallow structure so the app is easier to scan without hiding beha
 
 ## Folders
 
-- `app.tsx`: stateful app shell and workflow orchestration.
+- `app.tsx`: workflow orchestration, API actions, and top-level view composition.
 - `components/`: render-focused React components and small view-local state.
 - `domain/`: API-shaped types plus pure derived-state helpers.
 - `services/`: browser and API boundary code.
-- `hooks/`: reserved for future reusable React lifecycle/state hooks.
+- `hooks/`: reusable React lifecycle/state hooks for named workflows.
 
 ## Refactor rule
 

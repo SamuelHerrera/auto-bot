@@ -1,17 +1,15 @@
-import { FormEvent, useEffect, useRef, useState } from "react";
-import { Icon } from "@iconify/react";
+import { FormEvent, useCallback, useEffect, useRef, useState } from "react";
 
-import { AccountTabLabel, EmptyState, IconButton, LinkAccountDialog, LogsView, NumberChooserPanel, NumberWorkspace, SettingsView, StatusIndicator } from "./components";
-import { accountMatchesSearch, findCompletedLinkedAccount, getAccountStatusDetail, isPendingAccountId, mergeLinkingStatus } from "./domain/accounts";
+import { EmptyState, LinkAccountDialog, LogsView, NumberChooserPanel, NumberWorkspace, SettingsView, TopBar } from "./components";
+import { accountMatchesSearch, findCompletedLinkedAccount, isPendingAccountId } from "./domain/accounts";
 import { buildChatMessages, buildChatSummaries } from "./domain/chats";
-import { areStringArraysEqual } from "./domain/collections";
 import type { AuditLogRecord, BrandingSettings, DeliveryRecord, NumberRule, NumberRuleAction, NumberRuleMatchType, NumberSubview, RefreshScope, SessionMapping, WhatsAppAccount } from "./domain/models";
+import { useLinkSession } from "./hooks/use-link-session";
+import { useWorkspaceTabs } from "./hooks/use-workspace-tabs";
 import { buildEventUrl, normalizeError, request } from "./services/api-client";
 import { brandingStorageKeys, defaultAppIcon, defaultAppTitle, getInitialBranding, normalizeBranding, setFavicon } from "./services/branding";
-import { getFallbackTabId, getInitialWorkspaceState, persistWorkspaceState } from "./services/workspace-storage";
 
 export function App() {
-  const [initialWorkspace] = useState(getInitialWorkspaceState);
   const [branding, setBranding] = useState<BrandingSettings>(getInitialBranding);
   const [accounts, setAccounts] = useState<WhatsAppAccount[]>([]);
   const [hasLoadedAccounts, setHasLoadedAccounts] = useState(false);
@@ -21,16 +19,8 @@ export function App() {
   const [auditLogs, setAuditLogs] = useState<AuditLogRecord[]>([]);
   const [activeNumberView, setActiveNumberView] = useState<NumberSubview>("home");
   const [accountSearch, setAccountSearch] = useState("");
-  const [openAccountTabs, setOpenAccountTabs] = useState<string[]>(initialWorkspace.openAccountTabs);
   const [isNumberPanelOpen, setIsNumberPanelOpen] = useState(false);
-  const [isSettingsTabOpen, setIsSettingsTabOpen] = useState(initialWorkspace.isSettingsTabOpen);
-  const [isLogsTabOpen, setIsLogsTabOpen] = useState(initialWorkspace.isLogsTabOpen);
-  const [activeTabId, setActiveTabId] = useState(initialWorkspace.activeTabId);
-  const [activeAccountId, setActiveAccountId] = useState(initialWorkspace.activeAccountId);
   const [activeChatJid, setActiveChatJid] = useState("");
-  const [isLinkDialogOpen, setIsLinkDialogOpen] = useState(false);
-  const [linkingStatus, setLinkingStatus] = useState<WhatsAppAccount | null>(null);
-  const [linkingBaselineAccountIds, setLinkingBaselineAccountIds] = useState<string[]>([]);
   const [statusMessage, setStatusMessage] = useState("Live");
   const [errorMessage, setErrorMessage] = useState("");
   const [isBusy, setIsBusy] = useState(false);
@@ -40,27 +30,43 @@ export function App() {
   const [ruleLabel, setRuleLabel] = useState("");
   const [accountAliasDrafts, setAccountAliasDrafts] = useState<Record<string, string>>({});
   const accountsRef = useRef(accounts);
-  const isLinkDialogOpenRef = useRef(isLinkDialogOpen);
-  const linkingStatusRef = useRef(linkingStatus);
-  const linkingBaselineAccountIdsRef = useRef(linkingBaselineAccountIds);
-  const linkingStartedAtRef = useRef<string | null>(null);
-  const workspaceTabsRef = useRef<HTMLDivElement | null>(null);
+  const {
+    clearLinkSession,
+    isLinkDialogOpen,
+    isLinkDialogOpenRef,
+    linkingBaselineAccountIdsRef,
+    linkingStartedAtRef,
+    linkingStatus,
+    linkingStatusRef,
+    startLinkSession,
+    updateLinkingStatus,
+  } = useLinkSession();
+  const resetActiveChat = useCallback(() => setActiveChatJid(""), []);
+  const {
+    activeAccountId,
+    activeTabId,
+    closeAccountTab,
+    closeLogsTab,
+    closeSettingsTab,
+    isLogsTabOpen,
+    isSettingsTabOpen,
+    openAccountTab,
+    openAccountTabs,
+    openLogsTab,
+    openSettingsTab,
+    selectAccountTab,
+    setActiveAccountId,
+    setActiveTabId,
+    workspaceTabsRef,
+  } = useWorkspaceTabs({
+    accounts,
+    hasLoadedAccounts,
+    onAccountViewReset: resetActiveChat,
+  });
 
   useEffect(() => {
     accountsRef.current = accounts;
   }, [accounts]);
-
-  useEffect(() => {
-    isLinkDialogOpenRef.current = isLinkDialogOpen;
-  }, [isLinkDialogOpen]);
-
-  useEffect(() => {
-    linkingStatusRef.current = linkingStatus;
-  }, [linkingStatus]);
-
-  useEffect(() => {
-    linkingBaselineAccountIdsRef.current = linkingBaselineAccountIds;
-  }, [linkingBaselineAccountIds]);
 
   useEffect(() => {
     document.title = branding.title;
@@ -94,94 +100,6 @@ export function App() {
 
     return () => events.close();
   }, []);
-
-  useEffect(() => {
-    persistWorkspaceState({
-      activeAccountId,
-      activeTabId,
-      isLogsTabOpen,
-      isSettingsTabOpen,
-      openAccountTabs,
-    });
-  }, [activeAccountId, activeTabId, isLogsTabOpen, isSettingsTabOpen, openAccountTabs]);
-
-  useEffect(() => {
-    const tabStrip = workspaceTabsRef.current;
-
-    if (!tabStrip) {
-      return;
-    }
-
-    const scrollElement = tabStrip;
-
-    function handleWorkspaceTabsWheel(event: WheelEvent) {
-      const horizontalDelta = Math.abs(event.deltaX) > Math.abs(event.deltaY) ? event.deltaX : event.deltaY;
-
-      if (!horizontalDelta || scrollElement.scrollWidth <= scrollElement.clientWidth) {
-        return;
-      }
-
-      const nextScrollLeft = Math.max(0, Math.min(scrollElement.scrollLeft + horizontalDelta, scrollElement.scrollWidth - scrollElement.clientWidth));
-
-      if (nextScrollLeft !== scrollElement.scrollLeft) {
-        scrollElement.scrollLeft = nextScrollLeft;
-        event.preventDefault();
-      }
-    }
-
-    scrollElement.addEventListener("wheel", handleWorkspaceTabsWheel, { passive: false });
-
-    return () => {
-      scrollElement.removeEventListener("wheel", handleWorkspaceTabsWheel);
-    };
-  }, []);
-
-  useEffect(() => {
-    if (!hasLoadedAccounts) {
-      return;
-    }
-
-    const availableAccountIds = new Set(accounts.map((account) => account.accountId));
-    const validOpenTabs = openAccountTabs.filter((accountId) => availableAccountIds.has(accountId));
-
-    if (!areStringArraysEqual(openAccountTabs, validOpenTabs)) {
-      setOpenAccountTabs(validOpenTabs);
-    }
-
-    const isActiveAccountTab = activeTabId && activeTabId !== "settings" && activeTabId !== "logs";
-    const isActiveTabAvailable =
-      !activeTabId ||
-      (activeTabId === "settings" && isSettingsTabOpen) ||
-      (activeTabId === "logs" && isLogsTabOpen) ||
-      (isActiveAccountTab && availableAccountIds.has(activeTabId));
-
-    if (!isActiveTabAvailable) {
-      const nextTabId = getFallbackTabId(validOpenTabs, isSettingsTabOpen, isLogsTabOpen);
-      setActiveTabId(nextTabId);
-      setActiveAccountId(nextTabId && nextTabId !== "settings" && nextTabId !== "logs" ? nextTabId : validOpenTabs[0] ?? "");
-      setActiveChatJid("");
-      return;
-    }
-
-    if (isActiveAccountTab && availableAccountIds.has(activeTabId) && activeAccountId !== activeTabId) {
-      setActiveAccountId(activeTabId);
-      setActiveChatJid("");
-      return;
-    }
-
-    if (activeAccountId && !availableAccountIds.has(activeAccountId)) {
-      setActiveAccountId(validOpenTabs[0] ?? "");
-      setActiveChatJid("");
-    }
-  }, [
-    accounts,
-    activeAccountId,
-    activeTabId,
-    hasLoadedAccounts,
-    isLogsTabOpen,
-    isSettingsTabOpen,
-    openAccountTabs,
-  ]);
 
   async function refreshData(
     showMessage = true,
@@ -262,32 +180,6 @@ export function App() {
         setIsBusy(false);
       }
     }
-  }
-
-  function startLinkSession(account: WhatsAppAccount, baselineAccountIds: string[], linkingStartedAt: string) {
-    linkingStatusRef.current = account;
-    linkingBaselineAccountIdsRef.current = baselineAccountIds;
-    linkingStartedAtRef.current = linkingStartedAt;
-    isLinkDialogOpenRef.current = true;
-    setLinkingStatus(account);
-    setLinkingBaselineAccountIds(baselineAccountIds);
-    setIsLinkDialogOpen(true);
-  }
-
-  function updateLinkingStatus(account: WhatsAppAccount) {
-    const nextStatus = mergeLinkingStatus(linkingStatusRef.current, account);
-    linkingStatusRef.current = nextStatus;
-    setLinkingStatus(nextStatus);
-  }
-
-  function clearLinkSession() {
-    linkingStatusRef.current = null;
-    linkingBaselineAccountIdsRef.current = [];
-    linkingStartedAtRef.current = null;
-    isLinkDialogOpenRef.current = false;
-    setLinkingStatus(null);
-    setLinkingBaselineAccountIds([]);
-    setIsLinkDialogOpen(false);
   }
 
   async function connectAccount(event: FormEvent<HTMLFormElement>) {
@@ -492,49 +384,6 @@ export function App() {
     setStatusMessage(`Opened ${accountId}.`);
   }
 
-  function openAccountTab(accountId: string) {
-    setOpenAccountTabs((currentTabs) => (currentTabs.includes(accountId) ? currentTabs : [...currentTabs, accountId]));
-    setActiveTabId(accountId);
-  }
-
-  function openLogsTab() {
-    setIsLogsTabOpen(true);
-    setActiveTabId("logs");
-  }
-
-  function closeLogsTab() {
-    setIsLogsTabOpen(false);
-    if (activeTabId === "logs") {
-      const nextTabId = getFallbackTabId(openAccountTabs, isSettingsTabOpen, false);
-      setActiveTabId(nextTabId);
-      setActiveAccountId(nextTabId && nextTabId !== "settings" ? nextTabId : activeAccountId);
-    }
-  }
-
-  function openSettingsTab() {
-    setIsSettingsTabOpen(true);
-    setActiveTabId("settings");
-  }
-
-  function closeSettingsTab() {
-    setIsSettingsTabOpen(false);
-    if (activeTabId === "settings") {
-      const nextTabId = getFallbackTabId(openAccountTabs, false, isLogsTabOpen);
-      setActiveTabId(nextTabId);
-      setActiveAccountId(nextTabId && nextTabId !== "logs" ? nextTabId : activeAccountId);
-    }
-  }
-
-  function closeAccountTab(accountId: string) {
-    setOpenAccountTabs((currentTabs) => currentTabs.filter((tabAccountId) => tabAccountId !== accountId));
-    if (activeTabId === accountId) {
-      const nextAccountId = openAccountTabs.find((tabAccountId) => tabAccountId !== accountId);
-      setActiveTabId(nextAccountId ?? getFallbackTabId([], isSettingsTabOpen, isLogsTabOpen));
-      setActiveAccountId(nextAccountId ?? "");
-      setActiveChatJid("");
-    }
-  }
-
   const connectedAccounts = accounts.filter((account) => account.status === "connected").length;
   const filteredAccounts = accounts.filter((account) => accountMatchesSearch(account, accountSearch));
   const selectedTabAccountId = activeTabId === "logs" || activeTabId === "settings" ? activeAccountId : activeTabId;
@@ -559,99 +408,32 @@ export function App() {
   const failedDeliveries = deliveries.filter((delivery) => delivery.status === "failed");
   const activeAccountFailedDeliveries = failedDeliveries.filter((delivery) => delivery.accountId === activeAccountId);
   const statusTone = errorMessage ? "error" : isBusy ? "syncing" : "live";
-  const workspaceTabs = (
-    <div ref={workspaceTabsRef} className="workspace-tabs" role="tablist" aria-label="Open workspaces">
-      {tabAccounts.map((account) => (
-        <div
-          key={account.accountId}
-          className={`workspace-tab${activeTabId === account.accountId ? " workspace-tab-active" : ""}`}
-          title={getAccountStatusDetail(account)}
-        >
-          <button
-            className="workspace-tab-main"
-            onClick={() => {
-              setActiveTabId(account.accountId);
-              setActiveAccountId(account.accountId);
-              setActiveChatJid("");
-            }}
-          >
-            <span className={`status-dot status-dot-${account.status}`} />
-            <AccountTabLabel account={account} />
-          </button>
-          <IconButton icon="mdi:close" label={`Close ${account.accountId}`} className="tab-close" variant="text" onClick={() => closeAccountTab(account.accountId)} />
-        </div>
-      ))}
-      {isSettingsTabOpen ? (
-        <div className={`workspace-tab${activeTabId === "settings" ? " workspace-tab-active" : ""}`}>
-          <button
-            className="workspace-tab-main"
-            onClick={() => {
-              setActiveTabId("settings");
-            }}
-            aria-label="Settings"
-            title="Settings"
-          >
-            <Icon icon="mdi:cog-outline" aria-hidden="true" />
-            <span>Settings</span>
-          </button>
-          <IconButton icon="mdi:close" label="Close settings" className="tab-close" variant="text" onClick={closeSettingsTab} />
-        </div>
-      ) : null}
-      {isLogsTabOpen ? (
-        <div className={`workspace-tab${activeTabId === "logs" ? " workspace-tab-active" : ""}`}>
-          <button
-            className="workspace-tab-main"
-            onClick={() => {
-              setActiveTabId("logs");
-            }}
-            aria-label="Logs"
-            title="Logs"
-          >
-            <Icon icon="mdi:clipboard-text-clock-outline" aria-hidden="true" />
-            <span>Logs</span>
-          </button>
-          <IconButton icon="mdi:close" label="Close logs" className="tab-close" variant="text" onClick={closeLogsTab} />
-        </div>
-      ) : null}
-    </div>
-  );
 
   return (
     <div className="shell">
-      <header className="topbar">
-        <div className="brand-lockup">
-          <img src={branding.iconSrc} alt="" aria-hidden="true" />
-          <h1>{branding.title}</h1>
-        </div>
-        {workspaceTabs}
-        <div className="topbar-actions">
-          <StatusIndicator detail={errorMessage || statusMessage} tone={statusTone} />
-          <IconButton icon="mdi:magnify" label="Find number" className="number-select-button" variant="secondary" onClick={() => setIsNumberPanelOpen(true)}>
-            <span className="button-count">{connectedAccounts}/{accounts.length}</span>
-          </IconButton>
-          <details className="action-menu topbar-menu">
-            <summary aria-label="App actions" title="App actions">
-              <Icon icon="mdi:dots-vertical" aria-hidden="true" />
-            </summary>
-            <div className="action-menu-list">
-              <form className="menu-action-form" onSubmit={connectAccount}>
-                <button type="submit" disabled={isBusy}>
-                  <Icon icon="mdi:link-plus" aria-hidden="true" />
-                  <span>Link number</span>
-                </button>
-              </form>
-              <button type="button" onClick={openSettingsTab}>
-                <Icon icon="mdi:cog-outline" aria-hidden="true" />
-                <span>Settings</span>
-              </button>
-              <button type="button" onClick={openLogsTab}>
-                <Icon icon="mdi:clipboard-text-clock-outline" aria-hidden="true" />
-                <span>Logs</span>
-              </button>
-            </div>
-          </details>
-        </div>
-      </header>
+      <TopBar
+        accountsCount={accounts.length}
+        activeTabId={activeTabId}
+        branding={branding}
+        connectedAccounts={connectedAccounts}
+        isBusy={isBusy}
+        isLogsTabOpen={isLogsTabOpen}
+        isSettingsTabOpen={isSettingsTabOpen}
+        statusDetail={errorMessage || statusMessage}
+        statusTone={statusTone}
+        tabAccounts={tabAccounts}
+        workspaceTabsRef={workspaceTabsRef}
+        onCloseAccountTab={closeAccountTab}
+        onCloseLogsTab={closeLogsTab}
+        onCloseSettingsTab={closeSettingsTab}
+        onConnectAccount={connectAccount}
+        onFindNumber={() => setIsNumberPanelOpen(true)}
+        onOpenLogsTab={openLogsTab}
+        onOpenSettingsTab={openSettingsTab}
+        onSelectAccountTab={selectAccountTab}
+        onSelectLogsTab={() => setActiveTabId("logs")}
+        onSelectSettingsTab={() => setActiveTabId("settings")}
+      />
 
       <main className="admin-layout">
         <section className="admin-panel">

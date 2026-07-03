@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { Icon } from "@iconify/react";
 
-import { auditLogMatchesFilters, getAuditLogCounts, getAuditLogIcon } from "../domain/audit-logs";
+import { auditLogMatchesFilters, getAuditLogCounts, getAuditLogDisplay } from "../domain/audit-logs";
 import { formatTimestamp } from "../domain/formatting";
 import type { AuditLogFilter, AuditLogRecord } from "../domain/models";
 import { EmptyState, TabButton } from "./shared";
@@ -46,36 +46,45 @@ export function LogsView({
         ) : visibleLogs.length === 0 ? (
           <EmptyState title="No matching logs" description="Adjust the filters or search." />
         ) : (
-          visibleLogs.map((entry) => (
-            <details key={entry.id} className={`audit-log-row audit-log-row-${entry.outcome}`}>
-              <summary>
-                <span className={`audit-log-icon audit-log-icon-${entry.outcome}`}>
-                  <Icon icon={getAuditLogIcon(entry)} aria-hidden="true" />
-                </span>
-                <span className="audit-log-main">
-                  <span>
-                    <strong>{entry.action}</strong>
-                    <small>{entry.resourceType ? `${entry.resourceType} / ${entry.resourceId ?? "unknown"}` : entry.actor}</small>
+          visibleLogs.map((entry) => {
+            const display = getAuditLogDisplay(entry);
+
+            return (
+              <details key={entry.id} className={`audit-log-row audit-log-row-${entry.outcome}`}>
+                <summary>
+                  <span className={`audit-log-icon audit-log-icon-${entry.outcome}`}>
+                    <Icon icon={display.icon} aria-hidden="true" />
                   </span>
-                </span>
-                <span className={`badge badge-audit-${entry.outcome}`}>{entry.outcome}</span>
-                <time>{formatTimestamp(entry.createdAt)}</time>
-              </summary>
-              <div className="audit-log-detail">
-                <dl className="audit-log-meta">
-                  <div>
-                    <dt>Actor</dt>
-                    <dd>{entry.actor}</dd>
-                  </div>
-                  <div>
-                    <dt>Resource</dt>
-                    <dd>{entry.resourceType ? `${entry.resourceType} / ${entry.resourceId ?? "unknown"}` : "none"}</dd>
-                  </div>
-                </dl>
-                {entry.details ? <pre>{JSON.stringify(entry.details, null, 2)}</pre> : <p>No JSON details.</p>}
-              </div>
-            </details>
-          ))
+                  <span className="audit-log-main">
+                    <strong>{display.title}</strong>
+                    <small>{display.description}</small>
+                  </span>
+                  <time>{formatTimestamp(entry.createdAt)}</time>
+                </summary>
+                <div className="audit-log-detail">
+                  <dl className="audit-log-meta">
+                    <div>
+                      <dt>Actor</dt>
+                      <dd>{entry.actor}</dd>
+                    </div>
+                    <div>
+                      <dt>Resource</dt>
+                      <dd>{entry.resourceType ? `${entry.resourceType} / ${entry.resourceId ?? "unknown"}` : "none"}</dd>
+                    </div>
+                    <div>
+                      <dt>Action</dt>
+                      <dd>{entry.action}</dd>
+                    </div>
+                    <div>
+                      <dt>Outcome</dt>
+                      <dd>{entry.outcome}</dd>
+                    </div>
+                  </dl>
+                  {entry.details ? <pre>{JSON.stringify(entry.details, null, 2)}</pre> : <p>No JSON details.</p>}
+                </div>
+              </details>
+            );
+          })
         )}
       </div>
     </>

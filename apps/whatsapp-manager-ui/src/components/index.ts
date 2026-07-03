@@ -1,3 +1,4 @@
+export { TopBar } from "./app-shell";
 export { LogsView } from "./logs-view";
 export { NumberWorkspace } from "./number-workspace";
 export { LinkAccountDialog, NumberChooserPanel } from "./panels";

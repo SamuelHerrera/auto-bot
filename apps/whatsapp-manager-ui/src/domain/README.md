@@ -13,3 +13,4 @@ This folder holds framework-light types and pure helper functions for the WhatsA
 - Chat summaries are derived from direct-chat session mappings and delivery records. Group records are intentionally filtered out by callers before rendering.
 - Pending link accounts use account IDs prefixed with `pending-`; account display helpers hide those IDs from primary labels.
 - Date formatting currently uses `toLocaleString()` to preserve the app's existing behavior.
+- Audit log display helpers convert raw audit actions into readable titles/descriptions while preserving the raw JSON details in the UI.
