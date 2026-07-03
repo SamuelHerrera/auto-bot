@@ -1,4 +1,4 @@
-import { FormEvent, useCallback, useEffect, useRef, useState } from "react";
+import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { EmptyState, LinkAccountDialog, LogsView, NumberChooserPanel, NumberWorkspace, SettingsView, TopBar } from "./components";
 import { accountMatchesSearch, findCompletedLinkedAccount, isPendingAccountId } from "./domain/accounts";
@@ -488,22 +488,43 @@ export function App() {
     .map((accountId) => accounts.find((account) => account.accountId === accountId))
     .filter((account): account is WhatsAppAccount => Boolean(account));
   const activeAccount = accounts.find((account) => account.accountId === activeAccountId) ?? null;
-  const activeContactDisplayIndex = buildContactDisplayIndex(
-    contacts.filter((contact) => contact.accountId === activeAccountId),
-    lidMappings.filter((mapping) => mapping.accountId === activeAccountId),
+  const activeContactDisplayIndex = useMemo(
+    () =>
+      buildContactDisplayIndex(
+        contacts.filter((contact) => contact.accountId === activeAccountId),
+        lidMappings.filter((mapping) => mapping.accountId === activeAccountId),
+      ),
+    [activeAccountId, contacts, lidMappings],
   );
-  const activeChats = buildChatSummaries(
-    activeAccountId,
-    mappings,
-    deliveries,
-    syncedChats,
-    syncedMessages,
-    activeContactDisplayIndex,
-    managerChatMetadata,
+  const activeChats = useMemo(
+    () =>
+      buildChatSummaries(
+        activeAccountId,
+        mappings,
+        deliveries,
+        syncedChats,
+        syncedMessages,
+        activeContactDisplayIndex,
+        managerChatMetadata,
+      ),
+    [activeAccountId, activeContactDisplayIndex, deliveries, managerChatMetadata, mappings, syncedChats, syncedMessages],
   );
+  useEffect(() => {
+    setActiveChatJid((currentChatJid) => {
+      if (!activeAccountId) {
+        return currentChatJid ? "" : currentChatJid;
+      }
+
+      if (currentChatJid && activeChats.some((chat) => chat.chatJid === currentChatJid)) {
+        return currentChatJid;
+      }
+
+      return activeChats.find((chat) => !chat.managerArchived)?.chatJid ?? activeChats[0]?.chatJid ?? "";
+    });
+  }, [activeAccountId, activeChats]);
   const activeAccountDeliveries = deliveries.filter((delivery) => delivery.accountId === activeAccountId);
   const activeAccountMappings = mappings.filter((mapping) => mapping.accountId === activeAccountId);
-  const activeChat = activeChats.find((chat) => chat.chatJid === activeChatJid) ?? activeChats.find((chat) => !chat.managerArchived) ?? activeChats[0] ?? null;
+  const activeChat = activeChats.find((chat) => chat.chatJid === activeChatJid) ?? null;
   const activeChatMessages = activeChat
     ? buildChatMessages(
         deliveries.filter((delivery) => delivery.accountId === activeAccountId && delivery.chatJid === activeChat.chatJid),
@@ -569,7 +590,7 @@ export function App() {
             <NumberWorkspace
               account={activeAccount}
               activeChat={activeChat}
-              activeChatJid={activeChat?.chatJid ?? ""}
+              activeChatJid={activeChatJid}
               activeChatMessages={activeChatMessages}
               activeView={activeNumberView}
               chats={activeChats}
