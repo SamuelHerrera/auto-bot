@@ -15,9 +15,29 @@ import { getWhatsAppChatType } from "../domain/types.js";
 import type { WhatsAppSyncStore } from "./chat-session-router.js";
 import type { WhatsAppSyncEvent } from "./whatsapp-service.js";
 
-export function recordWhatsAppSyncEvent(store: WhatsAppSyncStore | undefined, event: WhatsAppSyncEvent): void {
+export interface RecordedWhatsAppSyncChanges {
+  contacts: WhatsAppContactRecord[];
+  chats: WhatsAppChatRecord[];
+  messages: WhatsAppStoredMessageRecord[];
+  receipts: WhatsAppMessageReceiptRecord[];
+  updates: WhatsAppMessageUpdateRecord[];
+  mediaAssets: WhatsAppMediaAssetRecord[];
+  lidMappings: WhatsAppLidMappingRecord[];
+}
+
+export function recordWhatsAppSyncEvent(store: WhatsAppSyncStore | undefined, event: WhatsAppSyncEvent): RecordedWhatsAppSyncChanges {
+  const changes: RecordedWhatsAppSyncChanges = {
+    contacts: [],
+    chats: [],
+    messages: [],
+    receipts: [],
+    updates: [],
+    mediaAssets: [],
+    lidMappings: [],
+  };
+
   if (!store) {
-    return;
+    return changes;
   }
 
   const rawJson = safeJsonStringify(event.payload);
@@ -31,31 +51,40 @@ export function recordWhatsAppSyncEvent(store: WhatsAppSyncStore | undefined, ev
     receivedAt: event.receivedAt,
   });
 
-  for (const contact of extractContacts(event)) {
+  changes.contacts = extractContacts(event);
+  for (const contact of changes.contacts) {
     store.saveWhatsAppContact(contact);
   }
-  for (const chat of extractChats(event)) {
+  changes.chats = extractChats(event);
+  for (const chat of changes.chats) {
     store.saveWhatsAppChat(chat);
   }
-  for (const message of extractMessages(event)) {
+  changes.messages = extractMessages(event);
+  for (const message of changes.messages) {
     store.saveWhatsAppMessage(message);
   }
-  for (const receipt of extractMessageReceipts(event)) {
+  changes.receipts = extractMessageReceipts(event);
+  for (const receipt of changes.receipts) {
     store.saveWhatsAppMessageReceipt(receipt);
   }
-  for (const update of extractMessageUpdates(event, payloadHash)) {
+  changes.updates = extractMessageUpdates(event, payloadHash);
+  for (const update of changes.updates) {
     store.saveWhatsAppMessageUpdate(update);
   }
-  for (const mediaAsset of extractMediaAssets(event)) {
+  changes.mediaAssets = extractMediaAssets(event);
+  for (const mediaAsset of changes.mediaAssets) {
     store.saveWhatsAppMediaAsset(mediaAsset);
   }
-  for (const mapping of extractLidMappings(event)) {
+  changes.lidMappings = extractLidMappings(event);
+  for (const mapping of changes.lidMappings) {
     store.saveWhatsAppLidMapping(mapping);
   }
   const batch = extractHistorySyncBatch(event, rawJson);
   if (batch) {
     store.saveWhatsAppHistorySyncBatch(batch);
   }
+
+  return changes;
 }
 
 function extractContacts(event: WhatsAppSyncEvent): WhatsAppContactRecord[] {

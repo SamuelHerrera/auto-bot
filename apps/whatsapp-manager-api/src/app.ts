@@ -474,8 +474,13 @@ export function createApp({ config, services = buildServices(config) }: CreateAp
       };
       const decision = evaluateNumberRules(services.numberRuleStore, retryEvent);
       if (!decision.allowed) {
-        recordBlockedNumberDelivery(services.deliveryStore, retryEvent, decision.reason ?? "Blocked by number rule");
-        services.eventBus.publish("activity");
+        const delivery = recordBlockedNumberDelivery(services.deliveryStore, retryEvent, decision.reason ?? "Blocked by number rule");
+        services.eventBus.publish("activity", {
+          accountId: record.accountId,
+          chatJid: record.chatJid,
+          source: "delivery",
+          deliveries: [delivery],
+        });
         audit({
           action: "delivery.retry",
           outcome: "ignored",
@@ -511,14 +516,20 @@ export function createApp({ config, services = buildServices(config) }: CreateAp
       });
 
       const { error: _error, failureStage: _failureStage, ...resolvedRecord } = record;
-      services.deliveryStore?.saveDelivery({
+      const delivery = {
         ...resolvedRecord,
         status: "sent",
         attempts: record.attempts + 1,
         updatedAt: new Date().toISOString(),
-      });
+      } as const;
+      services.deliveryStore?.saveDelivery(delivery);
 
-      services.eventBus.publish("activity");
+      services.eventBus.publish("activity", {
+        accountId: record.accountId,
+        chatJid: record.chatJid,
+        source: "delivery",
+        deliveries: [delivery],
+      });
       audit({
         action: "delivery.retry",
         resourceType: "delivery",
@@ -537,7 +548,7 @@ export function createApp({ config, services = buildServices(config) }: CreateAp
       return reply.code(409).send({ error: "Delivery record has no outbound text to retry" });
     }
 
-    await sendReplyWithDeliveryRecord({
+    const delivery = await sendReplyWithDeliveryRecord({
       ...(services.deliveryStore ? { deliveryStore: services.deliveryStore } : {}),
       event: {
         accountId: record.accountId,
@@ -551,7 +562,12 @@ export function createApp({ config, services = buildServices(config) }: CreateAp
       whatsappGateway: services.whatsappGateway,
     });
 
-    services.eventBus.publish("activity");
+    services.eventBus.publish("activity", {
+      accountId: record.accountId,
+      chatJid: record.chatJid,
+      source: "delivery",
+      deliveries: [delivery],
+    });
     audit({
       action: "delivery.retry",
       resourceType: "delivery",
@@ -612,8 +628,13 @@ export function createApp({ config, services = buildServices(config) }: CreateAp
 
     const decision = evaluateNumberRules(services.numberRuleStore, event);
     if (!decision.allowed) {
-      recordBlockedNumberDelivery(services.deliveryStore, event, decision.reason ?? "Blocked by number rule");
-      services.eventBus.publish("activity");
+      const delivery = recordBlockedNumberDelivery(services.deliveryStore, event, decision.reason ?? "Blocked by number rule");
+      services.eventBus.publish("activity", {
+        accountId: event.accountId,
+        chatJid: event.chatJid,
+        source: "delivery",
+        deliveries: [delivery],
+      });
       audit({
         action: "message.inbound",
         outcome: "ignored",
@@ -629,7 +650,11 @@ export function createApp({ config, services = buildServices(config) }: CreateAp
     }
 
     const result = await services.router.handleInboundMessage(event);
-    services.eventBus.publish("activity");
+    services.eventBus.publish("activity", {
+      accountId: event.accountId,
+      chatJid: event.chatJid,
+      source: "message-inbound",
+    });
     audit({
       action: "message.inbound",
       resourceType: "whatsapp-message",

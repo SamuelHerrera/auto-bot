@@ -47,7 +47,7 @@ export function recordBlockedNumberDelivery(
   deliveryStore: BridgeDeliveryStore | undefined,
   event: WhatsAppMessageEvent,
   reason: string,
-) {
+): DeliveryRecord {
   const now = new Date().toISOString();
   const record: DeliveryRecord = {
     id: `${event.accountId}:${event.chatJid}:${event.messageId}`,
@@ -66,6 +66,7 @@ export function recordBlockedNumberDelivery(
   };
 
   deliveryStore?.saveDelivery(record);
+  return record;
 }
 
 function matchesRule(rule: NumberRuleRecord, candidates: string[]) {

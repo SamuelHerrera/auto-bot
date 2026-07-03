@@ -2,7 +2,7 @@ export type AccountStatus = "disconnected" | "connecting" | "connected";
 export type NumberSubview = "home" | "messages" | "rules" | "failures";
 export type NumberRuleAction = "allow" | "deny";
 export type NumberRuleMatchType = "all" | "exact" | "regex";
-export type RefreshScope = "accounts" | "activity" | "chat" | "rules" | "logs";
+export type RefreshScope = "accounts" | "directory" | "activity" | "chat" | "rules" | "logs";
 export type AuditLogOutcome = "success" | "failure" | "ignored";
 export type AuditLogFilter = "all" | AuditLogOutcome;
 

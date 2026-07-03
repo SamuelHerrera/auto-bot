@@ -19,7 +19,7 @@ import { AppEventBus } from "./services/event-bus.js";
 import { evaluateNumberRules, recordBlockedNumberDelivery } from "./services/number-rules.js";
 import type { WhatsAppGateway } from "./services/whatsapp-service.js";
 import { recordWhatsAppSyncEvent } from "./services/whatsapp-sync-recorder.js";
-import type { AuditLogInput, WhatsAppAccountStatus } from "./domain/types.js";
+import type { AuditLogInput, DeliveryRecord, WhatsAppAccountStatus } from "./domain/types.js";
 
 export interface AppServices {
   hermesAdapter: HermesAdapter;
@@ -80,8 +80,12 @@ export function buildServices(config: AppConfig): AppServices {
   });
 
   whatsappGateway.onSyncEvent?.((event) => {
-    recordWhatsAppSyncEvent(bridgeStore instanceof SqliteBridgeStateStore ? bridgeStore : undefined, event);
-    eventBus.publish("activity");
+    const changes = recordWhatsAppSyncEvent(bridgeStore instanceof SqliteBridgeStateStore ? bridgeStore : undefined, event);
+    eventBus.publish("activity", {
+      accountId: event.accountId,
+      source: "whatsapp-sync",
+      ...changes,
+    });
   });
 
   whatsappGateway.onInboundMessage(async (event) => {
@@ -89,7 +93,7 @@ export function buildServices(config: AppConfig): AppServices {
     const numberRuleStore = bridgeStore instanceof SqliteBridgeStateStore ? bridgeStore : undefined;
     const decision = evaluateNumberRules(numberRuleStore, event);
     if (!decision.allowed) {
-      recordBlockedNumberDelivery(deliveryStore, event, decision.reason ?? "Blocked by number rule");
+      const delivery = recordBlockedNumberDelivery(deliveryStore, event, decision.reason ?? "Blocked by number rule");
       recordAuditLog({
         action: "message.inbound",
         outcome: "ignored",
@@ -101,7 +105,12 @@ export function buildServices(config: AppConfig): AppServices {
           reason: decision.reason ?? "Blocked by number rule",
         },
       });
-      eventBus.publish("activity");
+      eventBus.publish("activity", {
+        accountId: event.accountId,
+        chatJid: event.chatJid,
+        source: "delivery",
+        deliveries: [delivery],
+      });
       return;
     }
 
@@ -111,7 +120,7 @@ export function buildServices(config: AppConfig): AppServices {
     } catch (error) {
       const now = new Date().toISOString();
       if (bridgeStore instanceof SqliteBridgeStateStore) {
-        bridgeStore.saveDelivery({
+        const delivery = {
           id: `${event.accountId}:${event.chatJid}:${event.messageId}`,
           accountId: event.accountId,
           chatJid: event.chatJid,
@@ -126,6 +135,13 @@ export function buildServices(config: AppConfig): AppServices {
           error: error instanceof Error ? error.message : "Hermes turn failed",
           createdAt: now,
           updatedAt: now,
+        } as const;
+        bridgeStore.saveDelivery(delivery);
+        eventBus.publish("activity", {
+          accountId: event.accountId,
+          chatJid: event.chatJid,
+          source: "delivery",
+          deliveries: [delivery],
         });
       }
       console.error("Hermes inbound turn failed", error);
@@ -140,7 +156,6 @@ export function buildServices(config: AppConfig): AppServices {
           reason: error instanceof Error ? error.message : "Hermes turn failed",
         },
       });
-      eventBus.publish("activity");
       return;
     }
 
@@ -159,13 +174,14 @@ export function buildServices(config: AppConfig): AppServices {
       return;
     }
 
-    await sendReplyWithDeliveryRecord({
+    const delivery = await sendReplyWithDeliveryRecord({
       ...(bridgeStore instanceof SqliteBridgeStateStore ? { deliveryStore: bridgeStore } : {}),
       event: result.event ?? event,
       text: result.reply.outputText,
       whatsappGateway,
     }).catch((error: unknown) => {
       console.error("WhatsApp reply delivery failed", error);
+      return null;
     });
     recordAuditLog({
       action: "message.inbound",
@@ -179,7 +195,12 @@ export function buildServices(config: AppConfig): AppServices {
         replied: true,
       },
     });
-    eventBus.publish("activity");
+    eventBus.publish("activity", {
+      accountId: event.accountId,
+      chatJid: event.chatJid,
+      source: "delivery",
+      ...(delivery ? { deliveries: [delivery] } : {}),
+    });
   });
 
   return {
@@ -235,9 +256,9 @@ export async function sendReplyWithDeliveryRecord(input: {
   };
   text: string;
   whatsappGateway: WhatsAppGateway;
-}) {
+}): Promise<DeliveryRecord> {
   const now = new Date().toISOString();
-  const record = {
+  const record: DeliveryRecord = {
     id: `${input.event.accountId}:${input.event.chatJid}:${input.event.messageId}`,
     accountId: input.event.accountId,
     chatJid: input.event.chatJid,
@@ -259,21 +280,24 @@ export async function sendReplyWithDeliveryRecord(input: {
       chatId: input.event.chatId,
       text: input.text,
     });
-    input.deliveryStore?.saveDelivery({
+    const sentRecord: DeliveryRecord = {
       ...record,
       status: "sent",
       attempts: record.attempts + 1,
       updatedAt: new Date().toISOString(),
-    });
+    };
+    input.deliveryStore?.saveDelivery(sentRecord);
+    return sentRecord;
   } catch (error) {
-    input.deliveryStore?.saveDelivery({
+    const failedRecord: DeliveryRecord = {
       ...record,
       status: "failed",
       attempts: record.attempts + 1,
       failureStage: "whatsapp",
       error: error instanceof Error ? error.message : "WhatsApp send failed",
       updatedAt: new Date().toISOString(),
-    });
+    };
+    input.deliveryStore?.saveDelivery(failedRecord);
     throw error;
   }
 }

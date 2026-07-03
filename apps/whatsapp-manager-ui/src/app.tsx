@@ -29,6 +29,12 @@ import { useWorkspaceTabs } from "./hooks/use-workspace-tabs";
 import { buildEventUrl, normalizeError, request } from "./services/api-client";
 import { brandingStorageKeys, defaultAppIcon, defaultAppTitle, getInitialBranding, normalizeBranding, setFavicon } from "./services/branding";
 
+interface AppSseEvent {
+  type: string;
+  at: string;
+  details?: Record<string, unknown>;
+}
+
 export function App() {
   const [branding, setBranding] = useState<BrandingSettings>(getInitialBranding);
   const [accounts, setAccounts] = useState<WhatsAppAccount[]>([]);
@@ -65,6 +71,7 @@ export function App() {
   const activeAccountIdRef = useRef("");
   const activeNumberViewRef = useRef<NumberSubview>("home");
   const activeChatJidRef = useRef("");
+  const isLogsTabOpenRef = useRef(false);
   const hasRequestedInitialDataRef = useRef(false);
   const loadedActivityAccountIdsRef = useRef<Set<string>>(new Set());
   const loadedChatDetailKeysRef = useRef<Set<string>>(new Set());
@@ -119,6 +126,10 @@ export function App() {
   }, [activeNumberView]);
 
   useEffect(() => {
+    isLogsTabOpenRef.current = isLogsTabOpen;
+  }, [isLogsTabOpen]);
+
+  useEffect(() => {
     document.title = branding.title;
     setFavicon(branding.iconSrc);
   }, [branding]);
@@ -137,17 +148,23 @@ export function App() {
     events.addEventListener("accounts", () => {
       queueRefreshData(["accounts"]);
     });
-    events.addEventListener("activity", () => {
+    events.addEventListener("activity", (event) => {
+      if (applyActivityEvent(event)) {
+        return;
+      }
+
       queueRefreshData(["activity", "chat"]);
     });
     events.addEventListener("rules", () => {
       queueRefreshData(["rules"]);
     });
     events.addEventListener("logs", () => {
-      queueRefreshData(["logs"]);
+      if (isLogsTabOpenRef.current) {
+        queueRefreshData(["logs"]);
+      }
     });
     events.addEventListener("sync", () => {
-      queueRefreshData(["accounts", "activity", "chat", "rules", "logs"]);
+      queueRefreshData(["accounts", "directory", "activity", "chat", "rules", "logs"]);
     });
     events.onerror = () => {
       setStatusMessage("Live updates reconnecting.");
@@ -172,7 +189,7 @@ export function App() {
     }
 
     loadedActivityAccountIdsRef.current.add(activeAccountId);
-    void refreshData(false, false, ["activity"]);
+    void refreshData(false, false, ["directory", "activity"]);
   }, [activeAccountId]);
 
   useEffect(() => {
@@ -188,6 +205,14 @@ export function App() {
     loadedChatDetailKeysRef.current.add(chatDetailKey);
     void refreshData(false, false, ["chat"]);
   }, [activeAccountId, activeChatJid, activeNumberView]);
+
+  useEffect(() => {
+    if (activeTabId !== "logs" || !isLogsTabOpen) {
+      return;
+    }
+
+    void refreshData(false, false, ["logs"]);
+  }, [activeTabId, isLogsTabOpen]);
 
   function queueRefreshData(scopes: RefreshScope[], delayMs = 150) {
     for (const scope of scopes) {
@@ -232,7 +257,7 @@ export function App() {
   async function refreshData(
     showMessage = true,
     showBusy = true,
-    scopes: RefreshScope[] = ["accounts", "activity", "rules", "logs"],
+    scopes: RefreshScope[] = ["accounts", "directory", "activity", "rules", "logs"],
   ) {
     if (showBusy) {
       setIsBusy(true);
@@ -242,12 +267,15 @@ export function App() {
     try {
       const shouldRefreshAccounts = scopes.includes("accounts");
       const activityAccountId = activeAccountIdRef.current;
+      const directoryAccountId = activeAccountIdRef.current;
       const chatAccountId = activeAccountIdRef.current;
       const chatJid = activeChatJidRef.current;
+      const shouldRefreshDirectory = scopes.includes("directory") && Boolean(directoryAccountId);
       const shouldRefreshActivity = scopes.includes("activity") && Boolean(activityAccountId);
       const shouldRefreshChat = scopes.includes("chat") && activeNumberViewRef.current === "messages" && Boolean(chatAccountId && chatJid);
       const shouldRefreshRules = scopes.includes("rules");
       const shouldRefreshLogs = scopes.includes("logs");
+      const directoryAccountQuery = shouldRefreshDirectory ? toQueryString({ accountId: directoryAccountId }) : "";
       const activityAccountQuery = shouldRefreshActivity ? toQueryString({ accountId: activityAccountId }) : "";
       const chatQuery = shouldRefreshChat ? toQueryString({ accountId: chatAccountId, chatJid }) : "";
       const [
@@ -268,12 +296,12 @@ export function App() {
         auditLogResponse,
       ] = await Promise.all([
         shouldRefreshAccounts ? request<{ items: WhatsAppAccount[] }>("/whatsapp/accounts") : Promise.resolve(null),
-        shouldRefreshActivity ? request<{ items: SessionMapping[] }>(`/sessions?${activityAccountQuery}`) : Promise.resolve(null),
+        shouldRefreshDirectory ? request<{ items: SessionMapping[] }>(`/sessions?${directoryAccountQuery}`) : Promise.resolve(null),
         shouldRefreshActivity ? request<{ items: DeliveryRecord[] }>(`/deliveries?${activityAccountQuery}`) : Promise.resolve(null),
-        shouldRefreshActivity ? request<{ items: ManagerChatMetadata[] }>(`/manager/chats?${activityAccountQuery}`) : Promise.resolve(null),
-        shouldRefreshActivity ? request<{ items: WhatsAppSyncedChat[] }>(`/whatsapp/sync/chats?limit=1000&${activityAccountQuery}`) : Promise.resolve(null),
-        shouldRefreshActivity ? request<{ items: WhatsAppContact[] }>(`/whatsapp/sync/contacts?limit=1000&${activityAccountQuery}`) : Promise.resolve(null),
-        shouldRefreshActivity ? request<{ items: WhatsAppLidMapping[] }>(`/whatsapp/sync/lid-mappings?limit=1000&${activityAccountQuery}`) : Promise.resolve(null),
+        shouldRefreshDirectory ? request<{ items: ManagerChatMetadata[] }>(`/manager/chats?${directoryAccountQuery}`) : Promise.resolve(null),
+        shouldRefreshDirectory ? request<{ items: WhatsAppSyncedChat[] }>(`/whatsapp/sync/chats?limit=1000&${directoryAccountQuery}`) : Promise.resolve(null),
+        shouldRefreshDirectory ? request<{ items: WhatsAppContact[] }>(`/whatsapp/sync/contacts?limit=1000&${directoryAccountQuery}`) : Promise.resolve(null),
+        shouldRefreshDirectory ? request<{ items: WhatsAppLidMapping[] }>(`/whatsapp/sync/lid-mappings?limit=1000&${directoryAccountQuery}`) : Promise.resolve(null),
         shouldRefreshActivity ? request<{ items: WhatsAppMessageCount[] }>(`/whatsapp/sync/message-counts?${activityAccountQuery}`) : Promise.resolve(null),
         shouldRefreshChat ? request<{ items: WhatsAppSyncedMessage[] }>(`/whatsapp/sync/messages?limit=1000&${chatQuery}`) : Promise.resolve(null),
         shouldRefreshChat ? optionalRequest<{ items: WhatsAppMessageReceipt[] }>(`/whatsapp/sync/message-receipts?limit=1000&${chatQuery}`) : Promise.resolve(null),
@@ -291,22 +319,22 @@ export function App() {
         setHasLoadedAccounts(true);
       }
       if (mappingResponse) {
-        setMappings((current) => replaceByAccount(current, activityAccountId, mappingResponse.items.filter((mapping) => mapping.chatType === "direct")));
+        setMappings((current) => replaceByAccount(current, directoryAccountId, mappingResponse.items.filter((mapping) => mapping.chatType === "direct")));
       }
       if (deliveryResponse) {
         setDeliveries((current) => replaceByAccount(current, activityAccountId, deliveryResponse.items.filter((delivery) => delivery.chatType === "direct")));
       }
       if (managerChatMetadataResponse) {
-        setManagerChatMetadata((current) => replaceByAccount(current, activityAccountId, managerChatMetadataResponse.items));
+        setManagerChatMetadata((current) => replaceByAccount(current, directoryAccountId, managerChatMetadataResponse.items));
       }
       if (syncedChatResponse) {
-        setSyncedChats((current) => replaceByAccount(current, activityAccountId, syncedChatResponse.items.filter((chat) => chat.chatType === "direct")));
+        setSyncedChats((current) => replaceByAccount(current, directoryAccountId, syncedChatResponse.items.filter((chat) => chat.chatType === "direct")));
       }
       if (contactResponse) {
-        setContacts((current) => replaceByAccount(current, activityAccountId, contactResponse.items));
+        setContacts((current) => replaceByAccount(current, directoryAccountId, contactResponse.items));
       }
       if (lidMappingResponse) {
-        setLidMappings((current) => replaceByAccount(current, activityAccountId, lidMappingResponse.items));
+        setLidMappings((current) => replaceByAccount(current, directoryAccountId, lidMappingResponse.items));
       }
       if (messageCountResponse) {
         setSyncedMessageCounts((current) => replaceByAccount(current, activityAccountId, messageCountResponse.items));
@@ -376,6 +404,93 @@ export function App() {
     }
   }
 
+  function applyActivityEvent(event: Event) {
+    const appEvent = parseAppSseEvent(event);
+    const details = appEvent?.details;
+    if (!details) {
+      return false;
+    }
+
+    const deliveriesPayload = readArray<DeliveryRecord>(details.deliveries);
+    const chatsPayload = readArray<WhatsAppSyncedChat>(details.chats).filter((chat) => chat.chatType === "direct");
+    const contactsPayload = readArray<WhatsAppContact>(details.contacts);
+    const lidMappingsPayload = readArray<WhatsAppLidMapping>(details.lidMappings);
+    const messagesPayload = readArray<WhatsAppSyncedMessage>(details.messages);
+    const receiptsPayload = readArray<WhatsAppMessageReceipt>(details.receipts);
+    const updatesPayload = readArray<WhatsAppMessageUpdate>(details.updates);
+    const mediaAssetsPayload = readArray<WhatsAppMediaAsset>(details.mediaAssets);
+
+    const hasPayload =
+      deliveriesPayload.length > 0 ||
+      chatsPayload.length > 0 ||
+      contactsPayload.length > 0 ||
+      lidMappingsPayload.length > 0 ||
+      messagesPayload.length > 0 ||
+      receiptsPayload.length > 0 ||
+      updatesPayload.length > 0 ||
+      mediaAssetsPayload.length > 0;
+
+    if (!hasPayload) {
+      return false;
+    }
+
+    if (deliveriesPayload.length > 0) {
+      setDeliveries((current) => upsertByKey(current, deliveriesPayload.filter((delivery) => delivery.chatType === "direct"), deliveryKey));
+    }
+    if (chatsPayload.length > 0) {
+      setSyncedChats((current) => upsertByKey(current, chatsPayload, accountChatKey));
+    }
+    if (contactsPayload.length > 0) {
+      setContacts((current) => upsertByKey(current, contactsPayload, contactKey));
+    }
+    if (lidMappingsPayload.length > 0) {
+      setLidMappings((current) => upsertByKey(current, lidMappingsPayload, lidMappingKey));
+    }
+    if (receiptsPayload.length > 0) {
+      setMessageReceipts((current) => upsertByKey(current, receiptsPayload, (receipt) => receipt.id));
+    }
+    if (updatesPayload.length > 0) {
+      setMessageUpdates((current) => upsertByKey(current, updatesPayload, (update) => update.id));
+    }
+    if (mediaAssetsPayload.length > 0) {
+      setMediaAssets((current) => upsertByKey(current, mediaAssetsPayload, (asset) => asset.id));
+    }
+    if (messagesPayload.length > 0) {
+      let addedMessages: WhatsAppSyncedMessage[] = [];
+      setSyncedMessages((current) => {
+        const currentKeys = new Set(current.map(syncedMessageKey));
+        addedMessages = messagesPayload.filter((message) => !currentKeys.has(syncedMessageKey(message)));
+        return upsertByKey(current, messagesPayload, syncedMessageKey);
+      });
+      if (addedMessages.length > 0) {
+        setSyncedMessageCounts((current) => applyMessageCountDeltas(current, addedMessages));
+      }
+    }
+
+    return true;
+  }
+
+  function parseAppSseEvent(event: Event): AppSseEvent | null {
+    if (!("data" in event) || typeof event.data !== "string") {
+      return null;
+    }
+
+    try {
+      const parsed = JSON.parse(event.data);
+      if (!isRecord(parsed) || typeof parsed.type !== "string" || typeof parsed.at !== "string") {
+        return null;
+      }
+
+      return {
+        type: parsed.type,
+        at: parsed.at,
+        ...(isRecord(parsed.details) ? { details: parsed.details } : {}),
+      };
+    } catch {
+      return null;
+    }
+  }
+
   function toQueryString(params: Record<string, string>) {
     return new URLSearchParams(params).toString();
   }
@@ -392,6 +507,83 @@ export function App() {
       ...items,
       ...current.filter((item) => item.accountId !== accountId || item.chatJid !== chatJid),
     ];
+  }
+
+  function upsertByKey<T>(current: T[], items: T[], getKey: (item: T) => string) {
+    const next = new Map(current.map((item) => [getKey(item), item]));
+    for (const item of items) {
+      next.set(getKey(item), item);
+    }
+
+    return [...next.values()];
+  }
+
+  function applyMessageCountDeltas(current: WhatsAppMessageCount[], messages: WhatsAppSyncedMessage[]) {
+    const countDeltas = new Map<string, WhatsAppMessageCount>();
+    for (const message of messages) {
+      if (!isActualSyncedMessage(message)) {
+        continue;
+      }
+
+      const key = accountChatKey(message);
+      const currentDelta = countDeltas.get(key) ?? {
+        accountId: message.accountId,
+        chatJid: message.chatJid,
+        messageCount: 0,
+      };
+      countDeltas.set(key, {
+        ...currentDelta,
+        messageCount: currentDelta.messageCount + 1,
+      });
+    }
+
+    if (countDeltas.size === 0) {
+      return current;
+    }
+
+    const countsByChat = new Map(current.map((item) => [accountChatKey(item), item]));
+    for (const [key, delta] of countDeltas) {
+      const existing = countsByChat.get(key);
+      countsByChat.set(key, {
+        accountId: delta.accountId,
+        chatJid: delta.chatJid,
+        messageCount: (existing?.messageCount ?? 0) + delta.messageCount,
+      });
+    }
+
+    return [...countsByChat.values()];
+  }
+
+  function readArray<T>(value: unknown): T[] {
+    return Array.isArray(value) ? value as T[] : [];
+  }
+
+  function isRecord(value: unknown): value is Record<string, unknown> {
+    return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+  }
+
+  function deliveryKey(delivery: DeliveryRecord) {
+    return delivery.id;
+  }
+
+  function accountChatKey(item: { accountId: string; chatJid: string }) {
+    return `${item.accountId}:${item.chatJid}`;
+  }
+
+  function contactKey(contact: WhatsAppContact) {
+    return `${contact.accountId}:${contact.contactJid}`;
+  }
+
+  function lidMappingKey(mapping: WhatsAppLidMapping) {
+    return `${mapping.accountId}:${mapping.lidJid}:${mapping.pnJid}`;
+  }
+
+  function syncedMessageKey(message: WhatsAppSyncedMessage) {
+    return `${message.accountId}:${message.chatJid}:${message.messageId}`;
+  }
+
+  function isActualSyncedMessage(message: WhatsAppSyncedMessage) {
+    return Boolean(message.text?.trim() || message.mediaJson);
   }
 
   async function connectAccount(event: FormEvent<HTMLFormElement>) {
