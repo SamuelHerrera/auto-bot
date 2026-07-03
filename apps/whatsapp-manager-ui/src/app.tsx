@@ -1008,48 +1008,56 @@ function NumberWorkspace({
       </div>
 
       {activeView === "home" ? (
-        <HomeView
-          account={account}
-          chats={chats}
-          deliveries={deliveries}
-          failedDeliveries={failedDeliveries}
-          mappings={mappings}
-          rules={rules}
-        />
+        <div className="number-view-scroll">
+          <HomeView
+            account={account}
+            chats={chats}
+            deliveries={deliveries}
+            failedDeliveries={failedDeliveries}
+            mappings={mappings}
+            rules={rules}
+          />
+        </div>
       ) : null}
 
       {activeView === "messages" ? (
-        <MessagesView
-          activeAccountId={account.accountId}
-          activeChat={activeChat}
-          activeChatJid={activeChatJid}
-          activeChatMessages={activeChatMessages}
-          chats={chats}
-          onSelectChat={onSelectChat}
-        />
+        <div className="number-view-scroll">
+          <MessagesView
+            activeAccountId={account.accountId}
+            activeChat={activeChat}
+            activeChatJid={activeChatJid}
+            activeChatMessages={activeChatMessages}
+            chats={chats}
+            onSelectChat={onSelectChat}
+          />
+        </div>
       ) : null}
 
       {activeView === "rules" ? (
-        <RulesView
-          activeAccountId={account.accountId}
-          isBusy={isBusy}
-          matchType={matchType}
-          onActionChange={onActionChange}
-          onCreate={onCreateRule}
-          onDelete={onDeleteRule}
-          onEnabledChange={onEnabledChange}
-          onLabelChange={onLabelChange}
-          onMatchTypeChange={onMatchTypeChange}
-          onPatternChange={onPatternChange}
-          pattern={pattern}
-          ruleAction={ruleAction}
-          ruleLabel={ruleLabel}
-          rules={rules}
-        />
+        <div className="number-view-scroll">
+          <RulesView
+            activeAccountId={account.accountId}
+            isBusy={isBusy}
+            matchType={matchType}
+            onActionChange={onActionChange}
+            onCreate={onCreateRule}
+            onDelete={onDeleteRule}
+            onEnabledChange={onEnabledChange}
+            onLabelChange={onLabelChange}
+            onMatchTypeChange={onMatchTypeChange}
+            onPatternChange={onPatternChange}
+            pattern={pattern}
+            ruleAction={ruleAction}
+            ruleLabel={ruleLabel}
+            rules={rules}
+          />
+        </div>
       ) : null}
 
       {activeView === "failures" ? (
-        <FailuresView failedDeliveries={failedDeliveries} isBusy={isBusy} onRetry={onRetry} />
+        <div className="number-view-scroll">
+          <FailuresView failedDeliveries={failedDeliveries} isBusy={isBusy} onRetry={onRetry} />
+        </div>
       ) : null}
 
       {isAliasDialogOpen ? (
@@ -1422,21 +1430,6 @@ function MessagesView({
         <section className="chat-detail-pane">
           {activeChat ? (
             <div className="chat-detail-content">
-              <dl className="detail-list">
-                <div>
-                  <dt>Hermes session</dt>
-                  <dd>{activeChat.hermesSessionId ?? "Not created"}</dd>
-                </div>
-                <div>
-                  <dt>Session key</dt>
-                  <dd>{activeChat.sessionKey ?? "Not available"}</dd>
-                </div>
-                <div>
-                  <dt>Last activity</dt>
-                  <dd>{formatTimestamp(activeChat.updatedAt)}</dd>
-                </div>
-              </dl>
-
               <div className="message-list">
                 {activeChatMessages.length === 0 ? (
                   <EmptyState
@@ -1646,13 +1639,6 @@ function SettingsView({
 
   return (
     <>
-      <div className="section-heading">
-        <div>
-          <span className="panel-kicker">Settings</span>
-          <h2>Branding</h2>
-        </div>
-      </div>
-
       <form className="branding-form" onSubmit={submit}>
         <div className="branding-preview">
           <img src={draftIconSrc || defaultBranding.iconSrc} alt="" aria-hidden="true" />
@@ -1702,13 +1688,6 @@ function LogsView({
 }) {
   return (
     <>
-      <div className="section-heading">
-        <div>
-          <span className="panel-kicker">Audit</span>
-          <h2>App logs</h2>
-        </div>
-      </div>
-
       <div className="audit-log-list">
         {auditLogs.length === 0 ? (
           <EmptyState title="No audit events" description="Changes will appear here after actions are recorded." />
