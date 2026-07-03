@@ -1,10 +1,13 @@
-import { useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import type { UIEvent } from "react";
 import { Icon } from "@iconify/react";
 
 import { auditLogMatchesFilters, getAuditLogCounts, getAuditLogDisplay } from "../domain/audit-logs";
 import { formatTimestamp } from "../domain/formatting";
 import type { AuditLogFilter, AuditLogRecord } from "../domain/models";
 import { EmptyState, TabButton } from "./shared";
+
+const logPageSize = 40;
 
 export function LogsView({
   auditLogs,
@@ -13,8 +16,38 @@ export function LogsView({
 }) {
   const [outcomeFilter, setOutcomeFilter] = useState<AuditLogFilter>("all");
   const [search, setSearch] = useState("");
-  const visibleLogs = auditLogs.filter((entry) => auditLogMatchesFilters(entry, outcomeFilter, search));
+  const [visibleCount, setVisibleCount] = useState(logPageSize);
+  const logListRef = useRef<HTMLDivElement | null>(null);
+  const visibleLogs = useMemo(
+    () => auditLogs.filter((entry) => auditLogMatchesFilters(entry, outcomeFilter, search)),
+    [auditLogs, outcomeFilter, search],
+  );
+  const renderedLogs = visibleLogs.slice(0, visibleCount);
   const counts = getAuditLogCounts(auditLogs);
+  const hasMoreLogs = visibleCount < visibleLogs.length;
+
+  useEffect(() => {
+    setVisibleCount(logPageSize);
+    if (logListRef.current) {
+      logListRef.current.scrollTop = 0;
+    }
+  }, [outcomeFilter, search, auditLogs]);
+
+  function loadNextPage() {
+    setVisibleCount((currentCount) => Math.min(currentCount + logPageSize, visibleLogs.length));
+  }
+
+  function handleLogScroll(event: UIEvent<HTMLDivElement>) {
+    if (!hasMoreLogs) {
+      return;
+    }
+
+    const element = event.currentTarget;
+    const remainingScroll = element.scrollHeight - element.scrollTop - element.clientHeight;
+    if (remainingScroll < 180) {
+      loadNextPage();
+    }
+  }
 
   return (
     <>
@@ -40,51 +73,54 @@ export function LogsView({
         </label>
       </div>
 
-      <div className="audit-log-list">
+      <div ref={logListRef} className="audit-log-list" onScroll={handleLogScroll}>
         {auditLogs.length === 0 ? (
           <EmptyState title="No audit events" description="Changes will appear here after actions are recorded." />
         ) : visibleLogs.length === 0 ? (
           <EmptyState title="No matching logs" description="Adjust the filters or search." />
         ) : (
-          visibleLogs.map((entry) => {
-            const display = getAuditLogDisplay(entry);
+          <>
+            {renderedLogs.map((entry) => {
+              const display = getAuditLogDisplay(entry);
 
-            return (
-              <details key={entry.id} className={`audit-log-row audit-log-row-${entry.outcome}`}>
-                <summary>
-                  <span className={`audit-log-icon audit-log-icon-${entry.outcome}`}>
-                    <Icon icon={display.icon} aria-hidden="true" />
-                  </span>
-                  <span className="audit-log-main">
-                    <strong>{display.title}</strong>
-                    <small>{display.description}</small>
-                  </span>
-                  <time>{formatTimestamp(entry.createdAt)}</time>
-                </summary>
-                <div className="audit-log-detail">
-                  <dl className="audit-log-meta">
-                    <div>
-                      <dt>Actor</dt>
-                      <dd>{entry.actor}</dd>
-                    </div>
-                    <div>
-                      <dt>Resource</dt>
-                      <dd>{entry.resourceType ? `${entry.resourceType} / ${entry.resourceId ?? "unknown"}` : "none"}</dd>
-                    </div>
-                    <div>
-                      <dt>Action</dt>
-                      <dd>{entry.action}</dd>
-                    </div>
-                    <div>
-                      <dt>Outcome</dt>
-                      <dd>{entry.outcome}</dd>
-                    </div>
-                  </dl>
-                  {entry.details ? <pre>{JSON.stringify(entry.details, null, 2)}</pre> : <p>No JSON details.</p>}
-                </div>
-              </details>
-            );
-          })
+              return (
+                <details key={entry.id} className={`audit-log-row audit-log-row-${entry.outcome}`}>
+                  <summary>
+                    <span className={`audit-log-icon audit-log-icon-${entry.outcome}`}>
+                      <Icon icon={display.icon} aria-hidden="true" />
+                    </span>
+                    <span className="audit-log-main">
+                      <strong>{display.title}</strong>
+                      <small>{display.description}</small>
+                    </span>
+                    <time>{formatTimestamp(entry.createdAt)}</time>
+                  </summary>
+                  <div className="audit-log-detail">
+                    <dl className="audit-log-meta">
+                      <div>
+                        <dt>Actor</dt>
+                        <dd>{entry.actor}</dd>
+                      </div>
+                      <div>
+                        <dt>Resource</dt>
+                        <dd>{entry.resourceType ? `${entry.resourceType} / ${entry.resourceId ?? "unknown"}` : "none"}</dd>
+                      </div>
+                      <div>
+                        <dt>Action</dt>
+                        <dd>{entry.action}</dd>
+                      </div>
+                      <div>
+                        <dt>Outcome</dt>
+                        <dd>{entry.outcome}</dd>
+                      </div>
+                    </dl>
+                    {entry.details ? <pre>{JSON.stringify(entry.details, null, 2)}</pre> : <p>No JSON details.</p>}
+                  </div>
+                </details>
+              );
+            })}
+            {hasMoreLogs ? <div className="audit-log-sentinel" aria-hidden="true" /> : null}
+          </>
         )}
       </div>
     </>

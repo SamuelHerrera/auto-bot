@@ -1720,6 +1720,10 @@ button {
   word-break: break-word;
 }
 
+.audit-log-sentinel {
+  min-height: 24px;
+}
+
 .table-list,
 .compact-list,
 .policy-list {
