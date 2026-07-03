@@ -85,27 +85,36 @@ export function MessagesView({
                   className={`chat-row${chat.chatJid === activeChatJid ? " chat-row-active" : ""}`}
                 >
                   <button type="button" className="chat-row-main" onClick={() => onSelectChat(chat.chatJid)}>
-                    <span>
+                    <span className="chat-row-label">
                       <strong>{chat.displayName ?? chat.phoneNumber ?? chat.chatJid}</strong>
                       <small>{chat.lastText ?? chat.phoneNumber ?? chat.pnJid ?? chat.chatJid}</small>
                     </span>
+                    <span className="chat-meta">
+                      <span className="chat-meta-primary">{formatTimestamp(chat.updatedAt)}</span>
+                      <span className="chat-meta-secondary">
+                        <span>{formatCountLabel(chat.messageCount, "message")}</span>
+                        {chat.unreadCount ? <span className="unread-pill">{chat.unreadCount}</span> : null}
+                        {chat.failedCount ? <span>{chat.failedCount} failed</span> : null}
+                      </span>
+                    </span>
                   </button>
-                  <span className="chat-meta">
-                    <span className="chat-meta-primary">{formatTimestamp(chat.updatedAt)}</span>
-                    <span className="chat-meta-secondary">
-                      <span>{formatCountLabel(chat.messageCount, "message")}</span>
-                      {chat.unreadCount ? <span className="unread-pill">{chat.unreadCount}</span> : null}
-                      {chat.failedCount ? <span>{chat.failedCount} failed</span> : null}
-                      <IconButton
-                        icon={chat.managerArchived ? "mdi:archive-arrow-up-outline" : "mdi:archive-arrow-down-outline"}
-                        label={chat.managerArchived ? "Restore in app manager" : "Archive in app manager"}
-                        className="chat-archive-button"
-                        variant="text"
+                  <details className="action-menu chat-row-menu">
+                    <summary aria-label="Chat actions" title="Chat actions">
+                      <Icon icon="mdi:dots-vertical" aria-hidden="true" />
+                    </summary>
+                    <div className="action-menu-list">
+                      <button
                         type="button"
                         onClick={() => onSetChatArchived(chat, !chat.managerArchived)}
-                      />
-                    </span>
-                  </span>
+                      >
+                        <Icon
+                          icon={chat.managerArchived ? "mdi:archive-arrow-up-outline" : "mdi:archive-arrow-down-outline"}
+                          aria-hidden="true"
+                        />
+                        <span>{chat.managerArchived ? "Restore" : "Archive"}</span>
+                      </button>
+                    </div>
+                  </details>
                 </div>
               ))
             )}

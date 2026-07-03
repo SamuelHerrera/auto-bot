@@ -1419,31 +1419,49 @@ button {
   color: inherit;
   align-items: center;
   display: grid;
-  gap: 8px;
+  gap: 4px;
   grid-template-columns: minmax(0, 1fr) auto;
   justify-content: stretch;
   min-height: 58px;
   min-width: 0;
-  padding: 8px 12px;
+  padding: 0 8px 0 12px;
   text-align: left;
   width: 100%;
 }
 
 .chat-row-main {
+  align-items: center;
   background: transparent;
   border: 0;
   color: inherit;
-  display: block;
-  min-height: 0;
+  display: grid;
+  gap: 8px;
+  grid-template-columns: minmax(0, 1fr) auto;
+  min-height: 58px;
   min-width: 0;
   padding: 0;
   text-align: left;
   width: 100%;
 }
 
+.chat-row-main:hover,
+.chat-row-main:focus-visible {
+  outline: none;
+}
+
+.chat-row:has(.chat-row-main:hover),
+.chat-row:has(.chat-row-main:focus-visible) {
+  background: #f5faf7;
+}
+
 .chat-row-active {
   background: #eaf6ef;
   box-shadow: inset 3px 0 0 #128c5b;
+}
+
+.chat-row-active:has(.chat-row-main:hover),
+.chat-row-active:has(.chat-row-main:focus-visible) {
+  background: #e4f3ea;
 }
 
 .chat-row strong,
@@ -1479,25 +1497,13 @@ button {
   justify-content: flex-end;
 }
 
-.chat-archive-button {
-  color: #526058;
-  height: 22px;
-  min-height: 22px;
-  min-width: 22px;
-  padding: 2px;
-  width: 22px;
+.chat-row-menu summary {
+  height: 30px;
+  width: 30px;
 }
 
-.chat-archive-button > svg {
-  height: 1rem;
-  width: 1rem;
-}
-
-.chat-archive-button:hover,
-.chat-archive-button:focus-visible {
-  background: rgba(7, 94, 84, 0.1);
-  color: #075e54;
-  outline: 0;
+.chat-row-menu .action-menu-list {
+  min-width: 132px;
 }
 
 .unread-pill {
