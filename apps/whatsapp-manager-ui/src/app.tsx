@@ -71,6 +71,7 @@ interface ChatSummary {
   updatedAt: string;
   deliveryCount: number;
   failedCount: number;
+  messageCount: number;
   lastText?: string;
 }
 
@@ -682,15 +683,31 @@ export function App() {
           <h1>{branding.title}</h1>
         </div>
         <div className="topbar-actions">
+          <StatusIndicator detail={errorMessage || statusMessage} tone={statusTone} />
           <IconButton icon="mdi:magnify" label="Find number" className="number-select-button" variant="secondary" onClick={() => setIsNumberPanelOpen(true)}>
             <span className="button-count">{connectedAccounts}/{accounts.length}</span>
           </IconButton>
-          <form className="header-link-form" onSubmit={connectAccount}>
-            <IconButton icon="mdi:link-plus" label="Link number" type="submit" disabled={isBusy} />
-          </form>
-          <IconButton icon="mdi:cog-outline" label="Settings" variant="secondary" onClick={openSettingsTab} />
-          <IconButton icon="mdi:clipboard-text-clock-outline" label="Logs" variant="secondary" onClick={openLogsTab} />
-          <StatusIndicator detail={errorMessage || statusMessage} tone={statusTone} />
+          <details className="action-menu topbar-menu">
+            <summary aria-label="App actions" title="App actions">
+              <Icon icon="mdi:dots-vertical" aria-hidden="true" />
+            </summary>
+            <div className="action-menu-list">
+              <form className="menu-action-form" onSubmit={connectAccount}>
+                <button type="submit" disabled={isBusy}>
+                  <Icon icon="mdi:link-plus" aria-hidden="true" />
+                  <span>Link number</span>
+                </button>
+              </form>
+              <button type="button" onClick={openSettingsTab}>
+                <Icon icon="mdi:cog-outline" aria-hidden="true" />
+                <span>Settings</span>
+              </button>
+              <button type="button" onClick={openLogsTab}>
+                <Icon icon="mdi:clipboard-text-clock-outline" aria-hidden="true" />
+                <span>Logs</span>
+              </button>
+            </div>
+          </details>
         </div>
       </header>
 
@@ -908,8 +925,6 @@ function NumberWorkspace({
     return <EmptyState title="Number unavailable" description="Select another number from the left rail." />;
   }
 
-  const messageCount = buildChatMessages(deliveries.filter((delivery) => delivery.chatType === "direct")).length;
-
   return (
     <>
       <div className="number-header">
@@ -917,7 +932,7 @@ function NumberWorkspace({
           <TabButton active={activeView === "home"} icon="mdi:view-dashboard-outline" onClick={() => onViewChange("home")}>
             Home
           </TabButton>
-          <TabButton active={activeView === "messages"} count={messageCount} icon="mdi:message-text-outline" onClick={() => onViewChange("messages")}>
+          <TabButton active={activeView === "messages"} count={chats.length} icon="mdi:message-text-outline" onClick={() => onViewChange("messages")}>
             Messages
           </TabButton>
           <TabButton active={activeView === "rules"} count={rules.length} icon="mdi:shield-check-outline" onClick={() => onViewChange("rules")}>
@@ -1361,7 +1376,8 @@ function MessagesView({
                   </span>
                   <span className="chat-meta">
                     <span>{formatTimestamp(chat.updatedAt)}</span>
-                    <span>{chat.failedCount ? `${chat.failedCount} failed` : `${chat.deliveryCount} deliveries`}</span>
+                    <span>{formatCountLabel(chat.messageCount, "message")}</span>
+                    {chat.failedCount ? <span>{chat.failedCount} failed</span> : null}
                   </span>
                 </button>
               ))
@@ -1788,6 +1804,7 @@ function buildChatSummaries(
       updatedAt: mapping.updatedAt,
       deliveryCount: 0,
       failedCount: 0,
+      messageCount: 0,
     });
   }
 
@@ -1803,12 +1820,17 @@ function buildChatSummaries(
       updatedAt,
       deliveryCount: (current?.deliveryCount ?? 0) + 1,
       failedCount: (current?.failedCount ?? 0) + (delivery.status === "failed" ? 1 : 0),
+      messageCount: (current?.messageCount ?? 0) + countDeliveryMessages(delivery),
       ...(current?.hermesSessionId ? { hermesSessionId: current.hermesSessionId } : {}),
       ...(lastText ? { lastText } : {}),
     });
   }
 
   return [...chats.values()].sort((a, b) => Date.parse(b.updatedAt) - Date.parse(a.updatedAt));
+}
+
+function countDeliveryMessages(delivery: DeliveryRecord): number {
+  return Number(Boolean(delivery.inboundText?.trim())) + Number(Boolean(delivery.outboundText.trim()));
 }
 
 function buildChatMessages(deliveries: DeliveryRecord[]): ChatMessage[] {
@@ -1838,6 +1860,10 @@ function buildChatMessages(deliveries: DeliveryRecord[]): ChatMessage[] {
       return messages;
     })
     .sort((a, b) => Date.parse(a.timestamp) - Date.parse(b.timestamp));
+}
+
+function formatCountLabel(count: number, singular: string) {
+  return `${count} ${count === 1 ? singular : `${singular}s`}`;
 }
 
 function formatTimestamp(value: string) {

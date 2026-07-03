@@ -86,6 +86,14 @@ button:disabled {
   display: flex;
 }
 
+.menu-action-form {
+  margin: 0;
+}
+
+.menu-action-form button {
+  width: 100%;
+}
+
 .icon-button {
   gap: 0;
   min-width: 40px;
@@ -104,6 +112,10 @@ button:disabled {
 .topbar-actions .icon-button {
   min-height: 38px;
   min-width: 38px;
+}
+
+.topbar-menu {
+  flex: 0 0 auto;
 }
 
 .number-select-button {
@@ -1729,7 +1741,7 @@ button {
 
   .topbar-actions {
     display: grid;
-    grid-template-columns: 1fr 1fr;
+    grid-template-columns: auto minmax(0, 1fr) auto;
   }
 
   .number-header {
