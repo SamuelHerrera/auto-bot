@@ -23,19 +23,23 @@ export function buildChatSummaries(
   syncedMessages: WhatsAppSyncedMessage[] = [],
   contactDisplayIndex: ContactDisplayIndex = new Map(),
   managerChatMetadata: ManagerChatMetadata[] = [],
+  mediaAssets: WhatsAppMediaAsset[] = [],
 ): ChatSummary[] {
   if (!accountId) {
     return [];
   }
 
   const chats = new Map<string, ChatSummary>();
+  const actualMessageCounts = countActualMessagesByChat(
+    deliveries.filter((item) => item.accountId === accountId && item.chatType === "direct"),
+    syncedMessages.filter((item) => item.accountId === accountId),
+    mediaAssets.filter((item) => item.accountId === accountId),
+  );
   const managerMetadataByChatJid = new Map(
     managerChatMetadata
       .filter((item) => item.accountId === accountId)
       .map((item) => [item.chatJid, item]),
   );
-  const syncedMessageCounts = countMessagesByChat(syncedMessages.filter((item) => item.accountId === accountId));
-  const appliedSyncedMessageCounts = new Set<string>();
 
   for (const syncedChat of syncedChats.filter((item) => item.accountId === accountId && item.chatType === "direct")) {
     const display = contactDisplayIndex.get(syncedChat.chatJid);
@@ -50,12 +54,11 @@ export function buildChatSummaries(
       updatedAt,
       deliveryCount: 0,
       failedCount: 0,
-      messageCount: syncedMessageCounts.get(syncedChat.chatJid) ?? 0,
+      messageCount: actualMessageCounts.get(syncedChat.chatJid) ?? 0,
       ...(syncedChat.unreadCount !== undefined ? { unreadCount: syncedChat.unreadCount } : {}),
       managerArchived: managerMetadataByChatJid.get(syncedChat.chatJid)?.archived ?? false,
       source: "synced",
     });
-    appliedSyncedMessageCounts.add(syncedChat.chatJid);
   }
 
   for (const mapping of mappings.filter((item) => item.accountId === accountId && item.chatType === "direct")) {
@@ -70,7 +73,7 @@ export function buildChatSummaries(
       updatedAt: maxTimestamp(current?.updatedAt, mapping.updatedAt),
       deliveryCount: current?.deliveryCount ?? 0,
       failedCount: current?.failedCount ?? 0,
-      messageCount: current?.messageCount ?? 0,
+      messageCount: actualMessageCounts.get(mapping.chatJid) ?? current?.messageCount ?? 0,
       ...(current?.unreadCount !== undefined ? { unreadCount: current.unreadCount } : {}),
       managerArchived: managerMetadataByChatJid.get(mapping.chatJid)?.archived ?? current?.managerArchived ?? false,
       source: current ? "mixed" : "routed",
@@ -91,7 +94,7 @@ export function buildChatSummaries(
       updatedAt,
       deliveryCount: (current?.deliveryCount ?? 0) + 1,
       failedCount: (current?.failedCount ?? 0) + (delivery.status === "failed" ? 1 : 0),
-      messageCount: (current?.messageCount ?? 0) + countDeliveryMessages(delivery),
+      messageCount: actualMessageCounts.get(delivery.chatJid) ?? current?.messageCount ?? 0,
       ...(current?.unreadCount !== undefined ? { unreadCount: current.unreadCount } : {}),
       managerArchived: managerMetadataByChatJid.get(delivery.chatJid)?.archived ?? current?.managerArchived ?? false,
       source: current?.source === "synced" || current?.source === "mixed" ? "mixed" : "routed",
@@ -110,26 +113,23 @@ export function buildChatSummaries(
         updatedAt: message.timestamp,
         deliveryCount: 0,
         failedCount: 0,
-        messageCount: syncedMessageCounts.get(message.chatJid) ?? 1,
+        messageCount: actualMessageCounts.get(message.chatJid) ?? 0,
         managerArchived: managerMetadataByChatJid.get(message.chatJid)?.archived ?? false,
         source: "synced",
         ...(message.text ? { lastText: message.text } : {}),
       });
-      appliedSyncedMessageCounts.add(message.chatJid);
       continue;
     }
 
     const messageIsNewer = Date.parse(message.timestamp) >= Date.parse(current.updatedAt);
-    const shouldApplySyncedCount = !appliedSyncedMessageCounts.has(message.chatJid);
     chats.set(message.chatJid, {
       ...current,
       updatedAt: maxTimestamp(current.updatedAt, message.timestamp),
-      messageCount: shouldApplySyncedCount ? current.messageCount + (syncedMessageCounts.get(message.chatJid) ?? 0) : current.messageCount,
+      messageCount: actualMessageCounts.get(message.chatJid) ?? current.messageCount,
       managerArchived: managerMetadataByChatJid.get(message.chatJid)?.archived ?? current.managerArchived,
       source: current.source === "routed" ? "mixed" : current.source,
       ...(messageIsNewer && message.text ? { lastText: message.text } : {}),
     });
-    appliedSyncedMessageCounts.add(message.chatJid);
   }
 
   return [...chats.values()].sort((a, b) => Date.parse(b.updatedAt) - Date.parse(a.updatedAt));
@@ -177,10 +177,6 @@ export function buildContactDisplayIndex(
   }
 
   return index;
-}
-
-export function countDeliveryMessages(delivery: DeliveryRecord): number {
-  return Number(Boolean(delivery.inboundText?.trim())) + Number(Boolean(delivery.outboundText.trim()));
 }
 
 export function buildChatMessages(
@@ -292,10 +288,29 @@ function removeUndefined<T extends Record<string, unknown>>(value: T): Partial<T
   return Object.fromEntries(Object.entries(value).filter(([, item]) => item !== undefined)) as Partial<T>;
 }
 
-function countMessagesByChat(messages: WhatsAppSyncedMessage[]) {
+function countActualMessagesByChat(
+  deliveries: DeliveryRecord[],
+  syncedMessages: WhatsAppSyncedMessage[],
+  mediaAssets: WhatsAppMediaAsset[],
+) {
+  const chatJids = new Set<string>();
+  for (const delivery of deliveries) {
+    chatJids.add(delivery.chatJid);
+  }
+  for (const message of syncedMessages) {
+    chatJids.add(message.chatJid);
+  }
+
   const counts = new Map<string, number>();
-  for (const message of messages) {
-    counts.set(message.chatJid, (counts.get(message.chatJid) ?? 0) + 1);
+  for (const chatJid of chatJids) {
+    const messages = buildChatMessages(
+      deliveries.filter((delivery) => delivery.chatJid === chatJid),
+      syncedMessages.filter((message) => message.chatJid === chatJid),
+      [],
+      [],
+      mediaAssets.filter((asset) => asset.chatJid === chatJid),
+    );
+    counts.set(chatJid, messages.filter((message) => message.kind === "message").length);
   }
 
   return counts;

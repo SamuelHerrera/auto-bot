@@ -57,6 +57,9 @@ export function App() {
   const [ruleLabel, setRuleLabel] = useState("");
   const [accountAliasDrafts, setAccountAliasDrafts] = useState<Record<string, string>>({});
   const accountsRef = useRef(accounts);
+  const pendingRefreshScopesRef = useRef<Set<RefreshScope>>(new Set());
+  const refreshTimerRef = useRef<number | null>(null);
+  const refreshInFlightRef = useRef(false);
   const {
     clearLinkSession,
     isLinkDialogOpen,
@@ -107,26 +110,72 @@ export function App() {
   useEffect(() => {
     const events = new EventSource(buildEventUrl());
     events.addEventListener("accounts", () => {
-      void refreshData(false, false, ["accounts"]);
+      queueRefreshData(["accounts"]);
     });
     events.addEventListener("activity", () => {
-      void refreshData(false, false, ["activity"]);
+      queueRefreshData(["activity"]);
     });
     events.addEventListener("rules", () => {
-      void refreshData(false, false, ["rules"]);
+      queueRefreshData(["rules"]);
     });
     events.addEventListener("logs", () => {
-      void refreshData(false, false, ["logs"]);
+      queueRefreshData(["logs"]);
     });
     events.addEventListener("sync", () => {
-      void refreshData(false, false);
+      queueRefreshData(["accounts", "activity", "rules", "logs"]);
     });
     events.onerror = () => {
       setStatusMessage("Live updates reconnecting.");
     };
 
-    return () => events.close();
+    return () => {
+      events.close();
+      if (refreshTimerRef.current !== null) {
+        window.clearTimeout(refreshTimerRef.current);
+        refreshTimerRef.current = null;
+      }
+    };
   }, []);
+
+  function queueRefreshData(scopes: RefreshScope[], delayMs = 150) {
+    for (const scope of scopes) {
+      pendingRefreshScopesRef.current.add(scope);
+    }
+
+    if (refreshTimerRef.current !== null) {
+      window.clearTimeout(refreshTimerRef.current);
+    }
+
+    refreshTimerRef.current = window.setTimeout(() => {
+      refreshTimerRef.current = null;
+      void flushQueuedRefresh();
+    }, delayMs);
+  }
+
+  async function flushQueuedRefresh() {
+    if (refreshInFlightRef.current) {
+      if (pendingRefreshScopesRef.current.size > 0) {
+        queueRefreshData([], 50);
+      }
+      return;
+    }
+
+    const scopes = [...pendingRefreshScopesRef.current];
+    pendingRefreshScopesRef.current.clear();
+    if (scopes.length === 0) {
+      return;
+    }
+
+    refreshInFlightRef.current = true;
+    try {
+      await refreshData(false, false, scopes);
+    } finally {
+      refreshInFlightRef.current = false;
+      if (pendingRefreshScopesRef.current.size > 0) {
+        queueRefreshData([], 0);
+      }
+    }
+  }
 
   async function refreshData(
     showMessage = true,
@@ -506,8 +555,9 @@ export function App() {
         syncedMessages,
         activeContactDisplayIndex,
         managerChatMetadata,
+        mediaAssets,
       ),
-    [activeAccountId, activeContactDisplayIndex, deliveries, managerChatMetadata, mappings, syncedChats, syncedMessages],
+    [activeAccountId, activeContactDisplayIndex, deliveries, managerChatMetadata, mappings, mediaAssets, syncedChats, syncedMessages],
   );
   useEffect(() => {
     setActiveChatJid((currentChatJid) => {
