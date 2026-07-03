@@ -53,19 +53,17 @@ button:disabled {
   height: 100dvh;
   min-height: 0;
   overflow: hidden;
-  padding: 24px;
 }
 
 .topbar {
   align-items: center;
-  border-bottom: 1px solid #dce3dd;
-  display: flex;
+  display: grid;
   gap: 16px;
+  grid-template-columns: minmax(180px, auto) minmax(0, 1fr) auto;
   justify-content: space-between;
-  margin-bottom: 14px;
   min-height: 58px;
   min-width: 0;
-  padding-block: 6px 12px;
+  padding: 6px;
 }
 
 .brand-lockup {
@@ -1330,7 +1328,7 @@ button {
 }
 
 .chat-list {
-  display: grid;
+  display: block;
   flex: 1 1 auto;
   min-height: 0;
   overflow: auto;
@@ -1463,10 +1461,14 @@ button {
 }
 
 .branding-form {
+  align-content: start;
+  align-self: center;
+  justify-self: center;
   display: grid;
-  gap: 16px;
-  max-width: 720px;
-  padding: 16px;
+  gap: 14px;
+  max-width: 640px;
+  padding: 18px;
+  width: 100%;
 }
 
 .branding-preview {
@@ -1474,16 +1476,16 @@ button {
   border: 1px solid #e5ebe6;
   display: flex;
   gap: 12px;
-  min-height: 72px;
-  padding: 14px;
+  min-height: 58px;
+  padding: 10px 12px;
 }
 
 .branding-preview img {
   display: block;
   flex: 0 0 auto;
-  height: 40px;
+  height: 34px;
   object-fit: contain;
-  width: 40px;
+  width: 34px;
 }
 
 .branding-preview strong {
@@ -1496,6 +1498,31 @@ button {
   display: flex;
   flex-wrap: wrap;
   gap: 10px;
+}
+
+.branding-form .field {
+  gap: 6px;
+}
+
+.branding-form .field span {
+  font-size: 0.82rem;
+  font-weight: 750;
+}
+
+.branding-form input {
+  min-height: 38px;
+  padding: 8px 10px;
+}
+
+.branding-form input[type="file"] {
+  background: #ffffff;
+  padding: 7px 10px;
+}
+
+.branding-form .icon-button {
+  min-height: 38px;
+  min-width: 38px;
+  padding: 8px;
 }
 
 .audit-log-list {
@@ -1799,12 +1826,34 @@ button {
   }
 }
 
+@media (max-width: 900px) {
+  .topbar {
+    align-items: center;
+    gap: 10px 12px;
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+
+  .workspace-tabs {
+    grid-column: 1 / -1;
+    grid-row: 2;
+    width: 100%;
+  }
+
+  .topbar-actions {
+    display: grid;
+    grid-column: 2;
+    grid-row: 1;
+    grid-template-columns: auto auto auto;
+    justify-content: end;
+    width: auto;
+  }
+}
+
 @media (max-width: 700px) {
   .shell {
     padding: 14px;
   }
 
-  .topbar,
   .account-summary,
   .account-heading-actions,
   .dialog-header,
@@ -1812,6 +1861,31 @@ button {
   .retry-row-header {
     align-items: stretch;
     flex-direction: column;
+  }
+
+  .topbar {
+    align-items: center;
+    gap: 10px 12px;
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+
+  .brand-lockup {
+    min-width: 0;
+  }
+
+  .brand-lockup img {
+    height: 30px;
+    width: 30px;
+  }
+
+  .workspace-tabs {
+    grid-column: 1 / -1;
+    grid-row: 2;
+  }
+
+  .topbar-actions {
+    grid-column: 2;
+    grid-row: 1;
   }
 
   .inline-form,
@@ -1828,7 +1902,6 @@ button {
 
   .brand-lockup,
   .workspace-tabs,
-  .topbar-actions,
   .header-status-badge,
   .header-link-form {
     width: 100%;
@@ -1836,7 +1909,9 @@ button {
 
   .topbar-actions {
     display: grid;
-    grid-template-columns: auto minmax(0, 1fr) auto;
+    grid-template-columns: auto auto auto;
+    justify-content: end;
+    width: auto;
   }
 
   .number-header {
@@ -1852,7 +1927,6 @@ button {
     order: 3;
   }
 
-  .topbar-actions button,
   .header-link-form button {
     width: 100%;
   }
