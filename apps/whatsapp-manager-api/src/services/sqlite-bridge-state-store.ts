@@ -546,6 +546,8 @@ function rowToSession(row: unknown): HermesSession {
 function rowToDelivery(row: unknown): DeliveryRecord {
   const value = row as Record<string, string | number | null>;
   const failureStage = value.failure_stage;
+  const error = value.error ? String(value.error) : undefined;
+  const isNumberRuleBlocked = error?.startsWith("Blocked by number rule") ?? false;
   return {
     id: String(value.id),
     accountId: String(value.account_id),
@@ -555,10 +557,10 @@ function rowToDelivery(row: unknown): DeliveryRecord {
     inboundMessageId: String(value.inbound_message_id),
     ...(value.inbound_text ? { inboundText: String(value.inbound_text) } : {}),
     outboundText: String(value.outbound_text),
-    status: String(value.status) as DeliveryRecord["status"],
+    status: isNumberRuleBlocked ? "ignored" : String(value.status) as DeliveryRecord["status"],
     attempts: Number(value.attempts),
-    ...(failureStage === "hermes" || failureStage === "whatsapp" ? { failureStage } : {}),
-    ...(value.error ? { error: String(value.error) } : {}),
+    ...(!isNumberRuleBlocked && (failureStage === "hermes" || failureStage === "whatsapp") ? { failureStage } : {}),
+    ...(error ? { error } : {}),
     createdAt: String(value.created_at),
     updatedAt: String(value.updated_at),
   };

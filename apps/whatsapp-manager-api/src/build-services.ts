@@ -82,7 +82,7 @@ export function buildServices(config: AppConfig): AppServices {
       recordBlockedNumberDelivery(deliveryStore, event, decision.reason ?? "Blocked by number rule");
       recordAuditLog({
         action: "message.inbound",
-        outcome: "failure",
+        outcome: "ignored",
         resourceType: "whatsapp-message",
         resourceId: event.messageId,
         details: {

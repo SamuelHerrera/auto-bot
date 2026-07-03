@@ -180,15 +180,15 @@ function describeBrandingUpdate(entry: AuditLogRecord): AuditLogDisplay {
 }
 
 function describeIconChange(previousCustomIcon: boolean | undefined, hasCustomIcon: boolean | undefined) {
-  if (typeof hasCustomIcon !== "boolean") {
+  if (typeof previousCustomIcon !== "boolean" || typeof hasCustomIcon !== "boolean") {
     return "";
   }
 
-  if (typeof previousCustomIcon === "boolean" && previousCustomIcon !== hasCustomIcon) {
+  if (previousCustomIcon !== hasCustomIcon) {
     return hasCustomIcon ? "added custom icon" : "restored default icon";
   }
 
-  return hasCustomIcon ? "custom icon" : "";
+  return "";
 }
 
 function describeInboundMessage(entry: AuditLogRecord): AuditLogDisplay {

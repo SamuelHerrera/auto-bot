@@ -3,6 +3,7 @@ import { FormEvent, useCallback, useEffect, useRef, useState } from "react";
 import { EmptyState, LinkAccountDialog, LogsView, NumberChooserPanel, NumberWorkspace, SettingsView, TopBar } from "./components";
 import { accountMatchesSearch, findCompletedLinkedAccount, isPendingAccountId } from "./domain/accounts";
 import { buildChatMessages, buildChatSummaries } from "./domain/chats";
+import { isFailedDelivery } from "./domain/deliveries";
 import type { AuditLogRecord, BrandingSettings, DeliveryRecord, NumberRule, NumberRuleAction, NumberRuleMatchType, NumberSubview, RefreshScope, SessionMapping, WhatsAppAccount } from "./domain/models";
 import { useLinkSession } from "./hooks/use-link-session";
 import { useWorkspaceTabs } from "./hooks/use-workspace-tabs";
@@ -399,7 +400,7 @@ export function App() {
     accounts.find((account) => account.accountId === activeAccountId && account.qrCode) ??
     accounts.find((account) => account.qrCode) ??
     null;
-  const failedDeliveries = deliveries.filter((delivery) => delivery.status === "failed");
+  const failedDeliveries = deliveries.filter(isFailedDelivery);
   const activeAccountFailedDeliveries = failedDeliveries.filter((delivery) => delivery.accountId === activeAccountId);
   const statusTone = errorMessage ? "error" : isBusy ? "syncing" : "live";
 

@@ -18,6 +18,7 @@ import { SqliteBridgeStateStore } from "./services/sqlite-bridge-state-store.js"
 import type { WhatsAppGateway } from "./services/whatsapp-service.js";
 import type { AppConfig } from "./config.js";
 import type {
+  AuditLogInput,
   HermesReply,
   HermesSession,
   OutboundWhatsAppMessage,
@@ -691,6 +692,61 @@ describe("whatsapp-manager-api", () => {
     }
   });
 
+  it("reports number-rule blocked deliveries as ignored even when older rows were stored as failures", async () => {
+    const dir = mkdtempSync(path.join(tmpdir(), "auto-bot-blocked-delivery-normalize-"));
+    const blockedConfig = loadConfig({
+      ...process.env,
+      API_TOKEN: "test-token",
+      BRIDGE_DATABASE_FILE: path.join(dir, "bridge-state.sqlite"),
+      BRIDGE_STATE_FILE: "",
+      DATABASE_URL: "postgres://postgres:postgres@127.0.0.1:5432/auto_bot",
+      NODE_ENV: "test",
+      PORT: "3000",
+    });
+
+    try {
+      const services = createTestServices(blockedConfig);
+      app = createApp({ config: blockedConfig, services });
+      const now = new Date().toISOString();
+
+      services.deliveryStore?.saveDelivery({
+        id: "ops-main:12345@s.whatsapp.net:wamid.blocked-legacy",
+        accountId: "ops-main",
+        chatJid: "12345@s.whatsapp.net",
+        chatType: "direct",
+        sessionKey: "whatsapp:ops-main:direct:12345@s.whatsapp.net",
+        inboundMessageId: "wamid.blocked-legacy",
+        inboundText: "blocked",
+        outboundText: "",
+        status: "failed",
+        attempts: 0,
+        failureStage: "hermes",
+        error: "Blocked by number rule: Default deny all",
+        createdAt: now,
+        updatedAt: now,
+      });
+
+      const list = await app.inject({
+        method: "GET",
+        url: "/deliveries",
+        headers: {
+          authorization: "Bearer test-token",
+        },
+      });
+
+      expect(list.statusCode).toBe(200);
+      expect(list.json().items[0]).toEqual(
+        expect.objectContaining({
+          status: "ignored",
+          error: "Blocked by number rule: Default deny all",
+        }),
+      );
+      expect(list.json().items[0]).not.toHaveProperty("failureStage");
+    } finally {
+      rmSync(dir, { force: true, recursive: true });
+    }
+  });
+
   it("records failed Hermes turns and retries them through the API", async () => {
     const dir = mkdtempSync(path.join(tmpdir(), "auto-bot-hermes-retry-"));
     const retryConfig = loadConfig({
@@ -1055,6 +1111,22 @@ describe("whatsapp-manager-api", () => {
       });
       expect(retry.statusCode).toBe(409);
       expect(retry.json()).toEqual({ error: expect.stringContaining("Blocked by number rule") });
+
+      const logs = await app.inject({
+        method: "GET",
+        url: "/audit-logs?limit=10",
+        headers: {
+          authorization: "Bearer test-token",
+        },
+      });
+      expect(logs.statusCode).toBe(200);
+      expect(logs.json().items).toEqual([
+        expect.objectContaining({
+          action: "message.inbound",
+          outcome: "ignored",
+          resourceId: "wamid.denied",
+        }),
+      ]);
     } finally {
       rmSync(dir, { force: true, recursive: true });
     }
@@ -1353,6 +1425,13 @@ function createTestServices(config: AppConfig): AppServices {
     bridgeStore instanceof SqliteBridgeStateStore ? bridgeStore : undefined,
   );
 
+  function recordAuditLog(input: AuditLogInput) {
+    if (bridgeStore instanceof SqliteBridgeStateStore) {
+      bridgeStore.recordAuditLog(input);
+      eventBus.publish("logs");
+    }
+  }
+
   whatsappGateway.onStatusChange((status) => {
     const createdDefaultRule = ensureDefaultDenyAllNumberRule(
       bridgeStore instanceof SqliteBridgeStateStore ? bridgeStore : undefined,
@@ -1370,6 +1449,17 @@ function createTestServices(config: AppConfig): AppServices {
     const decision = evaluateNumberRules(numberRuleStore, event);
     if (!decision.allowed) {
       recordBlockedNumberDelivery(deliveryStore, event, decision.reason ?? "Blocked by number rule");
+      recordAuditLog({
+        action: "message.inbound",
+        outcome: "ignored",
+        resourceType: "whatsapp-message",
+        resourceId: event.messageId,
+        details: {
+          accountId: event.accountId,
+          chatJid: event.chatJid,
+          reason: decision.reason ?? "Blocked by number rule",
+        },
+      });
       eventBus.publish("activity");
       return;
     }
