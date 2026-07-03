@@ -59,6 +59,7 @@ button:disabled {
 .brand-lockup {
   align-items: center;
   display: flex;
+  flex: 0 1 auto;
   gap: 12px;
   min-width: 0;
 }
@@ -363,14 +364,21 @@ button:disabled {
 }
 
 .workspace-tabs {
-  align-items: end;
-  background: #f7f9f7;
-  border-bottom: 1px solid #dce3dd;
+  align-items: center;
   display: flex;
+  flex: 1 1 auto;
   gap: 4px;
-  min-height: 48px;
+  min-height: 42px;
+  min-width: 0;
   overflow-x: auto;
-  padding: 8px 8px 0;
+  overscroll-behavior-x: contain;
+  padding: 0;
+  scrollbar-width: none;
+  touch-action: pan-x;
+}
+
+.workspace-tabs::-webkit-scrollbar {
+  display: none;
 }
 
 .workspace-tab {
@@ -450,10 +458,8 @@ button:disabled {
 
 .workspace-tab-active {
   background: #ffffff;
-  border-color: #cfe6d8;
-  border-bottom-color: #ffffff;
+  border-color: #dce3dd;
   color: #09643f;
-  margin-bottom: -1px;
 }
 
 .tab-close {
@@ -1743,6 +1749,7 @@ button {
   }
 
   .brand-lockup,
+  .workspace-tabs,
   .topbar-actions,
   .header-status-badge,
   .header-link-form {

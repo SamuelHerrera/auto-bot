@@ -161,6 +161,7 @@ export function App() {
   const linkingStatusRef = useRef(linkingStatus);
   const linkingBaselineAccountIdsRef = useRef(linkingBaselineAccountIds);
   const linkingStartedAtRef = useRef<string | null>(null);
+  const workspaceTabsRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     accountsRef.current = accounts;
@@ -220,6 +221,37 @@ export function App() {
       openAccountTabs,
     });
   }, [activeAccountId, activeTabId, isLogsTabOpen, isSettingsTabOpen, openAccountTabs]);
+
+  useEffect(() => {
+    const tabStrip = workspaceTabsRef.current;
+
+    if (!tabStrip) {
+      return;
+    }
+
+    const scrollElement = tabStrip;
+
+    function handleWorkspaceTabsWheel(event: WheelEvent) {
+      const horizontalDelta = Math.abs(event.deltaX) > Math.abs(event.deltaY) ? event.deltaX : event.deltaY;
+
+      if (!horizontalDelta || scrollElement.scrollWidth <= scrollElement.clientWidth) {
+        return;
+      }
+
+      const nextScrollLeft = Math.max(0, Math.min(scrollElement.scrollLeft + horizontalDelta, scrollElement.scrollWidth - scrollElement.clientWidth));
+
+      if (nextScrollLeft !== scrollElement.scrollLeft) {
+        scrollElement.scrollLeft = nextScrollLeft;
+        event.preventDefault();
+      }
+    }
+
+    scrollElement.addEventListener("wheel", handleWorkspaceTabsWheel, { passive: false });
+
+    return () => {
+      scrollElement.removeEventListener("wheel", handleWorkspaceTabsWheel);
+    };
+  }, []);
 
   useEffect(() => {
     if (!hasLoadedAccounts) {
@@ -674,6 +706,62 @@ export function App() {
   const failedDeliveries = deliveries.filter((delivery) => delivery.status === "failed");
   const activeAccountFailedDeliveries = failedDeliveries.filter((delivery) => delivery.accountId === activeAccountId);
   const statusTone = errorMessage ? "error" : isBusy ? "syncing" : "live";
+  const workspaceTabs = (
+    <div ref={workspaceTabsRef} className="workspace-tabs" role="tablist" aria-label="Open workspaces">
+      {tabAccounts.map((account) => (
+        <div
+          key={account.accountId}
+          className={`workspace-tab${activeTabId === account.accountId ? " workspace-tab-active" : ""}`}
+          title={getAccountStatusDetail(account)}
+        >
+          <button
+            className="workspace-tab-main"
+            onClick={() => {
+              setActiveTabId(account.accountId);
+              setActiveAccountId(account.accountId);
+              setActiveChatJid("");
+            }}
+          >
+            <span className={`status-dot status-dot-${account.status}`} />
+            <AccountTabLabel account={account} />
+          </button>
+          <IconButton icon="mdi:close" label={`Close ${account.accountId}`} className="tab-close" variant="text" onClick={() => closeAccountTab(account.accountId)} />
+        </div>
+      ))}
+      {isSettingsTabOpen ? (
+        <div className={`workspace-tab${activeTabId === "settings" ? " workspace-tab-active" : ""}`}>
+          <button
+            className="workspace-tab-main"
+            onClick={() => {
+              setActiveTabId("settings");
+            }}
+            aria-label="Settings"
+            title="Settings"
+          >
+            <Icon icon="mdi:cog-outline" aria-hidden="true" />
+            <span>Settings</span>
+          </button>
+          <IconButton icon="mdi:close" label="Close settings" className="tab-close" variant="text" onClick={closeSettingsTab} />
+        </div>
+      ) : null}
+      {isLogsTabOpen ? (
+        <div className={`workspace-tab${activeTabId === "logs" ? " workspace-tab-active" : ""}`}>
+          <button
+            className="workspace-tab-main"
+            onClick={() => {
+              setActiveTabId("logs");
+            }}
+            aria-label="Logs"
+            title="Logs"
+          >
+            <Icon icon="mdi:clipboard-text-clock-outline" aria-hidden="true" />
+            <span>Logs</span>
+          </button>
+          <IconButton icon="mdi:close" label="Close logs" className="tab-close" variant="text" onClick={closeLogsTab} />
+        </div>
+      ) : null}
+    </div>
+  );
 
   return (
     <div className="shell">
@@ -682,6 +770,7 @@ export function App() {
           <img src={branding.iconSrc} alt="" aria-hidden="true" />
           <h1>{branding.title}</h1>
         </div>
+        {workspaceTabs}
         <div className="topbar-actions">
           <StatusIndicator detail={errorMessage || statusMessage} tone={statusTone} />
           <IconButton icon="mdi:magnify" label="Find number" className="number-select-button" variant="secondary" onClick={() => setIsNumberPanelOpen(true)}>
@@ -713,61 +802,6 @@ export function App() {
 
       <main className="admin-layout">
         <section className="admin-panel">
-          <div className="workspace-tabs" role="tablist" aria-label="Open workspaces">
-            {tabAccounts.map((account) => (
-              <div
-                key={account.accountId}
-                className={`workspace-tab${activeTabId === account.accountId ? " workspace-tab-active" : ""}`}
-                title={getAccountStatusDetail(account)}
-              >
-                <button
-                  className="workspace-tab-main"
-                  onClick={() => {
-                    setActiveTabId(account.accountId);
-                    setActiveAccountId(account.accountId);
-                    setActiveChatJid("");
-                  }}
-                >
-                  <span className={`status-dot status-dot-${account.status}`} />
-                  <AccountTabLabel account={account} />
-                </button>
-                <IconButton icon="mdi:close" label={`Close ${account.accountId}`} className="tab-close" variant="text" onClick={() => closeAccountTab(account.accountId)} />
-              </div>
-            ))}
-            {isSettingsTabOpen ? (
-              <div className={`workspace-tab${activeTabId === "settings" ? " workspace-tab-active" : ""}`}>
-                <button
-                  className="workspace-tab-main"
-                  onClick={() => {
-                    setActiveTabId("settings");
-                  }}
-                  aria-label="Settings"
-                  title="Settings"
-                >
-                  <Icon icon="mdi:cog-outline" aria-hidden="true" />
-                  <span>Settings</span>
-                </button>
-                <IconButton icon="mdi:close" label="Close settings" className="tab-close" variant="text" onClick={closeSettingsTab} />
-              </div>
-            ) : null}
-            {isLogsTabOpen ? (
-              <div className={`workspace-tab${activeTabId === "logs" ? " workspace-tab-active" : ""}`}>
-                <button
-                  className="workspace-tab-main"
-                  onClick={() => {
-                    setActiveTabId("logs");
-                  }}
-                  aria-label="Logs"
-                  title="Logs"
-                >
-                  <Icon icon="mdi:clipboard-text-clock-outline" aria-hidden="true" />
-                  <span>Logs</span>
-                </button>
-                <IconButton icon="mdi:close" label="Close logs" className="tab-close" variant="text" onClick={closeLogsTab} />
-              </div>
-            ) : null}
-          </div>
-
           {activeTabId === "settings" && isSettingsTabOpen ? (
             <SettingsView
               branding={branding}
