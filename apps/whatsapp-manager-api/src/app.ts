@@ -239,12 +239,18 @@ export function createApp({ config, services = buildServices(config) }: CreateAp
     return mapping;
   });
 
-  app.get("/sessions", async () => ({
-    items: await services.router.getMappings(),
+  app.get<{ Querystring: { accountId?: string; chatJid?: string } }>("/sessions", async (request) => ({
+    items: await services.router.getMappings({
+      ...(request.query.accountId ? { accountId: request.query.accountId } : {}),
+      ...(request.query.chatJid ? { chatJid: request.query.chatJid } : {}),
+    }),
   }));
 
-  app.get("/deliveries", async () => ({
-    items: services.deliveryStore?.listDeliveries() ?? [],
+  app.get<{ Querystring: { accountId?: string; chatJid?: string } }>("/deliveries", async (request) => ({
+    items: services.deliveryStore?.listDeliveries({
+      ...(request.query.accountId ? { accountId: request.query.accountId } : {}),
+      ...(request.query.chatJid ? { chatJid: request.query.chatJid } : {}),
+    }) ?? [],
   }));
 
   app.get<{ Querystring: { accountId?: string } }>("/manager/chats", async (request) => ({
@@ -296,6 +302,10 @@ export function createApp({ config, services = buildServices(config) }: CreateAp
       ...(request.query.accountId ? { accountId: request.query.accountId } : {}),
       ...(request.query.chatJid ? { chatJid: request.query.chatJid } : {}),
     }) ?? [],
+  }));
+
+  app.get<{ Querystring: { accountId?: string } }>("/whatsapp/sync/message-counts", async (request) => ({
+    items: services.whatsappSyncStore?.listWhatsAppMessageCounts(request.query.accountId) ?? [],
   }));
 
   app.get<{ Querystring: SyncListQuery & { chatJid?: string } }>("/whatsapp/sync/message-receipts", async (request) => ({

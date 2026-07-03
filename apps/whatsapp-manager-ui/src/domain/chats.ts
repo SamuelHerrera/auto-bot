@@ -6,6 +6,7 @@ import type {
   SessionMapping,
   WhatsAppContact,
   WhatsAppLidMapping,
+  WhatsAppMessageCount,
   WhatsAppMediaAsset,
   WhatsAppMessageReceipt,
   WhatsAppMessageUpdate,
@@ -24,6 +25,7 @@ export function buildChatSummaries(
   contactDisplayIndex: ContactDisplayIndex = new Map(),
   managerChatMetadata: ManagerChatMetadata[] = [],
   mediaAssets: WhatsAppMediaAsset[] = [],
+  syncedMessageCounts: WhatsAppMessageCount[] = [],
 ): ChatSummary[] {
   if (!accountId) {
     return [];
@@ -34,6 +36,7 @@ export function buildChatSummaries(
     deliveries.filter((item) => item.accountId === accountId && item.chatType === "direct"),
     syncedMessages.filter((item) => item.accountId === accountId),
     mediaAssets.filter((item) => item.accountId === accountId),
+    syncedMessageCounts.filter((item) => item.accountId === accountId),
   );
   const managerMetadataByChatJid = new Map(
     managerChatMetadata
@@ -292,25 +295,34 @@ function countActualMessagesByChat(
   deliveries: DeliveryRecord[],
   syncedMessages: WhatsAppSyncedMessage[],
   mediaAssets: WhatsAppMediaAsset[],
+  syncedMessageCounts: WhatsAppMessageCount[],
 ) {
   const chatJids = new Set<string>();
+  const counts = new Map<string, number>();
+  for (const item of syncedMessageCounts) {
+    chatJids.add(item.chatJid);
+    counts.set(item.chatJid, item.messageCount);
+  }
   for (const delivery of deliveries) {
     chatJids.add(delivery.chatJid);
   }
   for (const message of syncedMessages) {
     chatJids.add(message.chatJid);
   }
-
-  const counts = new Map<string, number>();
   for (const chatJid of chatJids) {
-    const messages = buildChatMessages(
-      deliveries.filter((delivery) => delivery.chatJid === chatJid),
-      syncedMessages.filter((message) => message.chatJid === chatJid),
+    const chatSyncedMessages = syncedMessages.filter((message) => message.chatJid === chatJid);
+    if (counts.has(chatJid) && chatSyncedMessages.length === 0) {
+      continue;
+    }
+
+    const chatMessages = buildChatMessages(
+      counts.has(chatJid) ? [] : deliveries.filter((delivery) => delivery.chatJid === chatJid),
+      chatSyncedMessages,
       [],
       [],
       mediaAssets.filter((asset) => asset.chatJid === chatJid),
     );
-    counts.set(chatJid, messages.filter((message) => message.kind === "message").length);
+    counts.set(chatJid, chatMessages.filter((message) => message.kind === "message").length);
   }
 
   return counts;

@@ -17,6 +17,7 @@ import type {
   WhatsAppAccount,
   WhatsAppContact,
   WhatsAppLidMapping,
+  WhatsAppMessageCount,
   WhatsAppMediaAsset,
   WhatsAppMessageReceipt,
   WhatsAppMessageUpdate,
@@ -39,6 +40,7 @@ export function App() {
   const [lidMappings, setLidMappings] = useState<WhatsAppLidMapping[]>([]);
   const [syncedChats, setSyncedChats] = useState<WhatsAppSyncedChat[]>([]);
   const [syncedMessages, setSyncedMessages] = useState<WhatsAppSyncedMessage[]>([]);
+  const [syncedMessageCounts, setSyncedMessageCounts] = useState<WhatsAppMessageCount[]>([]);
   const [messageReceipts, setMessageReceipts] = useState<WhatsAppMessageReceipt[]>([]);
   const [messageUpdates, setMessageUpdates] = useState<WhatsAppMessageUpdate[]>([]);
   const [mediaAssets, setMediaAssets] = useState<WhatsAppMediaAsset[]>([]);
@@ -60,6 +62,12 @@ export function App() {
   const pendingRefreshScopesRef = useRef<Set<RefreshScope>>(new Set());
   const refreshTimerRef = useRef<number | null>(null);
   const refreshInFlightRef = useRef(false);
+  const activeAccountIdRef = useRef("");
+  const activeNumberViewRef = useRef<NumberSubview>("home");
+  const activeChatJidRef = useRef("");
+  const hasRequestedInitialDataRef = useRef(false);
+  const loadedActivityAccountIdsRef = useRef<Set<string>>(new Set());
+  const loadedChatDetailKeysRef = useRef<Set<string>>(new Set());
   const {
     clearLinkSession,
     isLinkDialogOpen,
@@ -99,12 +107,29 @@ export function App() {
   }, [accounts]);
 
   useEffect(() => {
+    activeAccountIdRef.current = activeAccountId;
+  }, [activeAccountId]);
+
+  useEffect(() => {
+    activeChatJidRef.current = activeChatJid;
+  }, [activeChatJid]);
+
+  useEffect(() => {
+    activeNumberViewRef.current = activeNumberView;
+  }, [activeNumberView]);
+
+  useEffect(() => {
     document.title = branding.title;
     setFavicon(branding.iconSrc);
   }, [branding]);
 
   useEffect(() => {
-    void refreshData(false);
+    if (hasRequestedInitialDataRef.current) {
+      return;
+    }
+
+    hasRequestedInitialDataRef.current = true;
+    void refreshData(false, false, ["accounts", "rules", "logs"]);
   }, []);
 
   useEffect(() => {
@@ -113,7 +138,7 @@ export function App() {
       queueRefreshData(["accounts"]);
     });
     events.addEventListener("activity", () => {
-      queueRefreshData(["activity"]);
+      queueRefreshData(["activity", "chat"]);
     });
     events.addEventListener("rules", () => {
       queueRefreshData(["rules"]);
@@ -122,7 +147,7 @@ export function App() {
       queueRefreshData(["logs"]);
     });
     events.addEventListener("sync", () => {
-      queueRefreshData(["accounts", "activity", "rules", "logs"]);
+      queueRefreshData(["accounts", "activity", "chat", "rules", "logs"]);
     });
     events.onerror = () => {
       setStatusMessage("Live updates reconnecting.");
@@ -136,6 +161,33 @@ export function App() {
       }
     };
   }, []);
+
+  useEffect(() => {
+    if (!activeAccountId) {
+      return;
+    }
+
+    if (loadedActivityAccountIdsRef.current.has(activeAccountId)) {
+      return;
+    }
+
+    loadedActivityAccountIdsRef.current.add(activeAccountId);
+    void refreshData(false, false, ["activity"]);
+  }, [activeAccountId]);
+
+  useEffect(() => {
+    if (!activeAccountId || !activeChatJid || activeNumberView !== "messages") {
+      return;
+    }
+
+    const chatDetailKey = `${activeAccountId}:${activeChatJid}`;
+    if (loadedChatDetailKeysRef.current.has(chatDetailKey)) {
+      return;
+    }
+
+    loadedChatDetailKeysRef.current.add(chatDetailKey);
+    void refreshData(false, false, ["chat"]);
+  }, [activeAccountId, activeChatJid, activeNumberView]);
 
   function queueRefreshData(scopes: RefreshScope[], delayMs = 150) {
     for (const scope of scopes) {
@@ -189,18 +241,25 @@ export function App() {
 
     try {
       const shouldRefreshAccounts = scopes.includes("accounts");
-      const shouldRefreshActivity = scopes.includes("activity");
+      const activityAccountId = activeAccountIdRef.current;
+      const chatAccountId = activeAccountIdRef.current;
+      const chatJid = activeChatJidRef.current;
+      const shouldRefreshActivity = scopes.includes("activity") && Boolean(activityAccountId);
+      const shouldRefreshChat = scopes.includes("chat") && activeNumberViewRef.current === "messages" && Boolean(chatAccountId && chatJid);
       const shouldRefreshRules = scopes.includes("rules");
       const shouldRefreshLogs = scopes.includes("logs");
+      const activityAccountQuery = shouldRefreshActivity ? toQueryString({ accountId: activityAccountId }) : "";
+      const chatQuery = shouldRefreshChat ? toQueryString({ accountId: chatAccountId, chatJid }) : "";
       const [
         accountResponse,
         mappingResponse,
         deliveryResponse,
         managerChatMetadataResponse,
         syncedChatResponse,
-        syncedMessageResponse,
         contactResponse,
         lidMappingResponse,
+        messageCountResponse,
+        syncedMessageResponse,
         receiptResponse,
         updateResponse,
         mediaAssetResponse,
@@ -209,16 +268,17 @@ export function App() {
         auditLogResponse,
       ] = await Promise.all([
         shouldRefreshAccounts ? request<{ items: WhatsAppAccount[] }>("/whatsapp/accounts") : Promise.resolve(null),
-        shouldRefreshActivity ? request<{ items: SessionMapping[] }>("/sessions") : Promise.resolve(null),
-        shouldRefreshActivity ? request<{ items: DeliveryRecord[] }>("/deliveries") : Promise.resolve(null),
-        shouldRefreshActivity ? request<{ items: ManagerChatMetadata[] }>("/manager/chats") : Promise.resolve(null),
-        shouldRefreshActivity ? request<{ items: WhatsAppSyncedChat[] }>("/whatsapp/sync/chats?limit=1000") : Promise.resolve(null),
-        shouldRefreshActivity ? request<{ items: WhatsAppSyncedMessage[] }>("/whatsapp/sync/messages?limit=1000") : Promise.resolve(null),
-        shouldRefreshActivity ? request<{ items: WhatsAppContact[] }>("/whatsapp/sync/contacts?limit=1000") : Promise.resolve(null),
-        shouldRefreshActivity ? request<{ items: WhatsAppLidMapping[] }>("/whatsapp/sync/lid-mappings?limit=1000") : Promise.resolve(null),
-        shouldRefreshActivity ? optionalRequest<{ items: WhatsAppMessageReceipt[] }>("/whatsapp/sync/message-receipts?limit=1000") : Promise.resolve(null),
-        shouldRefreshActivity ? optionalRequest<{ items: WhatsAppMessageUpdate[] }>("/whatsapp/sync/message-updates?limit=1000") : Promise.resolve(null),
-        shouldRefreshActivity ? optionalRequest<{ items: WhatsAppMediaAsset[] }>("/whatsapp/sync/media-assets?limit=1000") : Promise.resolve(null),
+        shouldRefreshActivity ? request<{ items: SessionMapping[] }>(`/sessions?${activityAccountQuery}`) : Promise.resolve(null),
+        shouldRefreshActivity ? request<{ items: DeliveryRecord[] }>(`/deliveries?${activityAccountQuery}`) : Promise.resolve(null),
+        shouldRefreshActivity ? request<{ items: ManagerChatMetadata[] }>(`/manager/chats?${activityAccountQuery}`) : Promise.resolve(null),
+        shouldRefreshActivity ? request<{ items: WhatsAppSyncedChat[] }>(`/whatsapp/sync/chats?limit=1000&${activityAccountQuery}`) : Promise.resolve(null),
+        shouldRefreshActivity ? request<{ items: WhatsAppContact[] }>(`/whatsapp/sync/contacts?limit=1000&${activityAccountQuery}`) : Promise.resolve(null),
+        shouldRefreshActivity ? request<{ items: WhatsAppLidMapping[] }>(`/whatsapp/sync/lid-mappings?limit=1000&${activityAccountQuery}`) : Promise.resolve(null),
+        shouldRefreshActivity ? request<{ items: WhatsAppMessageCount[] }>(`/whatsapp/sync/message-counts?${activityAccountQuery}`) : Promise.resolve(null),
+        shouldRefreshChat ? request<{ items: WhatsAppSyncedMessage[] }>(`/whatsapp/sync/messages?limit=1000&${chatQuery}`) : Promise.resolve(null),
+        shouldRefreshChat ? optionalRequest<{ items: WhatsAppMessageReceipt[] }>(`/whatsapp/sync/message-receipts?limit=1000&${chatQuery}`) : Promise.resolve(null),
+        shouldRefreshChat ? optionalRequest<{ items: WhatsAppMessageUpdate[] }>(`/whatsapp/sync/message-updates?limit=1000&${chatQuery}`) : Promise.resolve(null),
+        shouldRefreshChat ? optionalRequest<{ items: WhatsAppMediaAsset[] }>(`/whatsapp/sync/media-assets?limit=1000&${chatQuery}`) : Promise.resolve(null),
         shouldRefreshRules ? request<{ items: NumberRule[] }>("/number-rules") : Promise.resolve(null),
         shouldRefreshAccounts ? request<WhatsAppAccount>("/whatsapp/status") : Promise.resolve(null),
         shouldRefreshLogs ? request<{ items: AuditLogRecord[] }>("/audit-logs?limit=200") : Promise.resolve(null),
@@ -231,34 +291,37 @@ export function App() {
         setHasLoadedAccounts(true);
       }
       if (mappingResponse) {
-        setMappings(mappingResponse.items.filter((mapping) => mapping.chatType === "direct"));
+        setMappings((current) => replaceByAccount(current, activityAccountId, mappingResponse.items.filter((mapping) => mapping.chatType === "direct")));
       }
       if (deliveryResponse) {
-        setDeliveries(deliveryResponse.items.filter((delivery) => delivery.chatType === "direct"));
+        setDeliveries((current) => replaceByAccount(current, activityAccountId, deliveryResponse.items.filter((delivery) => delivery.chatType === "direct")));
       }
       if (managerChatMetadataResponse) {
-        setManagerChatMetadata(managerChatMetadataResponse.items);
+        setManagerChatMetadata((current) => replaceByAccount(current, activityAccountId, managerChatMetadataResponse.items));
       }
       if (syncedChatResponse) {
-        setSyncedChats(syncedChatResponse.items.filter((chat) => chat.chatType === "direct"));
-      }
-      if (syncedMessageResponse) {
-        setSyncedMessages(syncedMessageResponse.items);
+        setSyncedChats((current) => replaceByAccount(current, activityAccountId, syncedChatResponse.items.filter((chat) => chat.chatType === "direct")));
       }
       if (contactResponse) {
-        setContacts(contactResponse.items);
+        setContacts((current) => replaceByAccount(current, activityAccountId, contactResponse.items));
       }
       if (lidMappingResponse) {
-        setLidMappings(lidMappingResponse.items);
+        setLidMappings((current) => replaceByAccount(current, activityAccountId, lidMappingResponse.items));
+      }
+      if (messageCountResponse) {
+        setSyncedMessageCounts((current) => replaceByAccount(current, activityAccountId, messageCountResponse.items));
+      }
+      if (syncedMessageResponse) {
+        setSyncedMessages((current) => replaceByChat(current, chatAccountId, chatJid, syncedMessageResponse.items));
       }
       if (receiptResponse) {
-        setMessageReceipts(receiptResponse.items);
+        setMessageReceipts((current) => replaceByChat(current, chatAccountId, chatJid, receiptResponse.items));
       }
       if (updateResponse) {
-        setMessageUpdates(updateResponse.items);
+        setMessageUpdates((current) => replaceByChat(current, chatAccountId, chatJid, updateResponse.items));
       }
       if (mediaAssetResponse) {
-        setMediaAssets(mediaAssetResponse.items);
+        setMediaAssets((current) => replaceByChat(current, chatAccountId, chatJid, mediaAssetResponse.items));
       }
       if (ruleResponse) {
         setNumberRules(ruleResponse.items);
@@ -311,6 +374,24 @@ export function App() {
     } catch {
       return null;
     }
+  }
+
+  function toQueryString(params: Record<string, string>) {
+    return new URLSearchParams(params).toString();
+  }
+
+  function replaceByAccount<T extends { accountId: string }>(current: T[], accountId: string, items: T[]) {
+    return [
+      ...items,
+      ...current.filter((item) => item.accountId !== accountId),
+    ];
+  }
+
+  function replaceByChat<T extends { accountId: string; chatJid?: string }>(current: T[], accountId: string, chatJid: string, items: T[]) {
+    return [
+      ...items,
+      ...current.filter((item) => item.accountId !== accountId || item.chatJid !== chatJid),
+    ];
   }
 
   async function connectAccount(event: FormEvent<HTMLFormElement>) {
@@ -556,8 +637,9 @@ export function App() {
         activeContactDisplayIndex,
         managerChatMetadata,
         mediaAssets,
+        syncedMessageCounts,
       ),
-    [activeAccountId, activeContactDisplayIndex, deliveries, managerChatMetadata, mappings, mediaAssets, syncedChats, syncedMessages],
+    [activeAccountId, activeContactDisplayIndex, deliveries, managerChatMetadata, mappings, mediaAssets, syncedChats, syncedMessageCounts, syncedMessages],
   );
   useEffect(() => {
     setActiveChatJid((currentChatJid) => {

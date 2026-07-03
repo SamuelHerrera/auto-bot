@@ -19,6 +19,7 @@ import type {
   WhatsAppHistorySyncBatchRecord,
   WhatsAppLidMappingRecord,
   WhatsAppMediaAssetRecord,
+  WhatsAppMessageCountRecord,
   WhatsAppMessageReceiptRecord,
   WhatsAppMessageUpdateRecord,
   WhatsAppStoredMessageRecord,
@@ -131,10 +132,11 @@ export class SqliteBridgeStateStore
     }
   }
 
-  listDeliveries(): DeliveryRecord[] {
+  listDeliveries(input: { accountId?: string; chatJid?: string } = {}): DeliveryRecord[] {
+    const { clause, args } = syncWhereClause(input);
     return this.db
-      .prepare("SELECT * FROM delivery_records ORDER BY created_at DESC")
-      .all()
+      .prepare(`SELECT * FROM delivery_records ${clause} ORDER BY created_at DESC`)
+      .all(...args)
       .map(rowToDelivery);
   }
 
@@ -759,6 +761,21 @@ export class SqliteBridgeStateStore
       .map(rowToWhatsAppMessage);
   }
 
+  listWhatsAppMessageCounts(accountId?: string): WhatsAppMessageCountRecord[] {
+    const { clause, args } = accountWhereClause(accountId);
+    const contentFilter = "TRIM(COALESCE(text, '')) <> '' OR media_json IS NOT NULL";
+    const whereClause = clause ? `${clause} AND (${contentFilter})` : `WHERE ${contentFilter}`;
+    return this.db
+      .prepare(`
+        SELECT account_id, chat_jid, COUNT(*) AS message_count
+        FROM whatsapp_messages
+        ${whereClause}
+        GROUP BY account_id, chat_jid
+      `)
+      .all(...args)
+      .map(rowToWhatsAppMessageCount);
+  }
+
   listWhatsAppMessageReceipts(input: { accountId?: string; chatJid?: string; limit?: number } = {}): WhatsAppMessageReceiptRecord[] {
     const { clause, args } = syncWhereClause(input);
     return this.db
@@ -1251,6 +1268,15 @@ function rowToWhatsAppMessage(row: unknown): WhatsAppStoredMessageRecord {
     ...(value.reaction_json ? { reactionJson: String(value.reaction_json) } : {}),
     ...(value.raw_json ? { rawJson: String(value.raw_json) } : {}),
     receivedAt: String(value.received_at),
+  };
+}
+
+function rowToWhatsAppMessageCount(row: unknown): WhatsAppMessageCountRecord {
+  const value = row as Record<string, string | number | null>;
+  return {
+    accountId: String(value.account_id),
+    chatJid: String(value.chat_jid),
+    messageCount: Number(value.message_count),
   };
 }
 

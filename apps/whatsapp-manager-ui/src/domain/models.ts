@@ -2,7 +2,7 @@ export type AccountStatus = "disconnected" | "connecting" | "connected";
 export type NumberSubview = "home" | "messages" | "rules" | "failures";
 export type NumberRuleAction = "allow" | "deny";
 export type NumberRuleMatchType = "all" | "exact" | "regex";
-export type RefreshScope = "accounts" | "activity" | "rules" | "logs";
+export type RefreshScope = "accounts" | "activity" | "chat" | "rules" | "logs";
 export type AuditLogOutcome = "success" | "failure" | "ignored";
 export type AuditLogFilter = "all" | AuditLogOutcome;
 
@@ -105,6 +105,12 @@ export interface WhatsAppSyncedMessage {
   reactionJson?: string;
   rawJson?: string;
   receivedAt: string;
+}
+
+export interface WhatsAppMessageCount {
+  accountId: string;
+  chatJid: string;
+  messageCount: number;
 }
 
 export interface WhatsAppMessageReceipt {

@@ -18,6 +18,7 @@ import type {
   WhatsAppHistorySyncBatchRecord,
   WhatsAppLidMappingRecord,
   WhatsAppMediaAssetRecord,
+  WhatsAppMessageCountRecord,
   WhatsAppMessageReceiptRecord,
   WhatsAppMessageUpdateRecord,
   WhatsAppMessageEvent,
@@ -51,8 +52,11 @@ export class InMemoryChatSessionRouter {
     }
   }
 
-  async getMappings(): Promise<ChatSessionMapping[]> {
-    return [...this.mappings.values()];
+  async getMappings(input: { accountId?: string; chatJid?: string } = {}): Promise<ChatSessionMapping[]> {
+    return [...this.mappings.values()].filter((mapping) =>
+      (!input.accountId || mapping.accountId === input.accountId) &&
+      (!input.chatJid || mapping.chatJid === input.chatJid)
+    );
   }
 
   async listGroupPolicies(): Promise<GroupRoutingPolicyRecord[]> {
@@ -305,7 +309,7 @@ export interface ChatSessionRouterStore {
 }
 
 export interface BridgeDeliveryStore {
-  listDeliveries(): DeliveryRecord[];
+  listDeliveries(input?: { accountId?: string; chatJid?: string }): DeliveryRecord[];
   getDelivery(id: string): DeliveryRecord | null;
   saveDelivery(record: DeliveryRecord): void;
 }
@@ -362,6 +366,7 @@ export interface WhatsAppSyncStore {
     chatJid?: string;
     limit?: number;
   }): WhatsAppStoredMessageRecord[];
+  listWhatsAppMessageCounts(accountId?: string): WhatsAppMessageCountRecord[];
   listWhatsAppMessageReceipts(input?: {
     accountId?: string;
     chatJid?: string;

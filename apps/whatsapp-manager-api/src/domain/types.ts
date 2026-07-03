@@ -235,6 +235,12 @@ export interface WhatsAppStoredMessageRecord {
   receivedAt: string;
 }
 
+export interface WhatsAppMessageCountRecord {
+  accountId: string;
+  chatJid: string;
+  messageCount: number;
+}
+
 export interface WhatsAppMessageReceiptRecord {
   id: string;
   accountId: string;

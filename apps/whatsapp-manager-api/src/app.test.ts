@@ -1466,6 +1466,11 @@ describe("whatsapp-manager-api", () => {
           url: "/whatsapp/sync/messages?accountId=ops-main&chatJid=83038931275996%40lid",
           headers,
         });
+        const messageCounts = await syncApp.inject({
+          method: "GET",
+          url: "/whatsapp/sync/message-counts?accountId=ops-main",
+          headers,
+        });
         const contacts = await syncApp.inject({
           method: "GET",
           url: "/whatsapp/sync/contacts?accountId=ops-main",
@@ -1511,6 +1516,13 @@ describe("whatsapp-manager-api", () => {
             messageId: "wamid.history.1",
             text: "historical hello",
           }),
+        ]);
+        expect(messageCounts.json().items).toEqual([
+          {
+            accountId: "ops-main",
+            chatJid: "83038931275996@lid",
+            messageCount: 1,
+          },
         ]);
         expect(contacts.json().items).toEqual([
           expect.objectContaining({
@@ -1609,6 +1621,20 @@ describe("whatsapp-manager-api", () => {
             authorization: "Bearer test-token",
           },
         });
+        const sessions = await syncApp.inject({
+          method: "GET",
+          url: "/sessions?accountId=ops-main",
+          headers: {
+            authorization: "Bearer test-token",
+          },
+        });
+        const deliveries = await syncApp.inject({
+          method: "GET",
+          url: "/deliveries?accountId=ops-main&chatJid=83038931275996%40lid",
+          headers: {
+            authorization: "Bearer test-token",
+          },
+        });
 
         expect(messages.json().items).toEqual([
           expect.objectContaining({
@@ -1623,6 +1649,19 @@ describe("whatsapp-manager-api", () => {
             syncEvents: 1,
           }),
         );
+        expect(sessions.json().items).toEqual([
+          expect.objectContaining({
+            accountId: "ops-main",
+            chatJid: "83038931275996@lid",
+          }),
+        ]);
+        expect(deliveries.json().items).toEqual([
+          expect.objectContaining({
+            accountId: "ops-main",
+            chatJid: "83038931275996@lid",
+            inboundMessageId: "wamid.live.1",
+          }),
+        ]);
         expect(services.deliveryStore?.listDeliveries()).toEqual([
           expect.objectContaining({
             chatJid: "83038931275996@lid",
