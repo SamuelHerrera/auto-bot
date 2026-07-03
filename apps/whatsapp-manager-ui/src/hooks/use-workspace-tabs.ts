@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 
 import { areStringArraysEqual } from "../domain/collections";
 import type { WhatsAppAccount } from "../domain/models";
-import { getFallbackTabId, getInitialWorkspaceState, persistWorkspaceState } from "../services/workspace-storage";
+import { getFallbackTabId, getInitialWorkspaceState, getPreferredAccountTabId, persistWorkspaceState } from "../services/workspace-storage";
 
 export function useWorkspaceTabs({
   accounts,
@@ -68,10 +68,14 @@ export function useWorkspaceTabs({
     }
 
     const availableAccountIds = new Set(accounts.map((account) => account.accountId));
+    const allAccountIds = accounts.map((account) => account.accountId);
+    const connectedAccountIds = accounts.filter((account) => account.status === "connected").map((account) => account.accountId);
+    const preferredAccountId = getPreferredAccountTabId(allAccountIds, connectedAccountIds);
     const validOpenTabs = openAccountTabs.filter((accountId) => availableAccountIds.has(accountId));
+    const repairedOpenTabs = validOpenTabs.length > 0 || !preferredAccountId ? validOpenTabs : [preferredAccountId];
 
-    if (!areStringArraysEqual(openAccountTabs, validOpenTabs)) {
-      setOpenAccountTabs(validOpenTabs);
+    if (!areStringArraysEqual(openAccountTabs, repairedOpenTabs)) {
+      setOpenAccountTabs(repairedOpenTabs);
     }
 
     const isActiveAccountTab = activeTabId && activeTabId !== "settings" && activeTabId !== "logs";
@@ -82,9 +86,9 @@ export function useWorkspaceTabs({
       (isActiveAccountTab && availableAccountIds.has(activeTabId));
 
     if (!isActiveTabAvailable) {
-      const nextTabId = getFallbackTabId(validOpenTabs, isSettingsTabOpen, isLogsTabOpen);
+      const nextTabId = preferredAccountId || getFallbackTabId(repairedOpenTabs, isSettingsTabOpen, isLogsTabOpen);
       setActiveTabId(nextTabId);
-      setActiveAccountId(nextTabId && nextTabId !== "settings" && nextTabId !== "logs" ? nextTabId : validOpenTabs[0] ?? "");
+      setActiveAccountId(nextTabId && nextTabId !== "settings" && nextTabId !== "logs" ? nextTabId : repairedOpenTabs[0] ?? "");
       onAccountViewReset();
       return;
     }
@@ -96,7 +100,7 @@ export function useWorkspaceTabs({
     }
 
     if (activeAccountId && !availableAccountIds.has(activeAccountId)) {
-      setActiveAccountId(validOpenTabs[0] ?? "");
+      setActiveAccountId(preferredAccountId || repairedOpenTabs[0] || "");
       onAccountViewReset();
     }
   }, [

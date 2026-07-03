@@ -41,6 +41,16 @@ export function persistWorkspaceState(workspace: WorkspaceState) {
   localStorage.setItem(workspaceStorageKeys.openAccountTabs, JSON.stringify(workspace.openAccountTabs));
 }
 
+export function clearWorkspaceState() {
+  for (const key of Object.values(workspaceStorageKeys)) {
+    localStorage.removeItem(key);
+  }
+}
+
+export function getPreferredAccountTabId(accountIds: string[], connectedAccountIds: string[] = []) {
+  return connectedAccountIds.find((accountId) => accountIds.includes(accountId)) ?? accountIds[0] ?? "";
+}
+
 export function getFallbackTabId(openAccountTabs: string[], isSettingsTabOpen: boolean, isLogsTabOpen: boolean) {
   return openAccountTabs[0] ?? (isSettingsTabOpen ? "settings" : isLogsTabOpen ? "logs" : "");
 }

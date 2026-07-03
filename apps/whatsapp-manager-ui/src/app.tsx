@@ -33,6 +33,7 @@ import { useLinkSession } from "./hooks/use-link-session";
 import { useWorkspaceTabs } from "./hooks/use-workspace-tabs";
 import { buildEventUrl, normalizeError, request } from "./services/api-client";
 import { brandingStorageKeys, defaultAppIcon, defaultAppTitle, getInitialBranding, normalizeBranding, setFavicon } from "./services/branding";
+import { clearWorkspaceState } from "./services/workspace-storage";
 
 interface AppSseEvent {
   type: string;
@@ -1126,6 +1127,21 @@ export function App() {
     });
   }
 
+  function resetBrowserWorkspaceState() {
+    clearWorkspaceState();
+    const preferredAccount = accounts.find((account) => account.status === "connected") ?? accounts[0] ?? null;
+    if (preferredAccount) {
+      openAccountTab(preferredAccount.accountId);
+      setActiveAccountId(preferredAccount.accountId);
+    } else {
+      setActiveTabId("");
+      setActiveAccountId("");
+    }
+    setActiveChatJid("");
+    setActiveNumberView("home");
+    setStatusMessage("Browser workspace state reset.");
+  }
+
   function parsePostbackConfig(configJson: string) {
     try {
       const parsed = JSON.parse(configJson);
@@ -1262,6 +1278,7 @@ export function App() {
               onCreatePostbackAction={(draft) => void createPostbackAction(draft)}
               onDeletePostbackAction={(actionId) => void deletePostbackAction(actionId)}
               onCleanupPostbackRecords={() => void cleanupPostbackRecords()}
+              onResetWorkspaceState={resetBrowserWorkspaceState}
               onSavePostbackAction={(action, draft) => void savePostbackAction(action, draft)}
               onSave={(nextBranding) => void saveBranding(nextBranding)}
               onTestPostbackAction={(action) => void testPostbackAction(action)}
