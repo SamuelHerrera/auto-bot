@@ -5,6 +5,7 @@ import {
   type BridgeDeliveryStore,
   InMemoryChatSessionRouter,
   type NumberRuleStore,
+  type WhatsAppSyncStore,
 } from "./services/chat-session-router.js";
 import {
   HermesApiAdapter,
@@ -16,6 +17,7 @@ import { SqliteBridgeStateStore } from "./services/sqlite-bridge-state-store.js"
 import { AppEventBus } from "./services/event-bus.js";
 import { evaluateNumberRules, recordBlockedNumberDelivery } from "./services/number-rules.js";
 import type { WhatsAppGateway } from "./services/whatsapp-service.js";
+import { recordWhatsAppSyncEvent } from "./services/whatsapp-sync-recorder.js";
 import type { AuditLogInput, WhatsAppAccountStatus } from "./domain/types.js";
 
 export interface AppServices {
@@ -26,6 +28,7 @@ export interface AppServices {
   numberRuleStore?: NumberRuleStore;
   auditLogStore?: AuditLogStore;
   accountMetadataStore?: AccountMetadataStore;
+  whatsappSyncStore?: WhatsAppSyncStore;
   eventBus: AppEventBus;
 }
 
@@ -72,6 +75,11 @@ export function buildServices(config: AppConfig): AppServices {
       eventBus.publish("rules");
     }
     eventBus.publish("accounts");
+  });
+
+  whatsappGateway.onSyncEvent?.((event) => {
+    recordWhatsAppSyncEvent(bridgeStore instanceof SqliteBridgeStateStore ? bridgeStore : undefined, event);
+    eventBus.publish("activity");
   });
 
   whatsappGateway.onInboundMessage(async (event) => {
@@ -181,6 +189,7 @@ export function buildServices(config: AppConfig): AppServices {
     ...(bridgeStore instanceof SqliteBridgeStateStore ? { numberRuleStore: bridgeStore } : {}),
     ...(bridgeStore instanceof SqliteBridgeStateStore ? { auditLogStore: bridgeStore } : {}),
     ...(bridgeStore instanceof SqliteBridgeStateStore ? { accountMetadataStore: bridgeStore } : {}),
+    ...(bridgeStore instanceof SqliteBridgeStateStore ? { whatsappSyncStore: bridgeStore } : {}),
   };
 }
 

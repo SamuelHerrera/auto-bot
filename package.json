@@ -8,6 +8,10 @@
     "dev:api": "pnpm --filter @auto-bot/whatsapp-manager-api dev",
     "dev:ui": "pnpm --filter @auto-bot/whatsapp-manager-ui dev",
     "lint": "turbo run lint",
+    "sync:compare": "node scripts/compare-whatsapp-sync.mjs",
+    "sync:corroborate": "node scripts/corroborate-whatsapp-sync.mjs",
+    "sync:dump": "./scripts/check-whatsapp-sync.sh",
+    "sync:wait": "node scripts/wait-whatsapp-sync.mjs",
     "test": "turbo run test",
     "typecheck": "turbo run typecheck"
   },

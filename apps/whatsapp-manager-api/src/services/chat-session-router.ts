@@ -12,7 +12,14 @@ import type {
   WhatsAppChatId,
   WhatsAppChatType,
   WhatsAppGroupRoutingPolicy,
+  WhatsAppChatRecord,
+  WhatsAppContactRecord,
+  WhatsAppHistorySyncBatchRecord,
+  WhatsAppLidMappingRecord,
   WhatsAppMessageEvent,
+  WhatsAppStoredMessageRecord,
+  WhatsAppSyncEventRecord,
+  WhatsAppSyncSummary,
 } from "../domain/types.js";
 import { getWhatsAppSessionKey } from "../domain/types.js";
 import type { HermesAdapter } from "./hermes-adapter.js";
@@ -326,6 +333,26 @@ export interface AuditLogStore {
 export interface AccountMetadataStore {
   listAccountMetadata(): WhatsAppAccountMetadata[];
   setAccountAlias(accountId: string, alias: string): WhatsAppAccountMetadata;
+}
+
+export interface WhatsAppSyncStore {
+  saveWhatsAppContact(record: WhatsAppContactRecord): void;
+  saveWhatsAppChat(record: WhatsAppChatRecord): void;
+  saveWhatsAppMessage(record: WhatsAppStoredMessageRecord): void;
+  saveWhatsAppLidMapping(record: WhatsAppLidMappingRecord): void;
+  saveWhatsAppHistorySyncBatch(record: WhatsAppHistorySyncBatchRecord): void;
+  saveWhatsAppSyncEvent(record: WhatsAppSyncEventRecord): void;
+  getWhatsAppSyncSummary(accountId?: string): WhatsAppSyncSummary;
+  listWhatsAppContacts(accountId?: string, limit?: number): WhatsAppContactRecord[];
+  listWhatsAppChats(accountId?: string, limit?: number): WhatsAppChatRecord[];
+  listWhatsAppMessages(input?: {
+    accountId?: string;
+    chatJid?: string;
+    limit?: number;
+  }): WhatsAppStoredMessageRecord[];
+  listWhatsAppLidMappings(accountId?: string, limit?: number): WhatsAppLidMappingRecord[];
+  listWhatsAppHistorySyncBatches(accountId?: string, limit?: number): WhatsAppHistorySyncBatchRecord[];
+  listWhatsAppSyncEvents(accountId?: string, limit?: number): WhatsAppSyncEventRecord[];
 }
 
 export interface RoutingInput {

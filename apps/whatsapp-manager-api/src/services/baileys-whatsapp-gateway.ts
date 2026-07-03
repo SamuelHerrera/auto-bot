@@ -14,9 +14,10 @@ import type {
   WhatsAppMediaAttachment,
   WhatsAppAccountStatus,
   WhatsAppMessageEvent,
+  WhatsAppSyncEventType,
 } from "../domain/types.js";
 import { getWhatsAppChatType, getWhatsAppSessionKey } from "../domain/types.js";
-import type { WhatsAppGateway } from "./whatsapp-service.js";
+import type { WhatsAppGateway, WhatsAppSyncEvent } from "./whatsapp-service.js";
 
 interface BaileysAccountRuntime {
   accountId: string;
@@ -30,11 +31,13 @@ interface BaileysAccountRuntime {
 
 type InboundHandler = (event: WhatsAppMessageEvent) => Promise<void>;
 type StatusHandler = (status: WhatsAppAccountStatus) => void;
+type SyncHandler = (event: WhatsAppSyncEvent) => void;
 
 export class BaileysWhatsAppGateway implements WhatsAppGateway {
   private readonly accounts = new Map<string, BaileysAccountRuntime>();
   private inboundHandler: InboundHandler | null = null;
   private statusHandler: StatusHandler | null = null;
+  private syncHandler: SyncHandler | null = null;
   private lastActiveAccountId: string | null = null;
 
   constructor(private readonly stateDir: string) {
@@ -47,6 +50,10 @@ export class BaileysWhatsAppGateway implements WhatsAppGateway {
 
   onStatusChange(handler: StatusHandler): void {
     this.statusHandler = handler;
+  }
+
+  onSyncEvent(handler: SyncHandler): void {
+    this.syncHandler = handler;
   }
 
   async getStatus(): Promise<WhatsAppAccountStatus> {
@@ -119,6 +126,7 @@ export class BaileysWhatsAppGateway implements WhatsAppGateway {
     socket.ev.on("messages.upsert", (event) => {
       void this.handleMessageUpsert(runtime.accountId, event);
     });
+    this.registerSyncEventHandlers(runtime);
 
     return runtime.status;
   }
@@ -398,6 +406,8 @@ export class BaileysWhatsAppGateway implements WhatsAppGateway {
     _accountId: string,
     event: BaileysEventMap["messages.upsert"],
   ) {
+    this.emitSyncEvent(_accountId, "messages.upsert", event);
+
     if (!this.inboundHandler) {
       return;
     }
@@ -418,6 +428,45 @@ export class BaileysWhatsAppGateway implements WhatsAppGateway {
 
       await this.inboundHandler(normalized);
     }
+  }
+
+  private registerSyncEventHandlers(runtime: BaileysAccountRuntime) {
+    const events: WhatsAppSyncEventType[] = [
+      "messaging-history.set",
+      "messaging-history.status",
+      "chats.upsert",
+      "chats.update",
+      "chats.delete",
+      "contacts.upsert",
+      "contacts.update",
+      "messages.delete",
+      "messages.media-update",
+      "messages.reaction",
+      "messages.update",
+      "message-receipt.update",
+      "groups.upsert",
+      "groups.update",
+      "group-participants.update",
+      "lid-mapping.update",
+    ];
+    const eventSource = runtime.socket?.ev as unknown as {
+      on: (eventName: string, handler: (payload: unknown) => void) => void;
+    } | undefined;
+
+    for (const eventName of events) {
+      eventSource?.on(eventName, (payload) => {
+        this.emitSyncEvent(runtime.accountId, eventName, payload);
+      });
+    }
+  }
+
+  private emitSyncEvent(accountId: string, eventType: WhatsAppSyncEventType, payload: unknown) {
+    this.syncHandler?.({
+      accountId,
+      eventType,
+      payload,
+      receivedAt: new Date().toISOString(),
+    });
   }
 
   private resolveAccount(accountId?: string): BaileysAccountRuntime | null {

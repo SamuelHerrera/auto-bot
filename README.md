@@ -66,8 +66,18 @@ The WhatsApp manager now has two apps:
 
 The WhatsApp manager runs the Baileys gateway for live WhatsApp connectivity and can use the Hermes API adapter against Hermes' native API server session endpoints.
 
+WhatsApp sync metadata is tracked separately from Hermes delivery records. See `docs/whatsapp-sync-data-matrix.md` for the storage matrix and logout/relogin validation flow. The quick validation commands are:
+
+```bash
+pnpm sync:dump <accountId>
+pnpm sync:wait -- --account <accountId>
+pnpm sync:corroborate -- --account <accountId>
+pnpm sync:compare -- --before before.json --after after.json
+```
+
 ## Notes
 
+- Agent and maintainer engineering guidelines live in `AGENTS.md`; read them before changing persistence, delivery status semantics, or recovery/cleanup code.
 - Hermes, Codex, and ZeroTier state are persisted on the host under `./data`.
 - On startup, the container rebuilds `/opt/data/.codex/auth.json` from `CODEX_AUTH_MODE`, `CODEX_ACCESS_TOKEN`, `CODEX_REFRESH_TOKEN`, `CODEX_ID_TOKEN`, and `CODEX_ACCOUNT_ID` when those vars are present.
 - If token vars are absent, the container falls back to `codex login --with-api-key` when `OPENAI_API_KEY` is set.
@@ -75,7 +85,7 @@ The WhatsApp manager runs the Baileys gateway for live WhatsApp connectivity and
 - SSH listens on `SSH_PORT` and allows only key-based login for user `hermes`.
 - Docker exposes the WhatsApp API on `3000` and the UI dev server on `4173` by default.
 - The WhatsApp manager always uses live Baileys transport and persists auth state under `/opt/data/whatsapp-manager/baileys`.
-- Bridge mappings, processed WhatsApp message IDs, and delivery records persist in SQLite at `/opt/data/whatsapp-manager/bridge-state.sqlite` by default.
+- Bridge mappings, processed WhatsApp message IDs, delivery records, and WhatsApp sync tables persist in SQLite at `/opt/data/whatsapp-manager/bridge-state.sqlite` by default.
 - Run `hermes gateway run --force --accept-hooks`; the WhatsApp manager always uses Hermes' native `/api/sessions/{id}/chat` session API. The container creates a persistent internal key at `/opt/data/whatsapp-manager/internal-api-key` and exports it under the compatibility names Hermes and the manager expect.
 - `zerotier-one` is installed, but actual ZeroTier networking inside the container requires `/dev/net/tun` plus extra capabilities; Docker Desktop on this Mac does not provide that.
 - Keep secrets in a local `.env` file, not committed to git.

@@ -10,12 +10,14 @@ import {
 } from "./build-services.js";
 import { loadConfig } from "./config.js";
 import { evaluateNumberRules, recordBlockedNumberDelivery } from "./services/number-rules.js";
+import { recordWhatsAppSyncEvent } from "./services/whatsapp-sync-recorder.js";
 import { AppEventBus } from "./services/event-bus.js";
 import { HermesApiAdapter, type HermesAdapter } from "./services/hermes-adapter.js";
 import { FileBridgeStateStore } from "./services/bridge-state-store.js";
 import { InMemoryChatSessionRouter } from "./services/chat-session-router.js";
 import { SqliteBridgeStateStore } from "./services/sqlite-bridge-state-store.js";
 import type { WhatsAppGateway } from "./services/whatsapp-service.js";
+import type { WhatsAppSyncEvent } from "./services/whatsapp-service.js";
 import type { AppConfig } from "./config.js";
 import type {
   AuditLogInput,
@@ -692,24 +694,15 @@ describe("whatsapp-manager-api", () => {
     }
   });
 
-  it("reports number-rule blocked deliveries as ignored even when older rows were stored as failures", async () => {
-    const dir = mkdtempSync(path.join(tmpdir(), "auto-bot-blocked-delivery-normalize-"));
-    const blockedConfig = loadConfig({
-      ...process.env,
-      API_TOKEN: "test-token",
-      BRIDGE_DATABASE_FILE: path.join(dir, "bridge-state.sqlite"),
-      BRIDGE_STATE_FILE: "",
-      DATABASE_URL: "postgres://postgres:postgres@127.0.0.1:5432/auto_bot",
-      NODE_ENV: "test",
-      PORT: "3000",
-    });
+  it("cleans up legacy number-rule blocked deliveries stored as failures", async () => {
+    const dir = mkdtempSync(path.join(tmpdir(), "auto-bot-blocked-delivery-cleanup-"));
+    const databaseFile = path.join(dir, "bridge-state.sqlite");
 
     try {
-      const services = createTestServices(blockedConfig);
-      app = createApp({ config: blockedConfig, services });
+      const originalStore = new SqliteBridgeStateStore(databaseFile);
       const now = new Date().toISOString();
 
-      services.deliveryStore?.saveDelivery({
+      originalStore.saveDelivery({
         id: "ops-main:12345@s.whatsapp.net:wamid.blocked-legacy",
         accountId: "ops-main",
         chatJid: "12345@s.whatsapp.net",
@@ -726,22 +719,23 @@ describe("whatsapp-manager-api", () => {
         updatedAt: now,
       });
 
-      const list = await app.inject({
-        method: "GET",
-        url: "/deliveries",
-        headers: {
-          authorization: "Bearer test-token",
-        },
-      });
+      expect(originalStore.listDeliveries()[0]).toEqual(
+        expect.objectContaining({
+          status: "failed",
+          failureStage: "hermes",
+        }),
+      );
 
-      expect(list.statusCode).toBe(200);
-      expect(list.json().items[0]).toEqual(
+      const migratedStore = new SqliteBridgeStateStore(databaseFile);
+      const deliveries = migratedStore.listDeliveries();
+
+      expect(deliveries[0]).toEqual(
         expect.objectContaining({
           status: "ignored",
           error: "Blocked by number rule: Default deny all",
         }),
       );
-      expect(list.json().items[0]).not.toHaveProperty("failureStage");
+      expect(deliveries[0]).not.toHaveProperty("failureStage");
     } finally {
       rmSync(dir, { force: true, recursive: true });
     }
@@ -1270,6 +1264,358 @@ describe("whatsapp-manager-api", () => {
     }
   });
 
+  it("persists WhatsApp sync contacts, chats, messages, LID mappings, and event metadata", async () => {
+    const dir = mkdtempSync(path.join(tmpdir(), "auto-bot-whatsapp-sync-"));
+    const syncConfig = loadConfig({
+      ...process.env,
+      API_TOKEN: "test-token",
+      BRIDGE_DATABASE_FILE: path.join(dir, "bridge-state.sqlite"),
+      BRIDGE_STATE_FILE: "",
+      DATABASE_URL: "postgres://postgres:postgres@127.0.0.1:5432/auto_bot",
+      NODE_ENV: "test",
+      PORT: "3000",
+    });
+
+    try {
+      const services = createTestServices(syncConfig);
+      const gateway = services.whatsappGateway as TestWhatsAppGateway;
+      const syncApp = createApp({ config: syncConfig, services });
+
+      try {
+        const historyPayload = {
+          syncType: "initial_bootstrap",
+          contacts: [
+            {
+              id: "83038931275996@lid",
+              phoneNumber: "15551234567@s.whatsapp.net",
+              lid: "83038931275996@lid",
+              name: "Test Customer",
+              notify: "Customer",
+            },
+          ],
+          chats: [
+            {
+              id: "83038931275996@lid",
+              name: "Test Customer",
+              unreadCount: 2,
+              conversationTimestamp: 1783080000,
+            },
+          ],
+          messages: [
+            {
+              key: {
+                remoteJid: "83038931275996@lid",
+                id: "wamid.history.1",
+                fromMe: false,
+              },
+              messageTimestamp: 1783080000,
+              message: {
+                conversation: "historical hello",
+              },
+            },
+          ],
+          lidPnMappings: [
+            {
+              lid: "83038931275996@lid",
+              pn: "15551234567@s.whatsapp.net",
+            },
+          ],
+        };
+        gateway.injectSyncEvent({
+          accountId: "ops-main",
+          eventType: "messaging-history.set",
+          receivedAt: "2026-07-03T12:00:00.000Z",
+          payload: historyPayload,
+        });
+        gateway.injectSyncEvent({
+          accountId: "ops-main",
+          eventType: "messaging-history.set",
+          receivedAt: "2026-07-03T12:00:02.000Z",
+          payload: historyPayload,
+        });
+        gateway.injectSyncEvent({
+          accountId: "ops-main",
+          eventType: "lid-mapping.update",
+          receivedAt: "2026-07-03T12:00:01.000Z",
+          payload: {
+            lid: "83038931275996@lid",
+            pn: "15551234567@s.whatsapp.net",
+          },
+        });
+
+        const headers = { authorization: "Bearer test-token" };
+        const summary = await syncApp.inject({
+          method: "GET",
+          url: "/whatsapp/sync/summary?accountId=ops-main",
+          headers,
+        });
+        const chats = await syncApp.inject({
+          method: "GET",
+          url: "/whatsapp/sync/chats?accountId=ops-main",
+          headers,
+        });
+        const messages = await syncApp.inject({
+          method: "GET",
+          url: "/whatsapp/sync/messages?accountId=ops-main&chatJid=83038931275996%40lid",
+          headers,
+        });
+        const contacts = await syncApp.inject({
+          method: "GET",
+          url: "/whatsapp/sync/contacts?accountId=ops-main",
+          headers,
+        });
+        const mappings = await syncApp.inject({
+          method: "GET",
+          url: "/whatsapp/sync/lid-mappings?accountId=ops-main",
+          headers,
+        });
+        const batches = await syncApp.inject({
+          method: "GET",
+          url: "/whatsapp/sync/history-batches?accountId=ops-main",
+          headers,
+        });
+        const events = await syncApp.inject({
+          method: "GET",
+          url: "/whatsapp/sync/events?accountId=ops-main",
+          headers,
+        });
+
+        expect(summary.json()).toEqual({
+          contacts: 1,
+          chats: 1,
+          messages: 1,
+          lidMappings: 1,
+          historySyncBatches: 1,
+          syncEvents: 2,
+        });
+        expect(chats.json().items).toEqual([
+          expect.objectContaining({
+            chatJid: "83038931275996@lid",
+            displayName: "Test Customer",
+            chatType: "direct",
+          }),
+        ]);
+        expect(messages.json().items).toEqual([
+          expect.objectContaining({
+            chatJid: "83038931275996@lid",
+            messageId: "wamid.history.1",
+            text: "historical hello",
+          }),
+        ]);
+        expect(contacts.json().items).toEqual([
+          expect.objectContaining({
+            contactJid: "83038931275996@lid",
+            phoneNumber: "15551234567@s.whatsapp.net",
+            lidJid: "83038931275996@lid",
+          }),
+        ]);
+        expect(mappings.json().items).toEqual([
+          expect.objectContaining({
+            lidJid: "83038931275996@lid",
+            pnJid: "15551234567@s.whatsapp.net",
+          }),
+        ]);
+        expect(batches.json().items).toEqual([
+          expect.objectContaining({
+            accountId: "ops-main",
+            syncType: "initial_bootstrap",
+            chatCount: 1,
+            contactCount: 1,
+            messageCount: 1,
+          }),
+        ]);
+        expect(events.json().items).toEqual(
+          expect.arrayContaining([
+            expect.objectContaining({ eventType: "messaging-history.set" }),
+            expect.objectContaining({ eventType: "lid-mapping.update" }),
+          ]),
+        );
+      } finally {
+        await syncApp.close();
+      }
+    } finally {
+      rmSync(dir, { force: true, recursive: true });
+    }
+  });
+
+  it("stores live WhatsApp upsert messages independently from Hermes delivery records", async () => {
+    const dir = mkdtempSync(path.join(tmpdir(), "auto-bot-whatsapp-live-sync-"));
+    const syncConfig = loadConfig({
+      ...process.env,
+      API_TOKEN: "test-token",
+      BRIDGE_DATABASE_FILE: path.join(dir, "bridge-state.sqlite"),
+      BRIDGE_STATE_FILE: "",
+      DATABASE_URL: "postgres://postgres:postgres@127.0.0.1:5432/auto_bot",
+      NODE_ENV: "test",
+      PORT: "3000",
+    });
+
+    try {
+      const services = createTestServices(syncConfig);
+      const gateway = services.whatsappGateway as TestWhatsAppGateway;
+      const syncApp = createApp({ config: syncConfig, services });
+
+      try {
+        gateway.injectSyncEvent({
+          accountId: "ops-main",
+          eventType: "messages.upsert",
+          receivedAt: "2026-07-03T12:10:00.000Z",
+          payload: {
+            messages: [
+              {
+                key: {
+                  remoteJid: "83038931275996@lid",
+                  id: "wamid.live.1",
+                  fromMe: false,
+                },
+                messageTimestamp: 1783080600,
+                message: {
+                  conversation: "live hello",
+                },
+              },
+            ],
+            type: "notify",
+          },
+        });
+        await gateway.injectInboundMessage({
+          accountId: "ops-main",
+          chatJid: "83038931275996@lid",
+          messageId: "wamid.live.1",
+          senderId: "83038931275996@lid",
+          text: "live hello",
+        });
+
+        const messages = await syncApp.inject({
+          method: "GET",
+          url: "/whatsapp/sync/messages?accountId=ops-main&chatJid=83038931275996%40lid",
+          headers: {
+            authorization: "Bearer test-token",
+          },
+        });
+        const summary = await syncApp.inject({
+          method: "GET",
+          url: "/whatsapp/sync/summary?accountId=ops-main",
+          headers: {
+            authorization: "Bearer test-token",
+          },
+        });
+
+        expect(messages.json().items).toEqual([
+          expect.objectContaining({
+            chatJid: "83038931275996@lid",
+            messageId: "wamid.live.1",
+            text: "live hello",
+          }),
+        ]);
+        expect(summary.json()).toEqual(
+          expect.objectContaining({
+            messages: 1,
+            syncEvents: 1,
+          }),
+        );
+        expect(services.deliveryStore?.listDeliveries()).toEqual([
+          expect.objectContaining({
+            chatJid: "83038931275996@lid",
+            inboundMessageId: "wamid.live.1",
+            status: "sent",
+          }),
+        ]);
+      } finally {
+        await syncApp.close();
+      }
+    } finally {
+      rmSync(dir, { force: true, recursive: true });
+    }
+  });
+
+  it("persists direct Baileys contact and group upsert arrays as typed sync rows", async () => {
+    const dir = mkdtempSync(path.join(tmpdir(), "auto-bot-whatsapp-array-sync-"));
+    const syncConfig = loadConfig({
+      ...process.env,
+      API_TOKEN: "test-token",
+      BRIDGE_DATABASE_FILE: path.join(dir, "bridge-state.sqlite"),
+      BRIDGE_STATE_FILE: "",
+      DATABASE_URL: "postgres://postgres:postgres@127.0.0.1:5432/auto_bot",
+      NODE_ENV: "test",
+      PORT: "3000",
+    });
+
+    try {
+      const services = createTestServices(syncConfig);
+      const gateway = services.whatsappGateway as TestWhatsAppGateway;
+      const syncApp = createApp({ config: syncConfig, services });
+
+      try {
+        gateway.injectSyncEvent({
+          accountId: "ops-main",
+          eventType: "contacts.upsert",
+          receivedAt: "2026-07-03T12:20:00.000Z",
+          payload: [
+            {
+              id: "15551234567@s.whatsapp.net",
+              lid: "83038931275996@lid",
+              notify: "Array Contact",
+            },
+          ],
+        });
+        gateway.injectSyncEvent({
+          accountId: "ops-main",
+          eventType: "groups.upsert",
+          receivedAt: "2026-07-03T12:20:01.000Z",
+          payload: [
+            {
+              id: "120363000000000000@g.us",
+              subject: "Array Group",
+            },
+          ],
+        });
+
+        const headers = { authorization: "Bearer test-token" };
+        const summary = await syncApp.inject({
+          method: "GET",
+          url: "/whatsapp/sync/summary?accountId=ops-main",
+          headers,
+        });
+        const contacts = await syncApp.inject({
+          method: "GET",
+          url: "/whatsapp/sync/contacts?accountId=ops-main",
+          headers,
+        });
+        const chats = await syncApp.inject({
+          method: "GET",
+          url: "/whatsapp/sync/chats?accountId=ops-main",
+          headers,
+        });
+
+        expect(summary.json()).toEqual(
+          expect.objectContaining({
+            contacts: 1,
+            chats: 1,
+            syncEvents: 2,
+          }),
+        );
+        expect(contacts.json().items).toEqual([
+          expect.objectContaining({
+            contactJid: "15551234567@s.whatsapp.net",
+            lidJid: "83038931275996@lid",
+            notifyName: "Array Contact",
+          }),
+        ]);
+        expect(chats.json().items).toEqual([
+          expect.objectContaining({
+            chatJid: "120363000000000000@g.us",
+            chatType: "group",
+            displayName: "Array Group",
+          }),
+        ]);
+      } finally {
+        await syncApp.close();
+      }
+    } finally {
+      rmSync(dir, { force: true, recursive: true });
+    }
+  });
+
   it("creates persisted Hermes API sessions and sends turns through session chat", async () => {
     const fetchMock = vi
       .fn()
@@ -1443,6 +1789,11 @@ function createTestServices(config: AppConfig): AppServices {
     eventBus.publish("accounts");
   });
 
+  whatsappGateway.onSyncEvent((event) => {
+    recordWhatsAppSyncEvent(bridgeStore instanceof SqliteBridgeStateStore ? bridgeStore : undefined, event);
+    eventBus.publish("activity");
+  });
+
   whatsappGateway.onInboundMessage(async (event) => {
     const deliveryStore = bridgeStore instanceof SqliteBridgeStateStore ? bridgeStore : undefined;
     const numberRuleStore = bridgeStore instanceof SqliteBridgeStateStore ? bridgeStore : undefined;
@@ -1513,6 +1864,7 @@ function createTestServices(config: AppConfig): AppServices {
     ...(bridgeStore instanceof SqliteBridgeStateStore ? { numberRuleStore: bridgeStore } : {}),
     ...(bridgeStore instanceof SqliteBridgeStateStore ? { auditLogStore: bridgeStore } : {}),
     ...(bridgeStore instanceof SqliteBridgeStateStore ? { accountMetadataStore: bridgeStore } : {}),
+    ...(bridgeStore instanceof SqliteBridgeStateStore ? { whatsappSyncStore: bridgeStore } : {}),
   };
 }
 
@@ -1548,6 +1900,7 @@ class TestWhatsAppGateway implements WhatsAppGateway {
   private lastConnectedAccountId: string | null = null;
   private inboundHandler: ((event: WhatsAppMessageEvent) => Promise<void>) | null = null;
   private statusHandler: ((status: WhatsAppAccountStatus) => void) | null = null;
+  private syncHandler: ((event: WhatsAppSyncEvent) => void) | null = null;
 
   onInboundMessage(handler: (event: WhatsAppMessageEvent) => Promise<void>): void {
     this.inboundHandler = handler;
@@ -1555,6 +1908,10 @@ class TestWhatsAppGateway implements WhatsAppGateway {
 
   onStatusChange(handler: (status: WhatsAppAccountStatus) => void): void {
     this.statusHandler = handler;
+  }
+
+  onSyncEvent(handler: (event: WhatsAppSyncEvent) => void): void {
+    this.syncHandler = handler;
   }
 
   async getStatus(): Promise<WhatsAppAccountStatus> {
@@ -1690,5 +2047,12 @@ class TestWhatsAppGateway implements WhatsAppGateway {
 
       throw error;
     }
+  }
+
+  injectSyncEvent(event: Omit<WhatsAppSyncEvent, "receivedAt"> & { receivedAt?: string }): void {
+    this.syncHandler?.({
+      ...event,
+      receivedAt: event.receivedAt ?? new Date().toISOString(),
+    });
   }
 }

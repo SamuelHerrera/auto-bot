@@ -247,6 +247,53 @@ export function createApp({ config, services = buildServices(config) }: CreateAp
     items: services.deliveryStore?.listDeliveries() ?? [],
   }));
 
+  app.get<{ Querystring: { accountId?: string } }>("/whatsapp/sync/summary", async (request) => (
+    services.whatsappSyncStore?.getWhatsAppSyncSummary(request.query.accountId) ?? emptyWhatsAppSyncSummary()
+  ));
+
+  app.get<{ Querystring: SyncListQuery }>("/whatsapp/sync/contacts", async (request) => ({
+    items: services.whatsappSyncStore?.listWhatsAppContacts(
+      request.query.accountId,
+      readLimit(request.query.limit, 1000),
+    ) ?? [],
+  }));
+
+  app.get<{ Querystring: SyncListQuery }>("/whatsapp/sync/chats", async (request) => ({
+    items: services.whatsappSyncStore?.listWhatsAppChats(
+      request.query.accountId,
+      readLimit(request.query.limit, 1000),
+    ) ?? [],
+  }));
+
+  app.get<{ Querystring: SyncListQuery & { chatJid?: string } }>("/whatsapp/sync/messages", async (request) => ({
+    items: services.whatsappSyncStore?.listWhatsAppMessages({
+      limit: readLimit(request.query.limit, 1000),
+      ...(request.query.accountId ? { accountId: request.query.accountId } : {}),
+      ...(request.query.chatJid ? { chatJid: request.query.chatJid } : {}),
+    }) ?? [],
+  }));
+
+  app.get<{ Querystring: SyncListQuery }>("/whatsapp/sync/lid-mappings", async (request) => ({
+    items: services.whatsappSyncStore?.listWhatsAppLidMappings(
+      request.query.accountId,
+      readLimit(request.query.limit, 1000),
+    ) ?? [],
+  }));
+
+  app.get<{ Querystring: SyncListQuery }>("/whatsapp/sync/history-batches", async (request) => ({
+    items: services.whatsappSyncStore?.listWhatsAppHistorySyncBatches(
+      request.query.accountId,
+      readLimit(request.query.limit, 1000),
+    ) ?? [],
+  }));
+
+  app.get<{ Querystring: SyncListQuery }>("/whatsapp/sync/events", async (request) => ({
+    items: services.whatsappSyncStore?.listWhatsAppSyncEvents(
+      request.query.accountId,
+      readLimit(request.query.limit, 1000),
+    ) ?? [],
+  }));
+
   app.get<{ Querystring: { limit?: string } }>("/audit-logs", async (request) => ({
     items: services.auditLogStore?.listAuditLogs(readLimit(request.query.limit)) ?? [],
   }));
@@ -660,9 +707,24 @@ function readString(value: unknown, fallback: string) {
   return typeof value === "string" ? value : fallback;
 }
 
-function readLimit(value: string | undefined) {
+function readLimit(value: string | undefined, max = 500) {
   const parsed = Number.parseInt(value ?? "", 10);
-  return Number.isFinite(parsed) ? parsed : 200;
+  if (!Number.isFinite(parsed)) {
+    return 200;
+  }
+
+  return Math.min(Math.max(parsed, 1), max);
+}
+
+function emptyWhatsAppSyncSummary() {
+  return {
+    contacts: 0,
+    chats: 0,
+    messages: 0,
+    lidMappings: 0,
+    historySyncBatches: 0,
+    syncEvents: 0,
+  };
 }
 
 function badRequest(message: string) {
@@ -719,6 +781,11 @@ interface SessionQuery {
   accountId?: string;
   chatType?: "direct" | "group";
   participantJid?: string;
+}
+
+interface SyncListQuery {
+  accountId?: string;
+  limit?: string;
 }
 
 function getRouteFromRequest(chatId: string, input?: Partial<RoutingInput>): RoutingInput {

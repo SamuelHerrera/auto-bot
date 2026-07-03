@@ -12,7 +12,14 @@ import type {
   NumberRuleInput,
   NumberRuleRecord,
   WhatsAppAccountMetadata,
+  WhatsAppChatRecord,
+  WhatsAppContactRecord,
   WhatsAppGroupRoutingPolicy,
+  WhatsAppHistorySyncBatchRecord,
+  WhatsAppLidMappingRecord,
+  WhatsAppStoredMessageRecord,
+  WhatsAppSyncEventRecord,
+  WhatsAppSyncSummary,
 } from "../domain/types.js";
 import type {
   AccountMetadataStore,
@@ -22,10 +29,18 @@ import type {
   ChatSessionRouterStore,
   GroupRoutingPolicyStore,
   NumberRuleStore,
+  WhatsAppSyncStore,
 } from "./chat-session-router.js";
 
 export class SqliteBridgeStateStore
-  implements ChatSessionRouterStore, BridgeDeliveryStore, GroupRoutingPolicyStore, NumberRuleStore, AuditLogStore, AccountMetadataStore
+  implements
+    ChatSessionRouterStore,
+    BridgeDeliveryStore,
+    GroupRoutingPolicyStore,
+    NumberRuleStore,
+    AuditLogStore,
+    AccountMetadataStore,
+    WhatsAppSyncStore
 {
   private readonly db: DatabaseSync;
 
@@ -410,6 +425,236 @@ export class SqliteBridgeStateStore
     };
   }
 
+  saveWhatsAppContact(record: WhatsAppContactRecord): void {
+    this.db
+      .prepare(`
+        INSERT INTO whatsapp_contacts
+          (account_id, contact_jid, phone_number, lid_jid, name, notify_name, verified_name, raw_json, first_seen_at, last_seen_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(account_id, contact_jid) DO UPDATE SET
+          phone_number = COALESCE(excluded.phone_number, whatsapp_contacts.phone_number),
+          lid_jid = COALESCE(excluded.lid_jid, whatsapp_contacts.lid_jid),
+          name = COALESCE(excluded.name, whatsapp_contacts.name),
+          notify_name = COALESCE(excluded.notify_name, whatsapp_contacts.notify_name),
+          verified_name = COALESCE(excluded.verified_name, whatsapp_contacts.verified_name),
+          raw_json = COALESCE(excluded.raw_json, whatsapp_contacts.raw_json),
+          last_seen_at = excluded.last_seen_at
+      `)
+      .run(
+        record.accountId,
+        record.contactJid,
+        record.phoneNumber ?? null,
+        record.lidJid ?? null,
+        record.name ?? null,
+        record.notifyName ?? null,
+        record.verifiedName ?? null,
+        record.rawJson ?? null,
+        record.firstSeenAt,
+        record.lastSeenAt,
+      );
+  }
+
+  saveWhatsAppChat(record: WhatsAppChatRecord): void {
+    this.db
+      .prepare(`
+        INSERT INTO whatsapp_chats
+          (account_id, chat_jid, chat_type, display_name, unread_count, last_message_at, archived, pinned, muted_until, raw_json, first_seen_at, last_seen_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(account_id, chat_jid) DO UPDATE SET
+          chat_type = excluded.chat_type,
+          display_name = COALESCE(excluded.display_name, whatsapp_chats.display_name),
+          unread_count = COALESCE(excluded.unread_count, whatsapp_chats.unread_count),
+          last_message_at = COALESCE(excluded.last_message_at, whatsapp_chats.last_message_at),
+          archived = COALESCE(excluded.archived, whatsapp_chats.archived),
+          pinned = COALESCE(excluded.pinned, whatsapp_chats.pinned),
+          muted_until = COALESCE(excluded.muted_until, whatsapp_chats.muted_until),
+          raw_json = COALESCE(excluded.raw_json, whatsapp_chats.raw_json),
+          last_seen_at = excluded.last_seen_at
+      `)
+      .run(
+        record.accountId,
+        record.chatJid,
+        record.chatType,
+        record.displayName ?? null,
+        record.unreadCount ?? null,
+        record.lastMessageAt ?? null,
+        record.archived === undefined ? null : Number(record.archived),
+        record.pinned === undefined ? null : Number(record.pinned),
+        record.mutedUntil ?? null,
+        record.rawJson ?? null,
+        record.firstSeenAt,
+        record.lastSeenAt,
+      );
+  }
+
+  saveWhatsAppMessage(record: WhatsAppStoredMessageRecord): void {
+    this.db
+      .prepare(`
+        INSERT INTO whatsapp_messages
+          (account_id, chat_jid, message_id, sender_jid, from_me, timestamp, message_type, text, media_json, reaction_json, raw_json, received_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(account_id, chat_jid, message_id) DO UPDATE SET
+          sender_jid = COALESCE(excluded.sender_jid, whatsapp_messages.sender_jid),
+          from_me = excluded.from_me,
+          timestamp = excluded.timestamp,
+          message_type = COALESCE(excluded.message_type, whatsapp_messages.message_type),
+          text = COALESCE(excluded.text, whatsapp_messages.text),
+          media_json = COALESCE(excluded.media_json, whatsapp_messages.media_json),
+          reaction_json = COALESCE(excluded.reaction_json, whatsapp_messages.reaction_json),
+          raw_json = COALESCE(excluded.raw_json, whatsapp_messages.raw_json),
+          received_at = excluded.received_at
+      `)
+      .run(
+        record.accountId,
+        record.chatJid,
+        record.messageId,
+        record.senderJid ?? null,
+        Number(record.fromMe),
+        record.timestamp,
+        record.messageType ?? null,
+        record.text ?? null,
+        record.mediaJson ?? null,
+        record.reactionJson ?? null,
+        record.rawJson ?? null,
+        record.receivedAt,
+      );
+  }
+
+  saveWhatsAppLidMapping(record: WhatsAppLidMappingRecord): void {
+    this.db
+      .prepare(`
+        INSERT INTO whatsapp_lid_mappings
+          (account_id, lid_jid, pn_jid, source, raw_json, first_seen_at, last_seen_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(account_id, lid_jid) DO UPDATE SET
+          pn_jid = excluded.pn_jid,
+          source = excluded.source,
+          raw_json = COALESCE(excluded.raw_json, whatsapp_lid_mappings.raw_json),
+          last_seen_at = excluded.last_seen_at
+      `)
+      .run(
+        record.accountId,
+        record.lidJid,
+        record.pnJid,
+        record.source,
+        record.rawJson ?? null,
+        record.firstSeenAt,
+        record.lastSeenAt,
+      );
+  }
+
+  saveWhatsAppHistorySyncBatch(record: WhatsAppHistorySyncBatchRecord): void {
+    this.db
+      .prepare(`
+        INSERT INTO whatsapp_history_sync_batches
+          (id, account_id, sync_type, chat_count, contact_count, message_count, raw_json, received_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(id) DO UPDATE SET
+          sync_type = COALESCE(excluded.sync_type, whatsapp_history_sync_batches.sync_type),
+          chat_count = excluded.chat_count,
+          contact_count = excluded.contact_count,
+          message_count = excluded.message_count,
+          raw_json = COALESCE(excluded.raw_json, whatsapp_history_sync_batches.raw_json),
+          received_at = excluded.received_at
+      `)
+      .run(
+        record.id,
+        record.accountId,
+        record.syncType ?? null,
+        record.chatCount,
+        record.contactCount,
+        record.messageCount,
+        record.rawJson ?? null,
+        record.receivedAt,
+      );
+  }
+
+  saveWhatsAppSyncEvent(record: WhatsAppSyncEventRecord): void {
+    this.db
+      .prepare(`
+        INSERT OR IGNORE INTO whatsapp_sync_events
+          (id, account_id, event_type, payload_hash, raw_json, received_at)
+        VALUES (?, ?, ?, ?, ?, ?)
+      `)
+      .run(
+        record.id,
+        record.accountId,
+        record.eventType,
+        record.payloadHash,
+        record.rawJson ?? null,
+        record.receivedAt,
+      );
+  }
+
+  getWhatsAppSyncSummary(accountId?: string): WhatsAppSyncSummary {
+    return {
+      contacts: this.countRows("whatsapp_contacts", accountId),
+      chats: this.countRows("whatsapp_chats", accountId),
+      messages: this.countRows("whatsapp_messages", accountId),
+      lidMappings: this.countRows("whatsapp_lid_mappings", accountId),
+      historySyncBatches: this.countRows("whatsapp_history_sync_batches", accountId),
+      syncEvents: this.countRows("whatsapp_sync_events", accountId),
+    };
+  }
+
+  listWhatsAppContacts(accountId?: string, limit = 200): WhatsAppContactRecord[] {
+    const { clause, args } = accountWhereClause(accountId);
+    return this.db
+      .prepare(`SELECT * FROM whatsapp_contacts ${clause} ORDER BY last_seen_at DESC LIMIT ?`)
+      .all(...args, safeLimit(limit))
+      .map(rowToWhatsAppContact);
+  }
+
+  listWhatsAppChats(accountId?: string, limit = 200): WhatsAppChatRecord[] {
+    const { clause, args } = accountWhereClause(accountId);
+    return this.db
+      .prepare(`SELECT * FROM whatsapp_chats ${clause} ORDER BY COALESCE(last_message_at, last_seen_at) DESC LIMIT ?`)
+      .all(...args, safeLimit(limit))
+      .map(rowToWhatsAppChat);
+  }
+
+  listWhatsAppMessages(input: { accountId?: string; chatJid?: string; limit?: number } = {}): WhatsAppStoredMessageRecord[] {
+    const filters: string[] = [];
+    const args: string[] = [];
+    if (input.accountId?.trim()) {
+      filters.push("account_id = ?");
+      args.push(input.accountId.trim());
+    }
+    if (input.chatJid?.trim()) {
+      filters.push("chat_jid = ?");
+      args.push(input.chatJid.trim());
+    }
+    const clause = filters.length ? `WHERE ${filters.join(" AND ")}` : "";
+    return this.db
+      .prepare(`SELECT * FROM whatsapp_messages ${clause} ORDER BY timestamp DESC LIMIT ?`)
+      .all(...args, safeLimit(input.limit))
+      .map(rowToWhatsAppMessage);
+  }
+
+  listWhatsAppLidMappings(accountId?: string, limit = 200): WhatsAppLidMappingRecord[] {
+    const { clause, args } = accountWhereClause(accountId);
+    return this.db
+      .prepare(`SELECT * FROM whatsapp_lid_mappings ${clause} ORDER BY last_seen_at DESC LIMIT ?`)
+      .all(...args, safeLimit(limit))
+      .map(rowToWhatsAppLidMapping);
+  }
+
+  listWhatsAppHistorySyncBatches(accountId?: string, limit = 200): WhatsAppHistorySyncBatchRecord[] {
+    const { clause, args } = accountWhereClause(accountId);
+    return this.db
+      .prepare(`SELECT * FROM whatsapp_history_sync_batches ${clause} ORDER BY received_at DESC LIMIT ?`)
+      .all(...args, safeLimit(limit))
+      .map(rowToWhatsAppHistorySyncBatch);
+  }
+
+  listWhatsAppSyncEvents(accountId?: string, limit = 200): WhatsAppSyncEventRecord[] {
+    const { clause, args } = accountWhereClause(accountId);
+    return this.db
+      .prepare(`SELECT * FROM whatsapp_sync_events ${clause} ORDER BY received_at DESC LIMIT ?`)
+      .all(...args, safeLimit(limit))
+      .map(rowToWhatsAppSyncEvent);
+  }
+
   private migrate() {
     this.db.exec(`
       CREATE TABLE IF NOT EXISTS hermes_sessions (
@@ -501,9 +746,117 @@ export class SqliteBridgeStateStore
 
       CREATE INDEX IF NOT EXISTS audit_logs_created_at_idx
         ON audit_logs(created_at DESC);
+
+      CREATE TABLE IF NOT EXISTS whatsapp_contacts (
+        account_id TEXT NOT NULL,
+        contact_jid TEXT NOT NULL,
+        phone_number TEXT,
+        lid_jid TEXT,
+        name TEXT,
+        notify_name TEXT,
+        verified_name TEXT,
+        raw_json TEXT,
+        first_seen_at TEXT NOT NULL,
+        last_seen_at TEXT NOT NULL,
+        PRIMARY KEY (account_id, contact_jid)
+      );
+
+      CREATE INDEX IF NOT EXISTS whatsapp_contacts_account_last_seen_idx
+        ON whatsapp_contacts(account_id, last_seen_at DESC);
+
+      CREATE TABLE IF NOT EXISTS whatsapp_chats (
+        account_id TEXT NOT NULL,
+        chat_jid TEXT NOT NULL,
+        chat_type TEXT NOT NULL,
+        display_name TEXT,
+        unread_count INTEGER,
+        last_message_at TEXT,
+        archived INTEGER,
+        pinned INTEGER,
+        muted_until TEXT,
+        raw_json TEXT,
+        first_seen_at TEXT NOT NULL,
+        last_seen_at TEXT NOT NULL,
+        PRIMARY KEY (account_id, chat_jid)
+      );
+
+      CREATE INDEX IF NOT EXISTS whatsapp_chats_account_last_message_idx
+        ON whatsapp_chats(account_id, last_message_at DESC);
+
+      CREATE TABLE IF NOT EXISTS whatsapp_messages (
+        account_id TEXT NOT NULL,
+        chat_jid TEXT NOT NULL,
+        message_id TEXT NOT NULL,
+        sender_jid TEXT,
+        from_me INTEGER NOT NULL,
+        timestamp TEXT NOT NULL,
+        message_type TEXT,
+        text TEXT,
+        media_json TEXT,
+        reaction_json TEXT,
+        raw_json TEXT,
+        received_at TEXT NOT NULL,
+        PRIMARY KEY (account_id, chat_jid, message_id)
+      );
+
+      CREATE INDEX IF NOT EXISTS whatsapp_messages_chat_timestamp_idx
+        ON whatsapp_messages(account_id, chat_jid, timestamp DESC);
+
+      CREATE TABLE IF NOT EXISTS whatsapp_lid_mappings (
+        account_id TEXT NOT NULL,
+        lid_jid TEXT NOT NULL,
+        pn_jid TEXT NOT NULL,
+        source TEXT NOT NULL,
+        raw_json TEXT,
+        first_seen_at TEXT NOT NULL,
+        last_seen_at TEXT NOT NULL,
+        PRIMARY KEY (account_id, lid_jid)
+      );
+
+      CREATE INDEX IF NOT EXISTS whatsapp_lid_mappings_pn_idx
+        ON whatsapp_lid_mappings(account_id, pn_jid);
+
+      CREATE TABLE IF NOT EXISTS whatsapp_history_sync_batches (
+        id TEXT PRIMARY KEY,
+        account_id TEXT NOT NULL,
+        sync_type TEXT,
+        chat_count INTEGER NOT NULL,
+        contact_count INTEGER NOT NULL,
+        message_count INTEGER NOT NULL,
+        raw_json TEXT,
+        received_at TEXT NOT NULL
+      );
+
+      CREATE INDEX IF NOT EXISTS whatsapp_history_sync_batches_account_idx
+        ON whatsapp_history_sync_batches(account_id, received_at DESC);
+
+      CREATE TABLE IF NOT EXISTS whatsapp_sync_events (
+        id TEXT PRIMARY KEY,
+        account_id TEXT NOT NULL,
+        event_type TEXT NOT NULL,
+        payload_hash TEXT NOT NULL,
+        raw_json TEXT,
+        received_at TEXT NOT NULL
+      );
+
+      CREATE INDEX IF NOT EXISTS whatsapp_sync_events_account_idx
+        ON whatsapp_sync_events(account_id, received_at DESC);
     `);
     this.ensureColumn("delivery_records", "inbound_text", "TEXT");
     this.ensureColumn("delivery_records", "failure_stage", "TEXT");
+    this.cleanupBlockedNumberRuleDeliveries();
+  }
+
+  private cleanupBlockedNumberRuleDeliveries() {
+    this.db
+      .prepare(`
+        UPDATE delivery_records
+        SET status = 'ignored',
+            failure_stage = NULL
+        WHERE error LIKE 'Blocked by number rule%'
+          AND (status != 'ignored' OR failure_stage IS NOT NULL)
+      `)
+      .run();
   }
 
   private ensureColumn(table: string, column: string, type: string) {
@@ -511,6 +864,18 @@ export class SqliteBridgeStateStore
     if (!rows.some((row) => row.name === column)) {
       this.db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${type}`);
     }
+  }
+
+  private countRows(table: string, accountId?: string): number {
+    if (accountId?.trim()) {
+      const row = this.db.prepare(`SELECT COUNT(*) AS count FROM ${table} WHERE account_id = ?`).get(accountId.trim()) as {
+        count?: number;
+      };
+      return Number(row?.count ?? 0);
+    }
+
+    const row = this.db.prepare(`SELECT COUNT(*) AS count FROM ${table}`).get() as { count?: number };
+    return Number(row?.count ?? 0);
   }
 }
 
@@ -546,8 +911,6 @@ function rowToSession(row: unknown): HermesSession {
 function rowToDelivery(row: unknown): DeliveryRecord {
   const value = row as Record<string, string | number | null>;
   const failureStage = value.failure_stage;
-  const error = value.error ? String(value.error) : undefined;
-  const isNumberRuleBlocked = error?.startsWith("Blocked by number rule") ?? false;
   return {
     id: String(value.id),
     accountId: String(value.account_id),
@@ -557,10 +920,10 @@ function rowToDelivery(row: unknown): DeliveryRecord {
     inboundMessageId: String(value.inbound_message_id),
     ...(value.inbound_text ? { inboundText: String(value.inbound_text) } : {}),
     outboundText: String(value.outbound_text),
-    status: isNumberRuleBlocked ? "ignored" : String(value.status) as DeliveryRecord["status"],
+    status: String(value.status) as DeliveryRecord["status"],
     attempts: Number(value.attempts),
-    ...(!isNumberRuleBlocked && (failureStage === "hermes" || failureStage === "whatsapp") ? { failureStage } : {}),
-    ...(error ? { error } : {}),
+    ...(failureStage === "hermes" || failureStage === "whatsapp" ? { failureStage } : {}),
+    ...(value.error ? { error: String(value.error) } : {}),
     createdAt: String(value.created_at),
     updatedAt: String(value.updated_at),
   };
@@ -615,6 +978,109 @@ function rowToAuditLog(row: unknown): AuditLogRecord {
     ...(detailsJson ? { details: parseDetailsJson(detailsJson) } : {}),
     createdAt: String(value.created_at),
   };
+}
+
+function rowToWhatsAppContact(row: unknown): WhatsAppContactRecord {
+  const value = row as Record<string, string | null>;
+  return {
+    accountId: String(value.account_id),
+    contactJid: String(value.contact_jid),
+    ...(value.phone_number ? { phoneNumber: String(value.phone_number) } : {}),
+    ...(value.lid_jid ? { lidJid: String(value.lid_jid) } : {}),
+    ...(value.name ? { name: String(value.name) } : {}),
+    ...(value.notify_name ? { notifyName: String(value.notify_name) } : {}),
+    ...(value.verified_name ? { verifiedName: String(value.verified_name) } : {}),
+    ...(value.raw_json ? { rawJson: String(value.raw_json) } : {}),
+    firstSeenAt: String(value.first_seen_at),
+    lastSeenAt: String(value.last_seen_at),
+  };
+}
+
+function rowToWhatsAppChat(row: unknown): WhatsAppChatRecord {
+  const value = row as Record<string, string | number | null>;
+  return {
+    accountId: String(value.account_id),
+    chatJid: String(value.chat_jid),
+    chatType: String(value.chat_type) as WhatsAppChatRecord["chatType"],
+    ...(value.display_name ? { displayName: String(value.display_name) } : {}),
+    ...(value.unread_count !== null && value.unread_count !== undefined ? { unreadCount: Number(value.unread_count) } : {}),
+    ...(value.last_message_at ? { lastMessageAt: String(value.last_message_at) } : {}),
+    ...(value.archived !== null && value.archived !== undefined ? { archived: Boolean(value.archived) } : {}),
+    ...(value.pinned !== null && value.pinned !== undefined ? { pinned: Boolean(value.pinned) } : {}),
+    ...(value.muted_until ? { mutedUntil: String(value.muted_until) } : {}),
+    ...(value.raw_json ? { rawJson: String(value.raw_json) } : {}),
+    firstSeenAt: String(value.first_seen_at),
+    lastSeenAt: String(value.last_seen_at),
+  };
+}
+
+function rowToWhatsAppMessage(row: unknown): WhatsAppStoredMessageRecord {
+  const value = row as Record<string, string | number | null>;
+  return {
+    accountId: String(value.account_id),
+    chatJid: String(value.chat_jid),
+    messageId: String(value.message_id),
+    ...(value.sender_jid ? { senderJid: String(value.sender_jid) } : {}),
+    fromMe: Boolean(value.from_me),
+    timestamp: String(value.timestamp),
+    ...(value.message_type ? { messageType: String(value.message_type) } : {}),
+    ...(value.text ? { text: String(value.text) } : {}),
+    ...(value.media_json ? { mediaJson: String(value.media_json) } : {}),
+    ...(value.reaction_json ? { reactionJson: String(value.reaction_json) } : {}),
+    ...(value.raw_json ? { rawJson: String(value.raw_json) } : {}),
+    receivedAt: String(value.received_at),
+  };
+}
+
+function rowToWhatsAppLidMapping(row: unknown): WhatsAppLidMappingRecord {
+  const value = row as Record<string, string | null>;
+  return {
+    accountId: String(value.account_id),
+    lidJid: String(value.lid_jid),
+    pnJid: String(value.pn_jid),
+    source: String(value.source),
+    ...(value.raw_json ? { rawJson: String(value.raw_json) } : {}),
+    firstSeenAt: String(value.first_seen_at),
+    lastSeenAt: String(value.last_seen_at),
+  };
+}
+
+function rowToWhatsAppHistorySyncBatch(row: unknown): WhatsAppHistorySyncBatchRecord {
+  const value = row as Record<string, string | number | null>;
+  return {
+    id: String(value.id),
+    accountId: String(value.account_id),
+    ...(value.sync_type ? { syncType: String(value.sync_type) } : {}),
+    chatCount: Number(value.chat_count),
+    contactCount: Number(value.contact_count),
+    messageCount: Number(value.message_count),
+    ...(value.raw_json ? { rawJson: String(value.raw_json) } : {}),
+    receivedAt: String(value.received_at),
+  };
+}
+
+function rowToWhatsAppSyncEvent(row: unknown): WhatsAppSyncEventRecord {
+  const value = row as Record<string, string | null>;
+  return {
+    id: String(value.id),
+    accountId: String(value.account_id),
+    eventType: String(value.event_type) as WhatsAppSyncEventRecord["eventType"],
+    payloadHash: String(value.payload_hash),
+    ...(value.raw_json ? { rawJson: String(value.raw_json) } : {}),
+    receivedAt: String(value.received_at),
+  };
+}
+
+function accountWhereClause(accountId?: string) {
+  if (!accountId?.trim()) {
+    return { clause: "", args: [] as string[] };
+  }
+
+  return { clause: "WHERE account_id = ?", args: [accountId.trim()] };
+}
+
+function safeLimit(limit: number | undefined) {
+  return Math.min(Math.max(Math.trunc(limit ?? 200), 1), 1000);
 }
 
 function parseDetailsJson(value: string): Record<string, unknown> {

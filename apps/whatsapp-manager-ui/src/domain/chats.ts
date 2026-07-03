@@ -1,5 +1,4 @@
 import type { ChatMessage, ChatSummary, DeliveryRecord, SessionMapping } from "./models";
-import { getDeliveryStatus, isFailedDelivery } from "./deliveries";
 
 export function buildChatSummaries(
   accountId: string,
@@ -37,7 +36,7 @@ export function buildChatSummaries(
       createdAt: current?.createdAt ?? delivery.createdAt,
       updatedAt,
       deliveryCount: (current?.deliveryCount ?? 0) + 1,
-      failedCount: (current?.failedCount ?? 0) + (isFailedDelivery(delivery) ? 1 : 0),
+      failedCount: (current?.failedCount ?? 0) + (delivery.status === "failed" ? 1 : 0),
       messageCount: (current?.messageCount ?? 0) + countDeliveryMessages(delivery),
       ...(current?.hermesSessionId ? { hermesSessionId: current.hermesSessionId } : {}),
       ...(lastText ? { lastText } : {}),
@@ -60,7 +59,7 @@ export function buildChatMessages(deliveries: DeliveryRecord[]): ChatMessage[] {
           id: `${delivery.id}:inbound`,
           direction: "inbound",
           text: delivery.inboundText,
-          status: getDeliveryStatus(delivery),
+          status: delivery.status,
           timestamp: delivery.createdAt,
           record: delivery,
         });
@@ -70,7 +69,7 @@ export function buildChatMessages(deliveries: DeliveryRecord[]): ChatMessage[] {
           id: `${delivery.id}:outbound`,
           direction: "outbound",
           text: delivery.outboundText,
-          status: getDeliveryStatus(delivery),
+          status: delivery.status,
           timestamp: delivery.updatedAt,
           record: delivery,
         });

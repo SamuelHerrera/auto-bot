@@ -8,6 +8,24 @@ export type MediaType = "image" | "video" | "audio" | "document";
 export type NumberRuleAction = "allow" | "deny";
 export type NumberRuleMatchType = "all" | "exact" | "regex";
 export type AuditLogOutcome = "success" | "failure" | "ignored";
+export type WhatsAppSyncEventType =
+  | "messaging-history.set"
+  | "messaging-history.status"
+  | "chats.upsert"
+  | "chats.update"
+  | "chats.delete"
+  | "contacts.upsert"
+  | "contacts.update"
+  | "messages.delete"
+  | "messages.media-update"
+  | "messages.reaction"
+  | "messages.upsert"
+  | "messages.update"
+  | "message-receipt.update"
+  | "groups.upsert"
+  | "groups.update"
+  | "group-participants.update"
+  | "lid-mapping.update";
 
 export interface WhatsAppMediaAttachment {
   type: MediaType;
@@ -164,6 +182,97 @@ export interface AuditLogInput {
   resourceType?: string;
   resourceId?: string;
   details?: Record<string, unknown>;
+}
+
+export interface WhatsAppContactRecord {
+  accountId: string;
+  contactJid: string;
+  phoneNumber?: string;
+  lidJid?: string;
+  name?: string;
+  notifyName?: string;
+  verifiedName?: string;
+  rawJson?: string;
+  firstSeenAt: string;
+  lastSeenAt: string;
+}
+
+export interface WhatsAppChatRecord {
+  accountId: string;
+  chatJid: string;
+  chatType: WhatsAppChatType;
+  displayName?: string;
+  unreadCount?: number;
+  lastMessageAt?: string;
+  archived?: boolean;
+  pinned?: boolean;
+  mutedUntil?: string;
+  rawJson?: string;
+  firstSeenAt: string;
+  lastSeenAt: string;
+}
+
+export interface WhatsAppStoredMessageRecord {
+  accountId: string;
+  chatJid: string;
+  messageId: string;
+  senderJid?: string;
+  fromMe: boolean;
+  timestamp: string;
+  messageType?: string;
+  text?: string;
+  mediaJson?: string;
+  reactionJson?: string;
+  rawJson?: string;
+  receivedAt: string;
+}
+
+export interface WhatsAppLidMappingRecord {
+  accountId: string;
+  lidJid: string;
+  pnJid: string;
+  source: string;
+  rawJson?: string;
+  firstSeenAt: string;
+  lastSeenAt: string;
+}
+
+export interface WhatsAppHistorySyncBatchRecord {
+  id: string;
+  accountId: string;
+  syncType?: string;
+  chatCount: number;
+  contactCount: number;
+  messageCount: number;
+  rawJson?: string;
+  receivedAt: string;
+}
+
+export interface WhatsAppSyncEventRecord {
+  id: string;
+  accountId: string;
+  eventType: WhatsAppSyncEventType;
+  payloadHash: string;
+  rawJson?: string;
+  receivedAt: string;
+}
+
+export interface WhatsAppSyncSummary {
+  contacts: number;
+  chats: number;
+  messages: number;
+  lidMappings: number;
+  historySyncBatches: number;
+  syncEvents: number;
+}
+
+export interface WhatsAppSyncSnapshot {
+  contacts: WhatsAppContactRecord[];
+  chats: WhatsAppChatRecord[];
+  messages: WhatsAppStoredMessageRecord[];
+  lidMappings: WhatsAppLidMappingRecord[];
+  historySyncBatches: WhatsAppHistorySyncBatchRecord[];
+  syncEvents: WhatsAppSyncEventRecord[];
 }
 
 export function getWhatsAppChatType(chatJid: string): WhatsAppChatType {
