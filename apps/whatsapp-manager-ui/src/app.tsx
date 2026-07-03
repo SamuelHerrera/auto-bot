@@ -712,7 +712,7 @@ export function App() {
                   }}
                 >
                   <span className={`status-dot status-dot-${account.status}`} />
-                  <span>{getAccountTabLabel(account)}</span>
+                  <AccountTabLabel account={account} />
                 </button>
                 <IconButton icon="mdi:close" label={`Close ${account.accountId}`} className="tab-close" variant="text" onClick={() => closeAccountTab(account.accountId)} />
               </div>
@@ -908,51 +908,54 @@ function NumberWorkspace({
     return <EmptyState title="Number unavailable" description="Select another number from the left rail." />;
   }
 
-  const hasAlias = Boolean(account.alias?.trim());
+  const messageCount = buildChatMessages(deliveries.filter((delivery) => delivery.chatType === "direct")).length;
 
   return (
     <>
       <div className="number-header">
-        <div className="number-title">
-          <span className="panel-kicker">Number</span>
-          <h2>{getAccountPrimaryLabel(account)}</h2>
-          {hasAlias ? <p>{account.accountId}</p> : null}
+        <div className="subnav" aria-label="Number sections">
+          <TabButton active={activeView === "home"} icon="mdi:view-dashboard-outline" onClick={() => onViewChange("home")}>
+            Home
+          </TabButton>
+          <TabButton active={activeView === "messages"} count={messageCount} icon="mdi:message-text-outline" onClick={() => onViewChange("messages")}>
+            Messages
+          </TabButton>
+          <TabButton active={activeView === "rules"} count={rules.length} icon="mdi:shield-check-outline" onClick={() => onViewChange("rules")}>
+            Rules
+          </TabButton>
+          <TabButton active={activeView === "failures"} count={failedDeliveries.length} icon="mdi:alert-circle-outline" onClick={() => onViewChange("failures")}>
+            Failures
+          </TabButton>
         </div>
         <div className="number-header-actions">
-          <AccountInfoPanel account={account} chatCount={chats.length} deliveryCount={deliveries.length} ruleCount={rules.length} />
-          <IconButton
-            icon="mdi:pencil-outline"
-            label="Edit alias"
-            variant="secondary"
-            onClick={() => setIsAliasDialogOpen(true)}
-            disabled={isPendingAccountId(account.accountId)}
-          />
           <span className={`badge badge-${account.status}`} title={getAccountStatusDetail(account)}>
             {account.status}
           </span>
-          <IconButton
-            icon="mdi:link-off"
-            label="Disconnect number"
-            variant="danger"
-            onClick={() => onDisconnect(account.accountId)}
-            disabled={isBusy || account.status === "disconnected"}
-          />
+          <details className="action-menu">
+            <summary aria-label="Account actions" title="Account actions">
+              <Icon icon="mdi:dots-vertical" aria-hidden="true" />
+            </summary>
+            <div className="action-menu-list">
+              <button
+                type="button"
+                onClick={() => setIsAliasDialogOpen(true)}
+                disabled={isPendingAccountId(account.accountId)}
+              >
+                <Icon icon="mdi:pencil-outline" aria-hidden="true" />
+                <span>Rename</span>
+              </button>
+              <button
+                type="button"
+                className="action-menu-danger"
+                onClick={() => onDisconnect(account.accountId)}
+                disabled={isBusy || account.status === "disconnected"}
+              >
+                <Icon icon="mdi:link-off" aria-hidden="true" />
+                <span>Disconnect</span>
+              </button>
+            </div>
+          </details>
         </div>
-      </div>
-
-      <div className="subnav" aria-label="Number sections">
-        <TabButton active={activeView === "home"} icon="mdi:view-dashboard-outline" onClick={() => onViewChange("home")}>
-          Home
-        </TabButton>
-        <TabButton active={activeView === "messages"} icon="mdi:message-text-outline" onClick={() => onViewChange("messages")}>
-          Messages
-        </TabButton>
-        <TabButton active={activeView === "rules"} icon="mdi:shield-check-outline" onClick={() => onViewChange("rules")}>
-          Rules
-        </TabButton>
-        <TabButton active={activeView === "failures"} icon="mdi:alert-circle-outline" onClick={() => onViewChange("failures")}>
-          Failures
-        </TabButton>
       </div>
 
       {activeView === "home" ? (
@@ -1017,51 +1020,18 @@ function NumberWorkspace({
   );
 }
 
-function AccountInfoPanel({
-  account,
-  chatCount,
-  deliveryCount,
-  ruleCount,
-}: {
-  account: WhatsAppAccount;
-  chatCount: number;
-  deliveryCount: number;
-  ruleCount: number;
-}) {
+function AccountTabLabel({ account }: { account: WhatsAppAccount }) {
+  const alias = account.alias?.trim();
+
+  if (!alias || isPendingAccountId(account.accountId)) {
+    return <span className="workspace-tab-label">{getAccountTabLabel(account)}</span>;
+  }
+
   return (
-    <details className="account-info-panel">
-      <summary aria-label="Show account details" title="Account details">
-        <Icon icon="mdi:information-outline" aria-hidden="true" />
-      </summary>
-      <dl>
-        <div>
-          <dt>Account</dt>
-          <dd>{account.accountId}</dd>
-        </div>
-        <div>
-          <dt>Connection</dt>
-          <dd>{getAccountActivity(account)}</dd>
-        </div>
-        <div>
-          <dt>Chats</dt>
-          <dd>{chatCount}</dd>
-        </div>
-        <div>
-          <dt>Deliveries</dt>
-          <dd>{deliveryCount}</dd>
-        </div>
-        <div>
-          <dt>Rules</dt>
-          <dd>{ruleCount}</dd>
-        </div>
-        {account.lastError ? (
-          <div>
-            <dt>Last error</dt>
-            <dd>{account.lastError}</dd>
-          </div>
-        ) : null}
-      </dl>
-    </details>
+    <span className="workspace-tab-label workspace-tab-label-stacked">
+      <strong>{alias}</strong>
+      <small>{account.accountId}</small>
+    </span>
   );
 }
 
@@ -1373,13 +1343,6 @@ function MessagesView({
     <div className="messages-view">
       <div className="chat-workspace">
         <section className="chat-list-pane">
-          <div className="section-heading">
-            <div>
-              <span className="panel-kicker">Direct chats</span>
-              <h3>Known conversations</h3>
-            </div>
-          </div>
-
           <div className="chat-list">
             {!activeAccountId ? (
               <EmptyState title="Select an account" description="Chats are scoped to one managed WhatsApp number." />
@@ -1407,13 +1370,6 @@ function MessagesView({
         </section>
 
         <section className="chat-detail-pane">
-          <div className="section-heading">
-            <div>
-              <span className="panel-kicker">Transcript</span>
-              <h3>{activeChat?.chatJid ?? "No chat selected"}</h3>
-            </div>
-          </div>
-
           {activeChat ? (
             <div className="chat-detail-content">
               <dl className="detail-list">
@@ -1494,13 +1450,6 @@ function RulesView({
 }) {
   return (
     <>
-      <div className="section-heading">
-        <div>
-          <span className="panel-kicker">Rules</span>
-          <h2>Approved number controls</h2>
-        </div>
-      </div>
-
       <form className="rule-form" onSubmit={onCreate}>
         <label className="compact-field">
           <span>Action</span>
@@ -1582,14 +1531,6 @@ function FailuresView({
 }) {
   return (
     <>
-      <div className="section-heading">
-        <div>
-          <span className="panel-kicker">Failures</span>
-          <h2>Delivery recovery</h2>
-        </div>
-        <span className="count-pill">{failedDeliveries.length} failed</span>
-      </div>
-
       <div className="compact-list">
         {failedDeliveries.length === 0 ? (
           <EmptyState title="No failures" description="Failed Hermes or WhatsApp deliveries will appear here." />
@@ -1744,18 +1685,23 @@ function LogsView({
 function TabButton({
   active,
   children,
+  count,
   icon,
   onClick,
 }: {
   active: boolean;
+  count?: number;
   icon: string;
   children: string;
   onClick: () => void;
 }) {
+  const label = typeof count === "number" ? `${children}, ${count}` : children;
+
   return (
-    <button className={`nav-button icon-tab-button${active ? " nav-button-active" : ""}`} onClick={onClick} aria-label={children} title={children}>
+    <button className={`nav-button icon-tab-button${active ? " nav-button-active" : ""}`} onClick={onClick} aria-label={label} title={label}>
       <Icon icon={icon} aria-hidden="true" />
       <span>{children}</span>
+      {typeof count === "number" ? <span className="tab-count">{count}</span> : null}
     </button>
   );
 }
