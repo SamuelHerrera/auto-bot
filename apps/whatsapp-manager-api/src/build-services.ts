@@ -4,6 +4,7 @@ import {
   type AuditLogStore,
   type BridgeDeliveryStore,
   InMemoryChatSessionRouter,
+  type ManagerChatMetadataStore,
   type NumberRuleStore,
   type WhatsAppSyncStore,
 } from "./services/chat-session-router.js";
@@ -28,6 +29,7 @@ export interface AppServices {
   numberRuleStore?: NumberRuleStore;
   auditLogStore?: AuditLogStore;
   accountMetadataStore?: AccountMetadataStore;
+  managerChatMetadataStore?: ManagerChatMetadataStore;
   whatsappSyncStore?: WhatsAppSyncStore;
   eventBus: AppEventBus;
 }
@@ -189,6 +191,7 @@ export function buildServices(config: AppConfig): AppServices {
     ...(bridgeStore instanceof SqliteBridgeStateStore ? { numberRuleStore: bridgeStore } : {}),
     ...(bridgeStore instanceof SqliteBridgeStateStore ? { auditLogStore: bridgeStore } : {}),
     ...(bridgeStore instanceof SqliteBridgeStateStore ? { accountMetadataStore: bridgeStore } : {}),
+    ...(bridgeStore instanceof SqliteBridgeStateStore ? { managerChatMetadataStore: bridgeStore } : {}),
     ...(bridgeStore instanceof SqliteBridgeStateStore ? { whatsappSyncStore: bridgeStore } : {}),
   };
 }

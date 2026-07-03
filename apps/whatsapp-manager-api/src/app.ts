@@ -247,6 +247,31 @@ export function createApp({ config, services = buildServices(config) }: CreateAp
     items: services.deliveryStore?.listDeliveries() ?? [],
   }));
 
+  app.get<{ Querystring: { accountId?: string } }>("/manager/chats", async (request) => ({
+    items: services.managerChatMetadataStore?.listManagerChatMetadata(request.query.accountId) ?? [],
+  }));
+
+  app.patch<{ Body: unknown }>("/manager/chats", async (request, reply) => {
+    if (!services.managerChatMetadataStore) {
+      return reply.code(503).send({ error: "Manager chat metadata storage is not configured" });
+    }
+
+    const input = parseManagerChatMetadataInput(request.body);
+    const metadata = services.managerChatMetadataStore.setManagerChatArchived(input);
+    services.eventBus.publish("activity");
+    audit({
+      action: metadata.archived ? "manager-chat.archive" : "manager-chat.unarchive",
+      resourceType: "manager-chat",
+      resourceId: `${metadata.accountId}:${metadata.chatJid}`,
+      details: {
+        accountId: metadata.accountId,
+        chatJid: metadata.chatJid,
+        archived: metadata.archived,
+      },
+    });
+    return metadata;
+  });
+
   app.get<{ Querystring: { accountId?: string } }>("/whatsapp/sync/summary", async (request) => (
     services.whatsappSyncStore?.getWhatsAppSyncSummary(request.query.accountId) ?? emptyWhatsAppSyncSummary()
   ));
@@ -680,6 +705,31 @@ function parseAccountAliasInput(body: unknown) {
   }
 
   return alias;
+}
+
+function parseManagerChatMetadataInput(body: unknown) {
+  if (!body || typeof body !== "object") {
+    throw badRequest("Manager chat payload must be an object");
+  }
+
+  const value = body as Record<string, unknown>;
+  const accountId = readString(value.accountId, "").trim();
+  const chatJid = readString(value.chatJid, "").trim();
+  if (!accountId) {
+    throw badRequest("accountId is required");
+  }
+  if (!chatJid) {
+    throw badRequest("chatJid is required");
+  }
+  if (typeof value.archived !== "boolean") {
+    throw badRequest("archived must be boolean");
+  }
+
+  return {
+    accountId,
+    chatJid,
+    archived: value.archived,
+  };
 }
 
 function mergeAccountMetadata<T extends { accountId: string }>(

@@ -2,6 +2,7 @@ import type {
   ChatMessage,
   ChatSummary,
   DeliveryRecord,
+  ManagerChatMetadata,
   SessionMapping,
   WhatsAppContact,
   WhatsAppLidMapping,
@@ -21,12 +22,18 @@ export function buildChatSummaries(
   syncedChats: WhatsAppSyncedChat[] = [],
   syncedMessages: WhatsAppSyncedMessage[] = [],
   contactDisplayIndex: ContactDisplayIndex = new Map(),
+  managerChatMetadata: ManagerChatMetadata[] = [],
 ): ChatSummary[] {
   if (!accountId) {
     return [];
   }
 
   const chats = new Map<string, ChatSummary>();
+  const managerMetadataByChatJid = new Map(
+    managerChatMetadata
+      .filter((item) => item.accountId === accountId)
+      .map((item) => [item.chatJid, item]),
+  );
   const syncedMessageCounts = countMessagesByChat(syncedMessages.filter((item) => item.accountId === accountId));
   const appliedSyncedMessageCounts = new Set<string>();
 
@@ -45,6 +52,7 @@ export function buildChatSummaries(
       failedCount: 0,
       messageCount: syncedMessageCounts.get(syncedChat.chatJid) ?? 0,
       ...(syncedChat.unreadCount !== undefined ? { unreadCount: syncedChat.unreadCount } : {}),
+      managerArchived: managerMetadataByChatJid.get(syncedChat.chatJid)?.archived ?? false,
       source: "synced",
     });
     appliedSyncedMessageCounts.add(syncedChat.chatJid);
@@ -64,6 +72,7 @@ export function buildChatSummaries(
       failedCount: current?.failedCount ?? 0,
       messageCount: current?.messageCount ?? 0,
       ...(current?.unreadCount !== undefined ? { unreadCount: current.unreadCount } : {}),
+      managerArchived: managerMetadataByChatJid.get(mapping.chatJid)?.archived ?? current?.managerArchived ?? false,
       source: current ? "mixed" : "routed",
       ...(current?.lastText ? { lastText: current.lastText } : {}),
     });
@@ -84,6 +93,7 @@ export function buildChatSummaries(
       failedCount: (current?.failedCount ?? 0) + (delivery.status === "failed" ? 1 : 0),
       messageCount: (current?.messageCount ?? 0) + countDeliveryMessages(delivery),
       ...(current?.unreadCount !== undefined ? { unreadCount: current.unreadCount } : {}),
+      managerArchived: managerMetadataByChatJid.get(delivery.chatJid)?.archived ?? current?.managerArchived ?? false,
       source: current?.source === "synced" || current?.source === "mixed" ? "mixed" : "routed",
       ...(current?.hermesSessionId ? { hermesSessionId: current.hermesSessionId } : {}),
       ...(lastText ? { lastText } : {}),
@@ -101,6 +111,7 @@ export function buildChatSummaries(
         deliveryCount: 0,
         failedCount: 0,
         messageCount: syncedMessageCounts.get(message.chatJid) ?? 1,
+        managerArchived: managerMetadataByChatJid.get(message.chatJid)?.archived ?? false,
         source: "synced",
         ...(message.text ? { lastText: message.text } : {}),
       });
@@ -114,6 +125,7 @@ export function buildChatSummaries(
       ...current,
       updatedAt: maxTimestamp(current.updatedAt, message.timestamp),
       messageCount: shouldApplySyncedCount ? current.messageCount + (syncedMessageCounts.get(message.chatJid) ?? 0) : current.messageCount,
+      managerArchived: managerMetadataByChatJid.get(message.chatJid)?.archived ?? current.managerArchived,
       source: current.source === "routed" ? "mixed" : current.source,
       ...(messageIsNewer && message.text ? { lastText: message.text } : {}),
     });

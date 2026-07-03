@@ -16,6 +16,14 @@ export interface WhatsAppAccount {
   lastError?: string;
 }
 
+export interface ManagerChatMetadata {
+  accountId: string;
+  chatJid: string;
+  archived: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface SessionMapping {
   sessionKey: string;
   accountId: string;
@@ -164,6 +172,7 @@ export interface ChatSummary {
   failedCount: number;
   messageCount: number;
   unreadCount?: number;
+  managerArchived: boolean;
   source: "routed" | "synced" | "mixed";
   lastText?: string;
 }

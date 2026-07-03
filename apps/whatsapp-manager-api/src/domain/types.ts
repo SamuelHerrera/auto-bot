@@ -110,6 +110,14 @@ export interface WhatsAppAccountMetadata {
   updatedAt: string;
 }
 
+export interface ManagerChatMetadata {
+  accountId: string;
+  chatJid: WhatsAppChatId;
+  archived: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface InboundMessageResult {
   duplicate: boolean;
   mapping?: ChatSessionMapping;

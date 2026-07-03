@@ -1367,6 +1367,38 @@ button {
   overflow: hidden;
 }
 
+.chat-list-toolbar {
+  background: #ffffff;
+  border-bottom: 1px solid #e5ebe6;
+  padding: 10px 12px;
+}
+
+.segmented-control {
+  background: #edf3ef;
+  border: 1px solid #d8e4dc;
+  border-radius: 8px;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  overflow: hidden;
+}
+
+.segmented-control button {
+  background: transparent;
+  border: 0;
+  color: #45534b;
+  font: inherit;
+  font-size: 0.84rem;
+  font-weight: 800;
+  min-height: 34px;
+  padding: 7px 10px;
+}
+
+.segmented-control .segmented-control-active {
+  background: #ffffff;
+  color: #0f6b45;
+  box-shadow: inset 0 0 0 1px #c7dccf;
+}
+
 .chat-list {
   display: block;
   flex: 1 1 auto;
@@ -1376,18 +1408,29 @@ button {
 
 .chat-row {
   background: #ffffff;
-  border: 0;
   border-bottom: 1px solid #e5ebe6;
   border-radius: 0;
   color: inherit;
-  align-items: start;
+  align-items: center;
   display: grid;
-  gap: 10px;
+  gap: 8px;
   grid-template-columns: minmax(0, 1fr) auto;
   justify-content: stretch;
-  min-height: 62px;
+  min-height: 58px;
   min-width: 0;
-  padding: 10px 14px;
+  padding: 8px 12px;
+  text-align: left;
+  width: 100%;
+}
+
+.chat-row-main {
+  background: transparent;
+  border: 0;
+  color: inherit;
+  display: block;
+  min-height: 0;
+  min-width: 0;
+  padding: 0;
   text-align: left;
   width: 100%;
 }
@@ -1407,17 +1450,48 @@ button {
 
 .chat-row small {
   color: #66746c;
-  font-size: 0.84rem;
-  margin-top: 3px;
+  font-size: 0.8rem;
+  line-height: 1.2;
+  margin-top: 2px;
 }
 
 .chat-meta {
+  align-items: end;
   color: #66746c;
   display: grid;
   font-size: 0.78rem;
-  gap: 3px;
+  gap: 4px;
   justify-items: end;
+  line-height: 1.15;
   white-space: nowrap;
+}
+
+.chat-meta-secondary {
+  align-items: center;
+  display: flex;
+  gap: 6px;
+  justify-content: flex-end;
+}
+
+.chat-archive-button {
+  color: #526058;
+  height: 22px;
+  min-height: 22px;
+  min-width: 22px;
+  padding: 2px;
+  width: 22px;
+}
+
+.chat-archive-button > svg {
+  height: 1rem;
+  width: 1rem;
+}
+
+.chat-archive-button:hover,
+.chat-archive-button:focus-visible {
+  background: rgba(7, 94, 84, 0.1);
+  color: #075e54;
+  outline: 0;
 }
 
 .unread-pill {
@@ -1429,8 +1503,8 @@ button {
   font-size: 0.72rem;
   font-weight: 900;
   justify-content: center;
-  min-height: 20px;
-  min-width: 20px;
+  min-height: 18px;
+  min-width: 18px;
   padding: 0 6px;
 }
 
@@ -1453,7 +1527,7 @@ button {
   padding: 10px 16px;
 }
 
-.chat-thread-header div {
+.chat-thread-title {
   display: grid;
   gap: 2px;
   min-width: 0;
@@ -1477,6 +1551,13 @@ button {
   border-radius: 999px;
   padding: 3px 8px;
   text-transform: capitalize;
+}
+
+.chat-thread-actions {
+  align-items: center;
+  display: flex;
+  flex: 0 0 auto;
+  gap: 8px;
 }
 
 .message-list {
@@ -1557,10 +1638,11 @@ button {
   box-shadow: 0 1px 1px rgba(18, 40, 28, 0.08);
   color: #1f2c25;
   display: grid;
-  gap: 4px;
+  gap: 1px;
   max-width: min(620px, 78%);
   min-width: 92px;
-  padding: 6px 8px 5px;
+  padding: 6px 8px 4px;
+  position: relative;
 }
 
 .message-row-outbound .message-bubble {
@@ -1583,7 +1665,8 @@ button {
   font-size: 0.7rem;
   gap: 5px;
   justify-content: flex-end;
-  line-height: 1;
+  line-height: 0.95;
+  min-height: 0;
 }
 
 .message-media-stack {
@@ -1592,8 +1675,7 @@ button {
   gap: 4px;
 }
 
-.message-media-chip,
-.message-update-line {
+.message-media-chip {
   background: rgba(7, 94, 84, 0.08);
   border-radius: 999px;
   color: #075e54;
@@ -1602,8 +1684,84 @@ button {
   padding: 3px 7px;
 }
 
-.message-update-line {
-  justify-self: start;
+.message-metadata {
+  display: inline-flex;
+  line-height: 1;
+  position: relative;
+}
+
+.message-metadata-trigger {
+  align-items: center;
+  background: transparent;
+  border: 0;
+  border-radius: 999px;
+  color: #557066;
+  cursor: pointer;
+  display: inline-flex;
+  height: 18px;
+  justify-content: center;
+  min-height: 18px;
+  min-width: 18px;
+  padding: 0;
+  width: 18px;
+}
+
+.message-metadata-trigger:hover,
+.message-metadata-trigger:focus-visible {
+  background: rgba(7, 94, 84, 0.1);
+  color: #075e54;
+  outline: 0;
+}
+
+.message-metadata-panel {
+  background: #ffffff;
+  border: 1px solid #c9d9d0;
+  border-radius: 8px;
+  bottom: calc(100% + 8px);
+  box-shadow: 0 12px 28px rgba(23, 44, 32, 0.16);
+  color: #1f2c25;
+  display: grid;
+  font-size: 0.76rem;
+  gap: 6px;
+  max-width: min(320px, 72vw);
+  min-width: 220px;
+  opacity: 0;
+  padding: 9px 10px;
+  pointer-events: none;
+  position: absolute;
+  right: 0;
+  transform: translateY(4px);
+  transition: opacity 120ms ease, transform 120ms ease;
+  visibility: hidden;
+  z-index: 8;
+}
+
+.message-row-inbound .message-metadata-panel {
+  left: 0;
+  right: auto;
+}
+
+.message-metadata:hover .message-metadata-panel,
+.message-metadata:focus-within .message-metadata-panel {
+  opacity: 1;
+  pointer-events: auto;
+  transform: translateY(0);
+  visibility: visible;
+}
+
+.message-metadata-row {
+  display: grid;
+  gap: 2px;
+}
+
+.message-metadata-row strong {
+  color: #075e54;
+  font-size: 0.72rem;
+}
+
+.message-metadata-row span {
+  color: #526058;
+  overflow-wrap: anywhere;
 }
 
 .delivery-status {
@@ -2176,7 +2334,6 @@ button {
 
   .inline-form,
   .account-row,
-  .chat-row,
   .rule-row,
   .audit-log-row,
   .branding-preview,
@@ -2224,7 +2381,17 @@ button {
   }
 
   .chat-meta {
-    justify-items: start;
+    justify-items: end;
+  }
+
+  .chat-thread-header {
+    align-items: stretch;
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .chat-thread-actions {
+    justify-content: space-between;
   }
 
   .connection-strip,

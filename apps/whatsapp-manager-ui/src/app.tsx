@@ -7,6 +7,7 @@ import type {
   AuditLogRecord,
   BrandingSettings,
   DeliveryRecord,
+  ManagerChatMetadata,
   NumberRule,
   NumberRuleAction,
   NumberRuleMatchType,
@@ -33,6 +34,7 @@ export function App() {
   const [hasLoadedAccounts, setHasLoadedAccounts] = useState(false);
   const [mappings, setMappings] = useState<SessionMapping[]>([]);
   const [deliveries, setDeliveries] = useState<DeliveryRecord[]>([]);
+  const [managerChatMetadata, setManagerChatMetadata] = useState<ManagerChatMetadata[]>([]);
   const [contacts, setContacts] = useState<WhatsAppContact[]>([]);
   const [lidMappings, setLidMappings] = useState<WhatsAppLidMapping[]>([]);
   const [syncedChats, setSyncedChats] = useState<WhatsAppSyncedChat[]>([]);
@@ -145,6 +147,7 @@ export function App() {
         accountResponse,
         mappingResponse,
         deliveryResponse,
+        managerChatMetadataResponse,
         syncedChatResponse,
         syncedMessageResponse,
         contactResponse,
@@ -159,6 +162,7 @@ export function App() {
         shouldRefreshAccounts ? request<{ items: WhatsAppAccount[] }>("/whatsapp/accounts") : Promise.resolve(null),
         shouldRefreshActivity ? request<{ items: SessionMapping[] }>("/sessions") : Promise.resolve(null),
         shouldRefreshActivity ? request<{ items: DeliveryRecord[] }>("/deliveries") : Promise.resolve(null),
+        shouldRefreshActivity ? request<{ items: ManagerChatMetadata[] }>("/manager/chats") : Promise.resolve(null),
         shouldRefreshActivity ? request<{ items: WhatsAppSyncedChat[] }>("/whatsapp/sync/chats?limit=1000") : Promise.resolve(null),
         shouldRefreshActivity ? request<{ items: WhatsAppSyncedMessage[] }>("/whatsapp/sync/messages?limit=1000") : Promise.resolve(null),
         shouldRefreshActivity ? request<{ items: WhatsAppContact[] }>("/whatsapp/sync/contacts?limit=1000") : Promise.resolve(null),
@@ -182,6 +186,9 @@ export function App() {
       }
       if (deliveryResponse) {
         setDeliveries(deliveryResponse.items.filter((delivery) => delivery.chatType === "direct"));
+      }
+      if (managerChatMetadataResponse) {
+        setManagerChatMetadata(managerChatMetadataResponse.items);
       }
       if (syncedChatResponse) {
         setSyncedChats(syncedChatResponse.items.filter((chat) => chat.chatType === "direct"));
@@ -397,6 +404,27 @@ export function App() {
     });
   }
 
+  async function updateManagerChatArchive(chat: { accountId: string; chatJid: string }, archived: boolean) {
+    await runAction(async () => {
+      const metadata = await request<ManagerChatMetadata>("/manager/chats", {
+        method: "PATCH",
+        body: JSON.stringify({
+          accountId: chat.accountId,
+          chatJid: chat.chatJid,
+          archived,
+        }),
+      });
+      setManagerChatMetadata((currentMetadata) => [
+        metadata,
+        ...currentMetadata.filter((item) => item.accountId !== metadata.accountId || item.chatJid !== metadata.chatJid),
+      ]);
+      if (activeChatJid === chat.chatJid && archived) {
+        setActiveChatJid("");
+      }
+      setStatusMessage(archived ? "Chat hidden from main view." : "Chat restored to main view.");
+    });
+  }
+
   async function saveBranding(nextBranding: BrandingSettings) {
     const normalizedBranding = normalizeBranding(nextBranding);
     if (branding.title === normalizedBranding.title && branding.iconSrc === normalizedBranding.iconSrc) {
@@ -471,10 +499,11 @@ export function App() {
     syncedChats,
     syncedMessages,
     activeContactDisplayIndex,
+    managerChatMetadata,
   );
   const activeAccountDeliveries = deliveries.filter((delivery) => delivery.accountId === activeAccountId);
   const activeAccountMappings = mappings.filter((mapping) => mapping.accountId === activeAccountId);
-  const activeChat = activeChats.find((chat) => chat.chatJid === activeChatJid) ?? activeChats[0] ?? null;
+  const activeChat = activeChats.find((chat) => chat.chatJid === activeChatJid) ?? activeChats.find((chat) => !chat.managerArchived) ?? activeChats[0] ?? null;
   const activeChatMessages = activeChat
     ? buildChatMessages(
         deliveries.filter((delivery) => delivery.accountId === activeAccountId && delivery.chatJid === activeChat.chatJid),
@@ -572,6 +601,7 @@ export function App() {
               onPatternChange={setRulePattern}
               onRetry={(deliveryId) => void retryDelivery(deliveryId)}
               onSelectChat={setActiveChatJid}
+              onSetChatArchived={(chat, archived) => void updateManagerChatArchive(chat, archived)}
               onViewChange={setActiveNumberView}
               pattern={rulePattern}
               ruleAction={ruleAction}

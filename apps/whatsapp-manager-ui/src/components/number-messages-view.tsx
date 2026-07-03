@@ -1,6 +1,9 @@
+import { useState } from "react";
+import { Icon } from "@iconify/react";
+
 import { formatCountLabel, formatTimestamp } from "../domain/formatting";
 import type { ChatMessage, ChatSummary } from "../domain/models";
-import { EmptyState } from "./shared";
+import { EmptyState, IconButton } from "./shared";
 
 export function MessagesView({
   activeAccountId,
@@ -9,6 +12,7 @@ export function MessagesView({
   activeChatMessages,
   chats,
   onSelectChat,
+  onSetChatArchived,
 }: {
   activeAccountId: string;
   activeChat: ChatSummary | null;
@@ -16,48 +20,104 @@ export function MessagesView({
   activeChatMessages: ChatMessage[];
   chats: ChatSummary[];
   onSelectChat: (chatJid: string) => void;
+  onSetChatArchived: (chat: ChatSummary, archived: boolean) => void;
 }) {
+  const [chatListMode, setChatListMode] = useState<"main" | "archived">("main");
+  const activeChats = chats.filter((chat) => !chat.managerArchived);
+  const archivedChats = chats.filter((chat) => chat.managerArchived);
+  const isShowingArchived = chatListMode === "archived";
+  const visibleChats = isShowingArchived ? archivedChats : activeChats;
+  const visibleActiveChat = activeChat && visibleChats.some((chat) => chat.chatJid === activeChat.chatJid) ? activeChat : null;
+  const emptyTitle = isShowingArchived ? "No archived chats" : "No chats yet";
+  const emptyDescription = isShowingArchived
+    ? "Archived app-manager chats appear here."
+    : "Chats appear after inbound WhatsApp activity is routed.";
+
   return (
     <div className="messages-view">
       <div className="chat-workspace">
         <section className="chat-list-pane">
+          <div className="chat-list-toolbar">
+            <div className="segmented-control" aria-label="Chat visibility">
+              <button
+                type="button"
+                className={!isShowingArchived ? "segmented-control-active" : ""}
+                onClick={() => {
+                  setChatListMode("main");
+                  onSelectChat(activeChats[0]?.chatJid ?? "");
+                }}
+              >
+                Main
+              </button>
+              <button
+                type="button"
+                className={isShowingArchived ? "segmented-control-active" : ""}
+                onClick={() => {
+                  setChatListMode("archived");
+                  onSelectChat(archivedChats[0]?.chatJid ?? "");
+                }}
+              >
+                Archived
+              </button>
+            </div>
+          </div>
           <div className="chat-list">
             {!activeAccountId ? (
               <EmptyState title="Select an account" description="Chats are scoped to one managed WhatsApp number." />
-            ) : chats.length === 0 ? (
-              <EmptyState title="No chats yet" description="Chats appear after inbound WhatsApp activity is routed." />
+            ) : visibleChats.length === 0 ? (
+              <EmptyState title={emptyTitle} description={emptyDescription} />
             ) : (
-              chats.map((chat) => (
-                <button
+              visibleChats.map((chat) => (
+                <div
                   key={chat.chatJid}
                   className={`chat-row${chat.chatJid === activeChatJid ? " chat-row-active" : ""}`}
-                  onClick={() => onSelectChat(chat.chatJid)}
                 >
-                  <span>
-                    <strong>{chat.displayName ?? chat.phoneNumber ?? chat.chatJid}</strong>
-                    <small>{chat.lastText ?? chat.phoneNumber ?? chat.pnJid ?? chat.chatJid}</small>
-                  </span>
+                  <button type="button" className="chat-row-main" onClick={() => onSelectChat(chat.chatJid)}>
+                    <span>
+                      <strong>{chat.displayName ?? chat.phoneNumber ?? chat.chatJid}</strong>
+                      <small>{chat.lastText ?? chat.phoneNumber ?? chat.pnJid ?? chat.chatJid}</small>
+                    </span>
+                  </button>
                   <span className="chat-meta">
-                    <span>{formatTimestamp(chat.updatedAt)}</span>
-                    <span>{formatCountLabel(chat.messageCount, "message")}</span>
-                    {chat.unreadCount ? <span className="unread-pill">{chat.unreadCount}</span> : null}
-                    {chat.failedCount ? <span>{chat.failedCount} failed</span> : null}
+                    <span className="chat-meta-primary">{formatTimestamp(chat.updatedAt)}</span>
+                    <span className="chat-meta-secondary">
+                      <span>{formatCountLabel(chat.messageCount, "message")}</span>
+                      {chat.unreadCount ? <span className="unread-pill">{chat.unreadCount}</span> : null}
+                      {chat.failedCount ? <span>{chat.failedCount} failed</span> : null}
+                      <IconButton
+                        icon={chat.managerArchived ? "mdi:archive-arrow-up-outline" : "mdi:archive-arrow-down-outline"}
+                        label={chat.managerArchived ? "Restore in app manager" : "Archive in app manager"}
+                        className="chat-archive-button"
+                        variant="text"
+                        type="button"
+                        onClick={() => onSetChatArchived(chat, !chat.managerArchived)}
+                      />
+                    </span>
                   </span>
-                </button>
+                </div>
               ))
             )}
           </div>
         </section>
 
         <section className="chat-detail-pane">
-          {activeChat ? (
+          {visibleActiveChat ? (
             <div className="chat-detail-content">
               <header className="chat-thread-header">
-                <div>
-                  <strong>{activeChat.displayName ?? activeChat.phoneNumber ?? activeChat.chatJid}</strong>
-                  <span>{activeChat.phoneNumber ?? activeChat.pnJid ?? activeChat.chatJid}</span>
+                <div className="chat-thread-title">
+                  <strong>{visibleActiveChat.displayName ?? visibleActiveChat.phoneNumber ?? visibleActiveChat.chatJid}</strong>
+                  <span>{visibleActiveChat.phoneNumber ?? visibleActiveChat.pnJid ?? visibleActiveChat.chatJid}</span>
                 </div>
-                <small>{activeChat.source === "mixed" ? "Synced + routed" : activeChat.source}</small>
+                <div className="chat-thread-actions">
+                  <small>{visibleActiveChat.source === "mixed" ? "Synced + routed" : visibleActiveChat.source}</small>
+                  <IconButton
+                    icon={visibleActiveChat.managerArchived ? "mdi:archive-arrow-up-outline" : "mdi:archive-arrow-down-outline"}
+                    label={visibleActiveChat.managerArchived ? "Restore in app manager" : "Archive in app manager"}
+                    variant="secondary"
+                    type="button"
+                    onClick={() => onSetChatArchived(visibleActiveChat, !visibleActiveChat.managerArchived)}
+                  />
+                </div>
               </header>
               <div className="message-list">
                 {activeChatMessages.length === 0 ? (
@@ -89,15 +149,11 @@ export function MessagesView({
                             </div>
                           ) : null}
                           <p>{message.text}</p>
-                          {message.updates?.length ? (
-                            <div className="message-update-line">
-                              {message.updates.map((update) => update.updateType).join(", ")}
-                            </div>
-                          ) : null}
                           <footer>
                             <time>{formatTimestamp(message.timestamp)}</time>
                             {message.status ? <span className={`delivery-status delivery-status-${message.status}`}>{message.status}</span> : null}
                             {message.receipts?.length ? <span>{latestReceiptLabel(message)}</span> : null}
+                            {hasMetadata(message) ? <MessageMetadataPopover message={message} /> : null}
                           </footer>
                           {message.record && "error" in message.record && message.record.error ? <p className="error-text">{message.record.error}</p> : null}
                         </div>
@@ -120,4 +176,76 @@ function latestReceiptLabel(message: ChatMessage) {
   const latest = [...(message.receipts ?? [])]
     .sort((a, b) => Date.parse(b.timestamp ?? b.receivedAt) - Date.parse(a.timestamp ?? a.receivedAt))[0];
   return latest?.receiptType ?? "received";
+}
+
+function hasMetadata(message: ChatMessage) {
+  return Boolean(
+    message.updates?.length ||
+      message.receipts?.length ||
+      message.media?.length ||
+      message.messageType ||
+      message.source === "sync",
+  );
+}
+
+function MessageMetadataPopover({ message }: { message: ChatMessage }) {
+  const rows = [
+    ...(message.updates ?? []).map((update) => ({
+      label: updateLabel(update.updateType),
+      value: formatTimestamp(update.receivedAt),
+    })),
+    ...(message.receipts ?? []).map((receipt) => ({
+      label: `Receipt: ${receipt.receiptType ?? "received"}`,
+      value: formatTimestamp(receipt.timestamp ?? receipt.receivedAt),
+    })),
+    ...(message.media ?? []).map((media) => ({
+      label: `Media: ${media.mediaType}${media.localPath ? " saved" : ""}`,
+      value: media.fileName ?? media.mimetype ?? media.localPath ?? "metadata stored",
+    })),
+    ...(message.messageType ? [{ label: "Message type", value: message.messageType }] : []),
+    { label: "Source", value: message.source === "sync" ? "WhatsApp sync" : "Hermes delivery" },
+    ...readMessageIds(message).map((messageId) => ({ label: "Message ID", value: messageId })),
+  ];
+
+  return (
+    <span className="message-metadata">
+      <button type="button" className="message-metadata-trigger" aria-label="Message metadata" title="Message metadata">
+        <Icon icon="mdi:information-outline" aria-hidden="true" />
+      </button>
+      <span className="message-metadata-panel" role="tooltip">
+        {rows.map((row, index) => (
+          <span key={`${row.label}:${index}`} className="message-metadata-row">
+            <strong>{row.label}</strong>
+            <span>{row.value}</span>
+          </span>
+        ))}
+      </span>
+    </span>
+  );
+}
+
+function readMessageIds(message: ChatMessage) {
+  const record = message.record;
+  if (!record || !("messageId" in record) || typeof record.messageId !== "string") {
+    return [];
+  }
+
+  return [record.messageId];
+}
+
+function updateLabel(updateType: string) {
+  if (updateType === "messages.update") {
+    return "Message metadata updated";
+  }
+  if (updateType === "messages.delete") {
+    return "Message deleted";
+  }
+  if (updateType === "messages.reaction") {
+    return "Reaction updated";
+  }
+  if (updateType === "messages.media-update") {
+    return "Media updated";
+  }
+
+  return updateType;
 }

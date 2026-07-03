@@ -6,6 +6,7 @@ import type {
   GroupRoutingPolicyRecord,
   HermesSession,
   InboundMessageResult,
+  ManagerChatMetadata,
   NumberRuleInput,
   NumberRuleRecord,
   WhatsAppAccountMetadata,
@@ -336,6 +337,11 @@ export interface AuditLogStore {
 export interface AccountMetadataStore {
   listAccountMetadata(): WhatsAppAccountMetadata[];
   setAccountAlias(accountId: string, alias: string): WhatsAppAccountMetadata;
+}
+
+export interface ManagerChatMetadataStore {
+  listManagerChatMetadata(accountId?: string): ManagerChatMetadata[];
+  setManagerChatArchived(input: { accountId: string; chatJid: string; archived: boolean }): ManagerChatMetadata;
 }
 
 export interface WhatsAppSyncStore {

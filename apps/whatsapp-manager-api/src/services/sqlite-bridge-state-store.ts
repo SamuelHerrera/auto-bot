@@ -9,6 +9,7 @@ import type {
   DeliveryRecord,
   GroupRoutingPolicyRecord,
   HermesSession,
+  ManagerChatMetadata,
   NumberRuleInput,
   NumberRuleRecord,
   WhatsAppAccountMetadata,
@@ -31,6 +32,7 @@ import type {
   ChatSessionRouterSnapshot,
   ChatSessionRouterStore,
   GroupRoutingPolicyStore,
+  ManagerChatMetadataStore,
   NumberRuleStore,
   WhatsAppSyncStore,
 } from "./chat-session-router.js";
@@ -43,6 +45,7 @@ export class SqliteBridgeStateStore
     NumberRuleStore,
     AuditLogStore,
     AccountMetadataStore,
+    ManagerChatMetadataStore,
     WhatsAppSyncStore
 {
   private readonly db: DatabaseSync;
@@ -350,6 +353,41 @@ export class SqliteBridgeStateStore
           updated_at = excluded.updated_at
       `)
       .run(record.accountId, record.alias ?? null, record.createdAt, record.updatedAt);
+
+    return record;
+  }
+
+  listManagerChatMetadata(accountId?: string): ManagerChatMetadata[] {
+    const { clause, args } = accountWhereClause(accountId);
+    return this.db
+      .prepare(`SELECT * FROM manager_chat_metadata ${clause} ORDER BY updated_at DESC`)
+      .all(...args)
+      .map(rowToManagerChatMetadata);
+  }
+
+  setManagerChatArchived(input: { accountId: string; chatJid: string; archived: boolean }): ManagerChatMetadata {
+    const now = new Date().toISOString();
+    const existing = this.db
+      .prepare("SELECT created_at FROM manager_chat_metadata WHERE account_id = ? AND chat_jid = ?")
+      .get(input.accountId, input.chatJid) as { created_at?: string } | undefined;
+    const record: ManagerChatMetadata = {
+      accountId: input.accountId,
+      chatJid: input.chatJid,
+      archived: input.archived,
+      createdAt: existing?.created_at ?? now,
+      updatedAt: now,
+    };
+
+    this.db
+      .prepare(`
+        INSERT INTO manager_chat_metadata
+          (account_id, chat_jid, archived, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?)
+        ON CONFLICT(account_id, chat_jid) DO UPDATE SET
+          archived = excluded.archived,
+          updated_at = excluded.updated_at
+      `)
+      .run(record.accountId, record.chatJid, record.archived ? 1 : 0, record.createdAt, record.updatedAt);
 
     return record;
   }
@@ -847,6 +885,18 @@ export class SqliteBridgeStateStore
         updated_at TEXT NOT NULL
       );
 
+      CREATE TABLE IF NOT EXISTS manager_chat_metadata (
+        account_id TEXT NOT NULL,
+        chat_jid TEXT NOT NULL,
+        archived INTEGER NOT NULL DEFAULT 0,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        PRIMARY KEY (account_id, chat_jid)
+      );
+
+      CREATE INDEX IF NOT EXISTS manager_chat_metadata_account_idx
+        ON manager_chat_metadata(account_id, archived, updated_at DESC);
+
       CREATE TABLE IF NOT EXISTS audit_logs (
         id TEXT PRIMARY KEY,
         action TEXT NOT NULL,
@@ -1121,6 +1171,17 @@ function rowToAccountMetadata(row: unknown): WhatsAppAccountMetadata {
   return {
     accountId: String(value.account_id),
     ...(value.alias ? { alias: String(value.alias) } : {}),
+    createdAt: String(value.created_at),
+    updatedAt: String(value.updated_at),
+  };
+}
+
+function rowToManagerChatMetadata(row: unknown): ManagerChatMetadata {
+  const value = row as Record<string, string | number | null>;
+  return {
+    accountId: String(value.account_id),
+    chatJid: String(value.chat_jid),
+    archived: Boolean(value.archived),
     createdAt: String(value.created_at),
     updatedAt: String(value.updated_at),
   };

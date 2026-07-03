@@ -265,6 +265,113 @@ describe("whatsapp-manager-api", () => {
     }
   });
 
+  it("stores app-manager chat archives separately from WhatsApp chat archive sync state", async () => {
+    const dir = mkdtempSync(path.join(tmpdir(), "auto-bot-manager-chat-archive-"));
+    const archiveConfig = loadConfig({
+      ...process.env,
+      API_TOKEN: "test-token",
+      BRIDGE_DATABASE_FILE: path.join(dir, "bridge-state.sqlite"),
+      BRIDGE_STATE_FILE: "",
+      DATABASE_URL: "postgres://postgres:postgres@127.0.0.1:5432/auto_bot",
+      NODE_ENV: "test",
+      PORT: "3000",
+    });
+    const services = createTestServices(archiveConfig);
+    const archiveApp = createApp({
+      config: archiveConfig,
+      services,
+    });
+
+    try {
+      services.whatsappSyncStore?.saveWhatsAppChat({
+        accountId: "ops-main",
+        chatJid: "12345@s.whatsapp.net",
+        chatType: "direct",
+        archived: false,
+        firstSeenAt: "2026-07-03T00:00:00.000Z",
+        lastSeenAt: "2026-07-03T00:00:00.000Z",
+      });
+
+      const archiveResponse = await archiveApp.inject({
+        method: "PATCH",
+        url: "/manager/chats",
+        headers: {
+          authorization: "Bearer test-token",
+        },
+        payload: {
+          accountId: "ops-main",
+          chatJid: "12345@s.whatsapp.net",
+          archived: true,
+        },
+      });
+
+      expect(archiveResponse.statusCode).toBe(200);
+      expect(archiveResponse.json()).toEqual(
+        expect.objectContaining({
+          accountId: "ops-main",
+          chatJid: "12345@s.whatsapp.net",
+          archived: true,
+        }),
+      );
+
+      const managerChats = await archiveApp.inject({
+        method: "GET",
+        url: "/manager/chats?accountId=ops-main",
+        headers: {
+          authorization: "Bearer test-token",
+        },
+      });
+      expect(managerChats.json()).toEqual({
+        items: [
+          expect.objectContaining({
+            accountId: "ops-main",
+            chatJid: "12345@s.whatsapp.net",
+            archived: true,
+          }),
+        ],
+      });
+
+      const syncedChats = await archiveApp.inject({
+        method: "GET",
+        url: "/whatsapp/sync/chats?accountId=ops-main",
+        headers: {
+          authorization: "Bearer test-token",
+        },
+      });
+      expect(syncedChats.json()).toEqual({
+        items: [
+          expect.objectContaining({
+            accountId: "ops-main",
+            chatJid: "12345@s.whatsapp.net",
+            archived: false,
+          }),
+        ],
+      });
+
+      const restoreResponse = await archiveApp.inject({
+        method: "PATCH",
+        url: "/manager/chats",
+        headers: {
+          authorization: "Bearer test-token",
+        },
+        payload: {
+          accountId: "ops-main",
+          chatJid: "12345@s.whatsapp.net",
+          archived: false,
+        },
+      });
+      expect(restoreResponse.statusCode).toBe(200);
+      expect(restoreResponse.json()).toEqual(
+        expect.objectContaining({
+          archived: false,
+        }),
+      );
+    } finally {
+      await archiveApp.close();
+      rmSync(dir, { force: true, recursive: true });
+    }
+  });
+
   it("uses the linked WhatsApp phone number when no account name is provided", async () => {
     const connectResponse = await app.inject({
       method: "POST",
@@ -2004,6 +2111,7 @@ function createTestServices(config: AppConfig): AppServices {
     ...(bridgeStore instanceof SqliteBridgeStateStore ? { numberRuleStore: bridgeStore } : {}),
     ...(bridgeStore instanceof SqliteBridgeStateStore ? { auditLogStore: bridgeStore } : {}),
     ...(bridgeStore instanceof SqliteBridgeStateStore ? { accountMetadataStore: bridgeStore } : {}),
+    ...(bridgeStore instanceof SqliteBridgeStateStore ? { managerChatMetadataStore: bridgeStore } : {}),
     ...(bridgeStore instanceof SqliteBridgeStateStore ? { whatsappSyncStore: bridgeStore } : {}),
   };
 }

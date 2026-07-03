@@ -34,6 +34,7 @@ export function NumberWorkspace({
   onPatternChange,
   onRetry,
   onSelectChat,
+  onSetChatArchived,
   onViewChange,
   pattern,
   ruleAction,
@@ -64,6 +65,7 @@ export function NumberWorkspace({
   onPatternChange: (value: string) => void;
   onRetry: (deliveryId: string) => void;
   onSelectChat: (chatJid: string) => void;
+  onSetChatArchived: (chat: ChatSummary, archived: boolean) => void;
   onViewChange: (view: NumberSubview) => void;
   pattern: string;
   ruleAction: NumberRuleAction;
@@ -146,6 +148,7 @@ export function NumberWorkspace({
             activeChatMessages={activeChatMessages}
             chats={chats}
             onSelectChat={onSelectChat}
+            onSetChatArchived={onSetChatArchived}
           />
         </div>
       ) : null}

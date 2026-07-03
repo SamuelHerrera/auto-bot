@@ -23,6 +23,7 @@ function buildApiProxy() {
     "/deliveries": { target, changeOrigin: true },
     "/audit-logs": { target, changeOrigin: true },
     "/number-rules": { target, changeOrigin: true },
+    "/manager": { target, changeOrigin: true },
     "/chats": { target, changeOrigin: true },
     "/messages": { target, changeOrigin: true },
     "/events": { target, changeOrigin: true },
