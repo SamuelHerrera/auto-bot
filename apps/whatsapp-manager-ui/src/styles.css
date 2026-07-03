@@ -374,33 +374,36 @@ button:disabled {
 }
 
 .workspace-tab {
+  align-items: center;
   background: #ffffff;
   border: 1px solid #dce3dd;
   border-bottom-color: #dce3dd;
   border-radius: 6px 6px 0 0;
   color: #526058;
   display: inline-grid;
-  flex: 0 0 auto;
-  gap: 8px;
-  grid-auto-flow: column;
-  grid-template-columns: minmax(72px, auto) auto;
+  flex: 0 0 180px;
+  gap: 6px;
+  grid-template-columns: minmax(0, 1fr) auto;
+  height: 42px;
   min-height: 42px;
-  max-width: 280px;
-  padding: 8px 10px;
+  padding: 6px 8px;
+  width: 180px;
 }
 
 .workspace-tab-main {
+  align-items: center;
   background: transparent;
   border: 0;
   color: inherit;
   display: inline-grid;
-  gap: 8px;
-  grid-auto-flow: column;
+  gap: 7px;
   grid-template-columns: auto minmax(0, 1fr);
+  height: 100%;
   justify-content: start;
   min-height: auto;
   min-width: 0;
   padding: 0;
+  text-align: left;
 }
 
 .workspace-tab-label,
@@ -412,11 +415,14 @@ button:disabled {
 
 .workspace-tab-label {
   display: block;
+  min-width: 0;
 }
 
 .workspace-tab-label-stacked {
   display: grid;
   gap: 1px;
+  justify-items: start;
+  line-height: 1.05;
 }
 
 .workspace-tab-label-stacked strong,
@@ -428,9 +434,13 @@ button:disabled {
   white-space: nowrap;
 }
 
+.workspace-tab-label-stacked strong {
+  font-size: 0.9rem;
+}
+
 .workspace-tab-label-stacked small {
   color: #66746c;
-  font-size: 0.74rem;
+  font-size: 0.68rem;
   font-weight: 650;
 }
 
