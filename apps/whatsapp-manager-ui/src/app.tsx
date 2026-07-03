@@ -7,6 +7,8 @@ type NumberSubview = "home" | "messages" | "rules" | "failures";
 type NumberRuleAction = "allow" | "deny";
 type NumberRuleMatchType = "all" | "exact" | "regex";
 type RefreshScope = "accounts" | "activity" | "rules" | "logs";
+type AuditLogOutcome = "success" | "failure" | "ignored";
+type AuditLogFilter = "all" | AuditLogOutcome;
 
 interface WhatsAppAccount {
   accountId: string;
@@ -38,7 +40,7 @@ interface DeliveryRecord {
   inboundMessageId: string;
   inboundText?: string;
   outboundText: string;
-  status: "pending" | "sent" | "failed";
+  status: "pending" | "sent" | "failed" | "ignored";
   attempts: number;
   failureStage?: "hermes" | "whatsapp";
   error?: string;
@@ -88,7 +90,7 @@ interface AuditLogRecord {
   id: string;
   action: string;
   actor: string;
-  outcome: "success" | "failure";
+  outcome: AuditLogOutcome;
   resourceType?: string;
   resourceId?: string;
   details?: Record<string, unknown>;
@@ -1686,29 +1688,125 @@ function LogsView({
 }: {
   auditLogs: AuditLogRecord[];
 }) {
+  const [outcomeFilter, setOutcomeFilter] = useState<AuditLogFilter>("all");
+  const [search, setSearch] = useState("");
+  const visibleLogs = auditLogs.filter((entry) => auditLogMatchesFilters(entry, outcomeFilter, search));
+  const counts = getAuditLogCounts(auditLogs);
+
   return (
     <>
+      <div className="log-filterbar">
+        <div className="subnav log-filter-tabs" aria-label="Log filters">
+          <TabButton active={outcomeFilter === "all"} count={auditLogs.length} icon="mdi:format-list-bulleted" onClick={() => setOutcomeFilter("all")}>
+            All
+          </TabButton>
+          <TabButton active={outcomeFilter === "failure"} count={counts.failure} icon="mdi:alert-circle-outline" onClick={() => setOutcomeFilter("failure")}>
+            Failures
+          </TabButton>
+          <TabButton active={outcomeFilter === "ignored"} count={counts.ignored} icon="mdi:debug-step-over" onClick={() => setOutcomeFilter("ignored")}>
+            Ignored
+          </TabButton>
+          <TabButton active={outcomeFilter === "success"} count={counts.success} icon="mdi:check-circle-outline" onClick={() => setOutcomeFilter("success")}>
+            Success
+          </TabButton>
+        </div>
+        <label className="log-search">
+          <span className="visually-hidden">Search logs</span>
+          <Icon icon="mdi:magnify" aria-hidden="true" />
+          <input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search logs" />
+        </label>
+      </div>
+
       <div className="audit-log-list">
         {auditLogs.length === 0 ? (
           <EmptyState title="No audit events" description="Changes will appear here after actions are recorded." />
+        ) : visibleLogs.length === 0 ? (
+          <EmptyState title="No matching logs" description="Adjust the filters or search." />
         ) : (
-          auditLogs.map((entry) => (
-            <article key={entry.id} className="audit-log-row">
-              <div className="audit-log-main">
-                <span className={`badge badge-audit-${entry.outcome}`}>{entry.outcome}</span>
-                <span>
-                  <strong>{entry.action}</strong>
-                  <small>{entry.resourceType ? `${entry.resourceType} / ${entry.resourceId ?? "unknown"}` : entry.actor}</small>
+          visibleLogs.map((entry) => (
+            <details key={entry.id} className={`audit-log-row audit-log-row-${entry.outcome}`}>
+              <summary>
+                <span className={`audit-log-icon audit-log-icon-${entry.outcome}`}>
+                  <Icon icon={getAuditLogIcon(entry)} aria-hidden="true" />
                 </span>
+                <span className="audit-log-main">
+                  <span>
+                    <strong>{entry.action}</strong>
+                    <small>{entry.resourceType ? `${entry.resourceType} / ${entry.resourceId ?? "unknown"}` : entry.actor}</small>
+                  </span>
+                </span>
+                <span className={`badge badge-audit-${entry.outcome}`}>{entry.outcome}</span>
+                <time>{formatTimestamp(entry.createdAt)}</time>
+              </summary>
+              <div className="audit-log-detail">
+                <dl className="audit-log-meta">
+                  <div>
+                    <dt>Actor</dt>
+                    <dd>{entry.actor}</dd>
+                  </div>
+                  <div>
+                    <dt>Resource</dt>
+                    <dd>{entry.resourceType ? `${entry.resourceType} / ${entry.resourceId ?? "unknown"}` : "none"}</dd>
+                  </div>
+                </dl>
+                {entry.details ? <pre>{JSON.stringify(entry.details, null, 2)}</pre> : <p>No JSON details.</p>}
               </div>
-              <time>{formatTimestamp(entry.createdAt)}</time>
-              {entry.details ? <pre>{JSON.stringify(entry.details, null, 2)}</pre> : null}
-            </article>
+            </details>
           ))
         )}
       </div>
     </>
   );
+}
+
+function auditLogMatchesFilters(entry: AuditLogRecord, outcomeFilter: AuditLogFilter, search: string) {
+  if (outcomeFilter !== "all" && entry.outcome !== outcomeFilter) {
+    return false;
+  }
+
+  const query = search.trim().toLowerCase();
+  if (!query) {
+    return true;
+  }
+
+  return [
+    entry.action,
+    entry.actor,
+    entry.outcome,
+    entry.resourceType ?? "",
+    entry.resourceId ?? "",
+    entry.details ? JSON.stringify(entry.details) : "",
+  ].some((value) => value.toLowerCase().includes(query));
+}
+
+function getAuditLogCounts(auditLogs: AuditLogRecord[]) {
+  return auditLogs.reduce(
+    (counts, entry) => ({
+      ...counts,
+      [entry.outcome]: counts[entry.outcome] + 1,
+    }),
+    { success: 0, failure: 0, ignored: 0 } satisfies Record<AuditLogOutcome, number>,
+  );
+}
+
+function getAuditLogIcon(entry: AuditLogRecord) {
+  if (entry.outcome === "failure") {
+    return "mdi:alert-circle-outline";
+  }
+
+  if (entry.outcome === "ignored") {
+    return "mdi:debug-step-over";
+  }
+
+  if (entry.action.includes("rule")) {
+    return "mdi:shield-check-outline";
+  }
+
+  if (entry.action.includes("message")) {
+    return "mdi:message-text-outline";
+  }
+
+  return "mdi:check-circle-outline";
 }
 
 function TabButton({

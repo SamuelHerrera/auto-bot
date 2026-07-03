@@ -364,7 +364,7 @@ describe("whatsapp-manager-api", () => {
         expect.objectContaining({
           accountId: "ops-main",
           inboundMessageId: "wamid.default-deny",
-          status: "failed",
+          status: "ignored",
           error: expect.stringContaining("Default deny all"),
         }),
       ]);
@@ -953,7 +953,7 @@ describe("whatsapp-manager-api", () => {
         expect.objectContaining({
           accountId: "ops-main",
           inboundMessageId: "wamid.denied",
-          status: "failed",
+          status: "ignored",
           error: expect.stringContaining("Blocked by number rule"),
         }),
       ]);
@@ -1025,7 +1025,7 @@ describe("whatsapp-manager-api", () => {
         expect.arrayContaining([
           expect.objectContaining({
             inboundMessageId: "wamid.not-allowed",
-            status: "failed",
+            status: "ignored",
           }),
           expect.objectContaining({
             inboundMessageId: "wamid.allowed",
@@ -1098,7 +1098,7 @@ describe("whatsapp-manager-api", () => {
         expect.arrayContaining([
           expect.objectContaining({
             inboundMessageId: "wamid.default-deny-not-allowed",
-            status: "failed",
+            status: "ignored",
           }),
           expect.objectContaining({
             inboundMessageId: "wamid.default-deny-allowed",

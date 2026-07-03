@@ -930,6 +930,11 @@ button {
   color: #a33b2f;
 }
 
+.badge-audit-ignored {
+  background: #eef1ee;
+  color: #526058;
+}
+
 .account-list {
   display: grid;
 }
@@ -1460,6 +1465,11 @@ button {
   color: #a33b2f;
 }
 
+.delivery-status-ignored {
+  background: #eef1ee;
+  color: #526058;
+}
+
 .branding-form {
   align-content: start;
   align-self: center;
@@ -1525,56 +1535,180 @@ button {
   padding: 8px;
 }
 
+.log-filterbar {
+  align-items: center;
+  border-bottom: 1px solid #e5ebe6;
+  display: grid;
+  gap: 12px;
+  grid-template-columns: minmax(0, 1fr) minmax(220px, 320px);
+  min-height: 58px;
+  padding: 10px 16px;
+}
+
+.log-filter-tabs .nav-button {
+  justify-content: center;
+  min-height: 34px;
+  min-width: 42px;
+  padding: 6px 10px;
+}
+
+.log-search {
+  align-items: center;
+  background: #ffffff;
+  border: 1px solid #dce3dd;
+  display: flex;
+  gap: 8px;
+  min-height: 34px;
+  min-width: 0;
+  padding: 6px 10px;
+}
+
+.log-search svg {
+  color: #66746c;
+  flex: 0 0 auto;
+  height: 1rem;
+  width: 1rem;
+}
+
+.log-search input {
+  border: 0;
+  min-width: 0;
+  outline: 0;
+  padding: 0;
+  width: 100%;
+}
+
 .audit-log-list {
   display: grid;
 }
 
 .audit-log-row {
   border-bottom: 1px solid #e5ebe6;
-  display: grid;
-  gap: 10px;
-  grid-template-columns: minmax(0, 1fr) auto;
-  padding: 14px 16px;
 }
 
 .audit-log-row:last-child {
   border-bottom: 0;
 }
 
-.audit-log-main {
+.audit-log-row summary {
   align-items: center;
-  display: flex;
+  cursor: pointer;
+  display: grid;
   gap: 10px;
-  min-width: 0;
+  grid-template-columns: auto minmax(0, 1fr) auto auto;
+  list-style: none;
+  min-height: 42px;
+  padding: 6px 16px;
 }
 
-.audit-log-main span:last-child {
+.audit-log-row summary::-webkit-details-marker {
+  display: none;
+}
+
+.audit-log-row-failure summary {
+  box-shadow: inset 3px 0 0 #d06053;
+}
+
+.audit-log-row-ignored summary {
+  box-shadow: inset 3px 0 0 #98a39d;
+}
+
+.audit-log-row-success summary {
+  box-shadow: inset 3px 0 0 #28a66f;
+}
+
+.audit-log-icon {
+  align-items: center;
+  border-radius: 999px;
+  display: inline-flex;
+  height: 26px;
+  justify-content: center;
+  width: 26px;
+}
+
+.audit-log-icon svg {
+  height: 1rem;
+  width: 1rem;
+}
+
+.audit-log-icon-success {
+  background: #dff6e8;
+  color: #09643f;
+}
+
+.audit-log-icon-failure {
+  background: #fff3f1;
+  color: #a33b2f;
+}
+
+.audit-log-icon-ignored {
+  background: #eef1ee;
+  color: #526058;
+}
+
+.audit-log-main {
   display: grid;
   min-width: 0;
 }
 
 .audit-log-main strong,
 .audit-log-main small {
+  display: block;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
+.audit-log-main strong {
+  font-size: 0.9rem;
+}
+
 .audit-log-main small,
 .audit-log-row time {
   color: #66746c;
-  font-size: 0.8rem;
+  font-size: 0.78rem;
 }
 
+.audit-log-detail {
+  display: grid;
+  gap: 10px;
+  padding: 0 16px 12px 52px;
+}
+
+.audit-log-meta {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  margin: 0;
+}
+
+.audit-log-meta div {
+  min-width: 0;
+}
+
+.audit-log-meta dt {
+  color: #66746c;
+  font-size: 0.72rem;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.audit-log-meta dd {
+  margin: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.audit-log-detail p,
 .audit-log-row pre {
   background: #f8faf8;
   border: 1px solid #e5ebe6;
   color: #2c3832;
   font-family: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   font-size: 0.78rem;
-  grid-column: 1 / -1;
   margin: 0;
-  max-height: 220px;
+  max-height: 260px;
   overflow: auto;
   padding: 10px;
   white-space: pre-wrap;
@@ -1850,10 +1984,6 @@ button {
 }
 
 @media (max-width: 700px) {
-  .shell {
-    padding: 14px;
-  }
-
   .account-summary,
   .account-heading-actions,
   .dialog-header,

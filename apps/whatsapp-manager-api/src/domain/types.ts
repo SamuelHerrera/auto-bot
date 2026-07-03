@@ -2,12 +2,12 @@ export type WhatsAppChatId = string;
 export type HermesSessionId = string;
 export type WhatsAppChatType = "direct" | "group";
 export type WhatsAppGroupRoutingPolicy = "group" | "participant";
-export type DeliveryStatus = "pending" | "sent" | "failed";
+export type DeliveryStatus = "pending" | "sent" | "failed" | "ignored";
 export type DeliveryFailureStage = "hermes" | "whatsapp";
 export type MediaType = "image" | "video" | "audio" | "document";
 export type NumberRuleAction = "allow" | "deny";
 export type NumberRuleMatchType = "all" | "exact" | "regex";
-export type AuditLogOutcome = "success" | "failure";
+export type AuditLogOutcome = "success" | "failure" | "ignored";
 
 export interface WhatsAppMediaAttachment {
   type: MediaType;

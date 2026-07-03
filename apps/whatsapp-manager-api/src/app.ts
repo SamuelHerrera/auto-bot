@@ -341,6 +341,10 @@ export function createApp({ config, services = buildServices(config) }: CreateAp
       return reply.code(404).send({ error: "Delivery record not found" });
     }
 
+    if (record.status === "ignored") {
+      return reply.code(409).send({ error: record.error ?? "Ignored delivery cannot be retried" });
+    }
+
     if (record.failureStage === "hermes") {
       if (!record.inboundText?.trim()) {
         return reply.code(409).send({ error: "Hermes failure record has no inbound text to retry" });
@@ -364,7 +368,7 @@ export function createApp({ config, services = buildServices(config) }: CreateAp
         services.eventBus.publish("activity");
         audit({
           action: "delivery.retry",
-          outcome: "failure",
+          outcome: "ignored",
           resourceType: "delivery",
           resourceId: record.id,
           details: {
@@ -502,7 +506,7 @@ export function createApp({ config, services = buildServices(config) }: CreateAp
       services.eventBus.publish("activity");
       audit({
         action: "message.inbound",
-        outcome: "failure",
+        outcome: "ignored",
         resourceType: "whatsapp-message",
         resourceId: event.messageId,
         details: {
@@ -626,8 +630,8 @@ function parseAuditLogInput(body: unknown): AuditLogInput {
   }
 
   const outcome = readString(value.outcome, "success");
-  if (outcome !== "success" && outcome !== "failure") {
-    throw badRequest("outcome must be success or failure");
+  if (outcome !== "success" && outcome !== "failure" && outcome !== "ignored") {
+    throw badRequest("outcome must be success, failure, or ignored");
   }
 
   const details = value.details && typeof value.details === "object" && !Array.isArray(value.details)
