@@ -1579,11 +1579,16 @@ button {
 }
 
 .audit-log-list {
-  display: grid;
+  display: block;
 }
 
 .audit-log-row {
   border-bottom: 1px solid #e5ebe6;
+  left: 0;
+  position: absolute;
+  right: 0;
+  top: 0;
+  will-change: transform;
 }
 
 .audit-log-row:last-child {
@@ -1721,7 +1726,15 @@ button {
 }
 
 .audit-log-sentinel {
+  left: 0;
   min-height: 24px;
+  position: absolute;
+  right: 0;
+}
+
+.audit-log-virtualizer {
+  min-height: 100%;
+  position: relative;
 }
 
 .table-list,
