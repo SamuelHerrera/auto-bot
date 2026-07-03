@@ -89,20 +89,20 @@ export function getAuditLogDisplay(entry: AuditLogRecord): AuditLogDisplay {
     case "session.create":
       return {
         icon: "mdi:plus-box-outline",
-        title: `Hermes session created for ${chatJid}`,
+        title: `Routing session created for ${chatJid}`,
         description: `Messages for account ${accountId} now route through session ${entry.resourceId ?? detailString(entry, "hermesSessionId") ?? "unknown"}.`,
       };
     case "session.reset":
       return {
         icon: "mdi:restore",
-        title: `Hermes session reset for ${chatJid}`,
-        description: `The routed conversation for account ${accountId} was reset in Hermes.`,
+        title: `Routing session reset for ${chatJid}`,
+        description: `The routed conversation for account ${accountId} was reset.`,
       };
     case "session.remap":
       return {
         icon: "mdi:swap-horizontal",
         title: `Chat route remapped for ${chatJid}`,
-        description: `The chat session now points to Hermes session ${detailString(entry, "hermesSessionId") ?? entry.resourceId ?? "unknown"}.`,
+        description: `The chat route now points to session ${detailString(entry, "hermesSessionId") ?? entry.resourceId ?? "unknown"}.`,
       };
     case "number-rule.create":
       return {
@@ -212,14 +212,14 @@ function describeInboundMessage(entry: AuditLogRecord): AuditLogDisplay {
     };
   }
 
-  const hermesSessionId = detailString(entry, "hermesSessionId");
+  const routeSessionId = detailString(entry, "hermesSessionId");
   const duplicate = detailBoolean(entry, "duplicate");
   return {
     icon: duplicate ? "mdi:content-duplicate" : "mdi:message-arrow-right-outline",
     title: duplicate ? `Duplicate inbound message skipped for ${chatJid}` : `Inbound message routed for ${chatJid}`,
     description: duplicate
       ? `The message for account ${accountId} was already processed.`
-      : `The message for account ${accountId} was routed${hermesSessionId ? ` to Hermes session ${hermesSessionId}` : ""}.`,
+      : `The message for account ${accountId} was routed${routeSessionId ? ` to session ${routeSessionId}` : ""}.`,
   };
 }
 

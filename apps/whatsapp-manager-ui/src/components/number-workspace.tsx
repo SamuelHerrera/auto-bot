@@ -2,11 +2,13 @@ import { FormEvent, useState } from "react";
 import { Icon } from "@iconify/react";
 
 import { getAccountStatusDetail, isPendingAccountId } from "../domain/accounts";
-import type { ChatMessage, ChatSummary, DeliveryRecord, NumberRule, NumberRuleAction, NumberRuleMatchType, NumberSubview, SessionMapping, WhatsAppAccount } from "../domain/models";
+import type { ChatMessage, ChatSummary, DeliveryRecord, NumberRule, NumberRuleAction, NumberRuleMatchType, NumberSubview, PostbackAction, PostbackActionRun, SessionMapping, WhatsAppAccount } from "../domain/models";
 import { FailuresView } from "./number-failures-view";
 import { HomeView } from "./number-home-view";
 import { MessagesView } from "./number-messages-view";
 import { RulesView } from "./number-rules-view";
+import { PostbackRunHistory, PostbackSettings } from "./postback-settings";
+import type { PostbackActionDraft } from "./postback-settings";
 import { EmptyState, IconButton, TabButton } from "./shared";
 
 export function NumberWorkspace({
@@ -22,10 +24,14 @@ export function NumberWorkspace({
   isBusy,
   mappings,
   matchType,
+  postbackActions,
+  postbackRuns,
   onActionChange,
   onAliasChange,
   onAliasSave,
+  onCreatePostbackAction,
   onCreateRule,
+  onDeletePostbackAction,
   onDeleteRule,
   onDisconnect,
   onEnabledChange,
@@ -33,8 +39,11 @@ export function NumberWorkspace({
   onMatchTypeChange,
   onPatternChange,
   onRetry,
+  onSavePostbackAction,
   onSelectChat,
   onSetChatArchived,
+  onTestPostbackAction,
+  onTogglePostbackAction,
   onViewChange,
   pattern,
   ruleAction,
@@ -53,10 +62,14 @@ export function NumberWorkspace({
   isBusy: boolean;
   mappings: SessionMapping[];
   matchType: NumberRuleMatchType;
+  postbackActions: PostbackAction[];
+  postbackRuns: PostbackActionRun[];
   onActionChange: (value: NumberRuleAction) => void;
   onAliasChange: (value: string) => void;
   onAliasSave: (alias: string) => void;
+  onCreatePostbackAction: (input: PostbackActionDraft) => void;
   onCreateRule: (event: FormEvent<HTMLFormElement>) => void;
+  onDeletePostbackAction: (actionId: string) => void;
   onDeleteRule: (ruleId: string) => void;
   onDisconnect: (accountId: string) => void;
   onEnabledChange: (rule: NumberRule, enabled: boolean) => void;
@@ -64,8 +77,11 @@ export function NumberWorkspace({
   onMatchTypeChange: (value: NumberRuleMatchType) => void;
   onPatternChange: (value: string) => void;
   onRetry: (deliveryId: string) => void;
+  onSavePostbackAction: (action: PostbackAction, input: PostbackActionDraft) => void;
   onSelectChat: (chatJid: string) => void;
   onSetChatArchived: (chat: ChatSummary, archived: boolean) => void;
+  onTestPostbackAction: (action: PostbackAction) => void;
+  onTogglePostbackAction: (action: PostbackAction, enabled: boolean) => void;
   onViewChange: (view: NumberSubview) => void;
   pattern: string;
   ruleAction: NumberRuleAction;
@@ -91,6 +107,9 @@ export function NumberWorkspace({
           </TabButton>
           <TabButton active={activeView === "rules"} count={rules.length} icon="mdi:shield-check-outline" onClick={() => onViewChange("rules")}>
             Rules
+          </TabButton>
+          <TabButton active={activeView === "postbacks"} count={postbackActions.length} icon="mdi:webhook" onClick={() => onViewChange("postbacks")}>
+            Postbacks
           </TabButton>
           <TabButton active={activeView === "failures"} count={failedDeliveries.length} icon="mdi:alert-circle-outline" onClick={() => onViewChange("failures")}>
             Failures
@@ -172,6 +191,23 @@ export function NumberWorkspace({
             ruleLabel={ruleLabel}
             rules={rules}
           />
+        </div>
+      ) : null}
+
+      {activeView === "postbacks" ? (
+        <div className="number-view-scroll postback-account-view">
+          <PostbackSettings
+            accountId={account.accountId}
+            actions={postbackActions}
+            isBusy={isBusy}
+            numberRules={rules}
+            onCreate={onCreatePostbackAction}
+            onDelete={onDeletePostbackAction}
+            onSave={onSavePostbackAction}
+            onTest={onTestPostbackAction}
+            onToggle={onTogglePostbackAction}
+          />
+          <PostbackRunHistory runs={postbackRuns} />
         </div>
       ) : null}
 

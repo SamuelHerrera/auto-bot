@@ -1,7 +1,7 @@
 import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { EmptyState, LinkAccountDialog, LogsView, NumberChooserPanel, NumberWorkspace, SettingsView, TopBar } from "./components";
-import type { PostbackActionDraft } from "./components/settings-view";
+import type { PostbackActionDraft } from "./components/postback-settings";
 import { accountMatchesSearch, findCompletedLinkedAccount, isPendingAccountId } from "./domain/accounts";
 import { buildChatMessages, buildChatSummaries, buildContactDisplayIndex } from "./domain/chats";
 import type {
@@ -13,11 +13,9 @@ import type {
   NumberRuleAction,
   NumberRuleMatchType,
   NumberSubview,
-  PostbackMaintenance,
   PostbackAction,
   PostbackActionRun,
   RefreshScope,
-  RuntimeStatus,
   SessionMapping,
   WhatsAppAccount,
   WhatsAppContact,
@@ -64,8 +62,6 @@ export function App() {
   const [numberRules, setNumberRules] = useState<NumberRule[]>([]);
   const [postbackActions, setPostbackActions] = useState<PostbackAction[]>([]);
   const [postbackRuns, setPostbackRuns] = useState<PostbackActionRun[]>([]);
-  const [postbackMaintenance, setPostbackMaintenance] = useState<PostbackMaintenance | null>(null);
-  const [runtimeStatus, setRuntimeStatus] = useState<RuntimeStatus | null>(null);
   const [auditLogs, setAuditLogs] = useState<AuditLogRecord[]>([]);
   const [activeNumberView, setActiveNumberView] = useState<NumberSubview>("home");
   const [accountSearch, setAccountSearch] = useState("");
@@ -331,8 +327,6 @@ export function App() {
         auditLogResponse,
         postbackActionResponse,
         postbackRunResponse,
-        postbackMaintenanceResponse,
-        runtimeStatusResponse,
       ] = await Promise.all([
         shouldRefreshAccounts ? request<{ items: WhatsAppAccount[] }>("/whatsapp/accounts") : Promise.resolve(null),
         shouldRefreshDirectory ? request<{ items: SessionMapping[] }>(`/sessions?${directoryAccountQuery}`) : Promise.resolve(null),
@@ -351,8 +345,6 @@ export function App() {
         shouldRefreshLogs ? request<{ items: AuditLogRecord[] }>("/audit-logs?limit=200") : Promise.resolve(null),
         shouldRefreshPostbacks ? request<{ items: PostbackAction[] }>("/postback-actions") : Promise.resolve(null),
         shouldRefreshPostbacks ? request<{ items: PostbackActionRun[] }>("/postback-action-runs?limit=100") : Promise.resolve(null),
-        shouldRefreshPostbacks ? request<PostbackMaintenance>("/postback-maintenance") : Promise.resolve(null),
-        shouldRefreshPostbacks ? request<RuntimeStatus>("/runtime/status") : Promise.resolve(null),
       ]);
 
       const refreshedAccounts = accountResponse?.items;
@@ -405,12 +397,6 @@ export function App() {
       }
       if (postbackRunResponse) {
         setPostbackRuns(postbackRunResponse.items);
-      }
-      if (postbackMaintenanceResponse) {
-        setPostbackMaintenance(postbackMaintenanceResponse);
-      }
-      if (runtimeStatusResponse) {
-        setRuntimeStatus(runtimeStatusResponse);
       }
       const currentAccounts = refreshedAccounts ?? accountsRef.current;
       const currentLinkingStatus = linkingStatusRef.current;
@@ -1104,8 +1090,8 @@ export function App() {
           },
         }
       : {
-          deliveryMode: draft.hermesDeliveryMode,
-          replyToWhatsApp: draft.hermesDeliveryMode === "platform" ? false : draft.replyToWhatsApp,
+          deliveryMode: draft.callbackDeliveryMode,
+          replyToWhatsApp: draft.callbackDeliveryMode === "platform" ? false : draft.replyToWhatsApp,
         };
   }
 
@@ -1135,24 +1121,6 @@ export function App() {
       });
       setPostbackActions((current) => current.filter((action) => action.id !== actionId));
       setStatusMessage("Postback action deleted.");
-    });
-  }
-
-  async function cleanupPostbackRecords() {
-    await runAction(async () => {
-      const response = await request<{ result: { deletedRuns: number; deletedPlatformEvents: number }; stats: PostbackMaintenance["stats"] }>("/postback-maintenance/cleanup", {
-        method: "POST",
-        body: JSON.stringify({}),
-      });
-      setPostbackMaintenance((current) => ({
-        retention: current?.retention ?? {
-          postbackRunRetentionDays: 30,
-          hermesPlatformEventRetentionDays: 7,
-        },
-        stats: response.stats,
-      }));
-      await refreshData(false, true, ["postbacks"]);
-      setStatusMessage(`Postback cleanup removed ${response.result.deletedRuns} runs and ${response.result.deletedPlatformEvents} platform events.`);
     });
   }
 
@@ -1269,6 +1237,8 @@ export function App() {
     null;
   const failedDeliveries = deliveries.filter((delivery) => delivery.status === "failed");
   const activeAccountFailedDeliveries = failedDeliveries.filter((delivery) => delivery.accountId === activeAccountId);
+  const activeAccountPostbackActions = postbackActions.filter((action) => action.accountId === activeAccountId);
+  const activeAccountPostbackRuns = postbackRuns.filter((run) => run.accountId === activeAccountId);
   const statusTone = errorMessage ? "error" : isBusy ? "syncing" : "live";
 
   return (
@@ -1304,19 +1274,8 @@ export function App() {
               branding={branding}
               defaultBranding={{ title: defaultAppTitle, iconSrc: defaultAppIcon }}
               isBusy={isBusy}
-              postbackActions={postbackActions}
-              postbackMaintenance={postbackMaintenance}
-              postbackRuns={postbackRuns}
-              numberRules={numberRules}
-              runtimeStatus={runtimeStatus}
-              onCreatePostbackAction={(draft) => void createPostbackAction(draft)}
-              onDeletePostbackAction={(actionId) => void deletePostbackAction(actionId)}
-              onCleanupPostbackRecords={() => void cleanupPostbackRecords()}
               onResetWorkspaceState={resetBrowserWorkspaceState}
-              onSavePostbackAction={(action, draft) => void savePostbackAction(action, draft)}
               onSave={(nextBranding) => void saveBranding(nextBranding)}
-              onTestPostbackAction={(action) => void testPostbackAction(action)}
-              onTogglePostbackAction={(action, enabled) => void togglePostbackAction(action, enabled)}
             />
           ) : null}
 
@@ -1339,6 +1298,8 @@ export function App() {
               isBusy={isBusy}
               mappings={activeAccountMappings}
               matchType={ruleMatchType}
+              postbackActions={activeAccountPostbackActions}
+              postbackRuns={activeAccountPostbackRuns}
               aliasDraft={activeAccount ? accountAliasDrafts[activeAccount.accountId] ?? activeAccount.alias ?? "" : ""}
               onActionChange={setRuleAction}
               onAliasChange={(value) => {
@@ -1353,7 +1314,9 @@ export function App() {
                 }
                 void saveAccountAlias(activeAccount.accountId, alias);
               }}
+              onCreatePostbackAction={(draft) => void createPostbackAction(draft)}
               onCreateRule={createNumberRule}
+              onDeletePostbackAction={(actionId) => void deletePostbackAction(actionId)}
               onDeleteRule={(ruleId) => void deleteNumberRule(ruleId)}
               onDisconnect={(accountId) => void disconnectAccount(accountId)}
               onEnabledChange={(rule, enabled) => void updateNumberRule(rule, enabled)}
@@ -1361,8 +1324,11 @@ export function App() {
               onMatchTypeChange={setRuleMatchType}
               onPatternChange={setRulePattern}
               onRetry={(deliveryId) => void retryDelivery(deliveryId)}
+              onSavePostbackAction={(action, draft) => void savePostbackAction(action, draft)}
               onSelectChat={selectChat}
               onSetChatArchived={(chat, archived) => void updateManagerChatArchive(chat, archived)}
+              onTestPostbackAction={(action) => void testPostbackAction(action)}
+              onTogglePostbackAction={(action, enabled) => void togglePostbackAction(action, enabled)}
               onViewChange={setActiveNumberView}
               pattern={rulePattern}
               ruleAction={ruleAction}

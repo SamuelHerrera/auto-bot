@@ -225,7 +225,7 @@ function MessageMetadataPopover({ message }: { message: ChatMessage }) {
       value: media.fileName ?? media.mimetype ?? media.localPath ?? "metadata stored",
     })),
     ...(message.messageType ? [{ label: "Message type", value: message.messageType }] : []),
-    { label: "Source", value: message.source === "sync" ? "WhatsApp sync" : "Hermes delivery" },
+    { label: "Source", value: message.source === "sync" ? "WhatsApp sync" : "Outbound delivery" },
     ...readMessageIds(message).map((messageId) => ({ label: "Message ID", value: messageId })),
   ];
 

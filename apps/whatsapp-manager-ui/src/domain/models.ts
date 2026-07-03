@@ -196,30 +196,6 @@ export interface PostbackActionRun {
   updatedAt: string;
 }
 
-export interface PostbackMaintenance {
-  retention: {
-    postbackRunRetentionDays: number;
-    hermesPlatformEventRetentionDays: number;
-  };
-  stats: {
-    postbackActionRuns: number;
-    hermesPlatformEvents: number;
-    oldestPostbackActionRun?: string;
-    oldestHermesPlatformEvent?: string;
-  };
-}
-
-export interface RuntimeStatus {
-  hermesNativeAdapter: {
-    enabled: string;
-    apiUrlConfigured: boolean;
-    apiTokenConfigured: boolean;
-    allowAllUsers: boolean;
-    allowedUsersConfigured: boolean;
-    ready: boolean;
-  };
-}
-
 export interface ChatSummary {
   accountId: string;
   chatJid: string;

@@ -633,6 +633,21 @@ button:disabled {
   display: grid;
 }
 
+.settings-tab-label {
+  align-items: center;
+  color: #09643f;
+  display: inline-flex;
+  font-size: 0.9rem;
+  font-weight: 800;
+  min-height: 34px;
+  padding: 6px 2px;
+}
+
+.postback-account-view {
+  display: grid;
+  gap: 0;
+}
+
 .number-header-actions {
   align-items: center;
   display: flex;
