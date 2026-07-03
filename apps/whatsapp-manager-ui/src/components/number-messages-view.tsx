@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Icon } from "@iconify/react";
 
 import { formatCountLabel, formatTimestamp } from "../domain/formatting";
@@ -23,6 +23,7 @@ export function MessagesView({
   onSetChatArchived: (chat: ChatSummary, archived: boolean) => void;
 }) {
   const [chatListMode, setChatListMode] = useState<"main" | "archived">("main");
+  const messageListRef = useRef<HTMLDivElement | null>(null);
   const activeChats = chats.filter((chat) => !chat.managerArchived);
   const archivedChats = chats.filter((chat) => chat.managerArchived);
   const isShowingArchived = chatListMode === "archived";
@@ -32,6 +33,17 @@ export function MessagesView({
   const emptyDescription = isShowingArchived
     ? "Archived app-manager chats appear here."
     : "Chats appear after inbound WhatsApp activity is routed.";
+
+  useEffect(() => {
+    const frame = window.requestAnimationFrame(() => {
+      const messageList = messageListRef.current;
+      if (messageList) {
+        messageList.scrollTop = messageList.scrollHeight;
+      }
+    });
+
+    return () => window.cancelAnimationFrame(frame);
+  }, [activeChatJid, activeChatMessages.length]);
 
   return (
     <div className="messages-view">
@@ -119,7 +131,7 @@ export function MessagesView({
                   />
                 </div>
               </header>
-              <div className="message-list">
+              <div className="message-list" ref={messageListRef}>
                 {activeChatMessages.length === 0 ? (
                   <EmptyState
                     title="No messages stored"
