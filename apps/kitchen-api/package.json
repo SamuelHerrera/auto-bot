@@ -1,0 +1,38 @@
+{
+  "name": "@auto-bot/kitchen-api",
+  "private": true,
+  "version": "1.0.0",
+  "description": "Kitchen backend API imported from KitchenBot.",
+  "type": "commonjs",
+  "main": "src/index.ts",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "dev": "tsx watch --clear-screen=false scripts/dev-api.ts",
+    "lint": "tsc -p tsconfig.json --noEmit",
+    "start": "tsx scripts/start-api.ts",
+    "test": "vitest run",
+    "test:api": "vitest run test/**/*.api.test.js test/setup/http-app.test.js",
+    "test:db": "vitest run test/**/*.db.test.js",
+    "test:http": "vitest run test/**/*.http.test.js",
+    "prisma:generate": "prisma generate",
+    "prisma:studio": "prisma studio",
+    "prisma:push": "prisma db push",
+    "db:seed:dev": "tsx scripts/seed-dev.ts",
+    "test:services": "tsx src/scripts/test-services.js",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@prisma/client": "^6.19.3",
+    "express": "^5.2.1",
+    "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "@types/express": "^5.0.3",
+    "@types/node": "^24.0.0",
+    "prisma": "^6.19.3",
+    "supertest": "^7.2.2",
+    "tsx": "^4.20.6",
+    "typescript": "^5.9.3",
+    "vitest": "^4.1.9"
+  }
+}

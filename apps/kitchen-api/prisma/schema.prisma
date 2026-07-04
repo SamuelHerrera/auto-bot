@@ -1,0 +1,558 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum KitchenSetupStatusEnum {
+  PENDING_SETUP
+  CHANNEL_READY
+  ACTIVE
+  INACTIVE
+
+  @@map("kitchen_setup_status_enum")
+}
+
+enum KitchenOrderingStatusEnum {
+  OPEN
+  CLOSED
+  PAUSED
+
+  @@map("kitchen_ordering_status_enum")
+}
+
+enum UserRoleEnum {
+  CLIENT
+  KITCHEN
+  DELIVERER
+
+  @@map("user_role_enum")
+}
+
+enum WhatsappSessionStatusEnum {
+  PENDING_LINK
+  CONNECTED
+  EXPIRED
+  DISCONNECTED
+
+  @@map("whatsapp_session_status_enum")
+}
+
+enum ConversationStatusEnum {
+  BOT_ACTIVE
+  HUMAN_HANDOFF
+  CLOSED
+
+  @@map("conversation_status_enum")
+}
+
+enum MenuStatusEnum {
+  DRAFT
+  PUBLISHED
+  ARCHIVED
+
+  @@map("menu_status_enum")
+}
+
+enum MenuItemAvailabilityEnum {
+  AVAILABLE
+  SOLD_OUT
+  HIDDEN
+
+  @@map("menu_item_availability_enum")
+}
+
+enum PrinterStatusEnum {
+  ON
+  OFF
+  NOT_CONNECTED
+
+  @@map("printer_status_enum")
+}
+
+enum OrderStatusEnum {
+  DRAFT
+  CONFIRMED
+  IN_PROCESS_OF_DELIVERY
+  DELIVERED
+  CANCELLED
+
+  @@map("order_status_enum")
+}
+
+enum PaymentMethodEnum {
+  CASH
+  TRANSFER
+
+  @@map("payment_method_enum")
+}
+
+enum PaymentStatusEnum {
+  PENDING
+  COMPLETED
+
+  @@map("payment_status_enum")
+}
+
+enum DeliveryTypeEnum {
+  PICKUP
+  DELIVERY
+
+  @@map("delivery_type_enum")
+}
+
+enum PrintStatusEnum {
+  PENDING
+  PRINTED
+  FAILED
+  NOT_REQUIRED
+
+  @@map("print_status_enum")
+}
+
+model Kitchen {
+  id               BigInt                    @id @default(autoincrement())
+  name             String                    @db.VarChar(150)
+  description      String?
+  zone             String?                   @db.VarChar(150)
+  schedule         String?                   @db.VarChar(150)
+  printerIdentifier String?                  @map("printer_identifier") @db.VarChar(100)
+  setupStatus      KitchenSetupStatusEnum    @default(PENDING_SETUP) @map("setup_status")
+  orderingStatus   KitchenOrderingStatusEnum @default(CLOSED) @map("ordering_status")
+  businessVoice    String?                   @map("business_voice") @db.VarChar(255)
+  paymentOptions   PaymentMethodEnum[]       @default([CASH, TRANSFER]) @map("payment_options")
+  deliveryEnabled  Boolean                   @default(true) @map("delivery_enabled")
+  deliveryFee      Decimal                   @default(0) @map("delivery_fee") @db.Decimal(10, 2)
+  createdAt        DateTime                  @default(now()) @map("created_at") @db.Timestamp(6)
+  updatedAt        DateTime                  @default(now()) @map("updated_at") @db.Timestamp(6)
+  users            User[]
+  linkedPhones     LinkedPhone[]
+  addresses        Address[]
+  whatsappSessions WhatsappSession[]
+  products         Product[]
+  menus            Menu[]
+  printers         Printer[]
+  orders           Order[]
+  conversations    Conversation[]
+  activityLogs     ActivityLog[]
+  processedEvents  ProcessedEvent[]
+
+  @@map("kitchens")
+}
+
+model User {
+  id                    BigInt          @id @default(autoincrement())
+  kitchenId             BigInt?         @map("kitchen_id")
+  name                  String          @db.VarChar(150)
+  role                  UserRoleEnum
+  isActive              Boolean         @default(true) @map("is_active")
+  createdAt             DateTime        @default(now()) @map("created_at") @db.Timestamp(6)
+  updatedAt             DateTime        @default(now()) @map("updated_at") @db.Timestamp(6)
+  kitchen               Kitchen?        @relation(fields: [kitchenId], references: [id])
+  linkedPhones          LinkedPhone[]
+  addresses             Address[]
+  createdMenus          Menu[]
+  clientOrders          Order[]         @relation("ClientOrders")
+  deliveryOrders        Order[]         @relation("DeliveryOrders")
+  clientConversations   Conversation[]  @relation("ConversationClient")
+  assignedConversations Conversation[]  @relation("ConversationAssigned")
+  chatLogs              ChatLog[]
+  activityLogs          ActivityLog[]
+
+  @@index([kitchenId], map: "idx_users_kitchen_id")
+  @@map("users")
+}
+
+model LinkedPhone {
+  id            BigInt         @id @default(autoincrement())
+  userId        BigInt?        @map("user_id")
+  kitchenId     BigInt         @map("kitchen_id")
+  phone         String         @db.VarChar(30)
+  normalizedPhone String       @map("normalized_phone") @db.VarChar(30)
+  createdAt     DateTime       @default(now()) @map("created_at") @db.Timestamp(6)
+  updatedAt     DateTime       @default(now()) @map("updated_at") @db.Timestamp(6)
+  user          User?          @relation(fields: [userId], references: [id])
+  kitchen       Kitchen        @relation(fields: [kitchenId], references: [id])
+  orders        Order[]
+  conversations Conversation[]
+  chatLogs      ChatLog[]
+
+  @@unique([kitchenId, normalizedPhone], map: "linked_phones_kitchen_id_normalized_phone_key")
+  @@index([userId], map: "idx_linked_phones_user_id")
+  @@index([kitchenId], map: "idx_linked_phones_kitchen_id")
+  @@index([phone], map: "idx_linked_phones_phone")
+  @@index([normalizedPhone], map: "idx_linked_phones_normalized_phone")
+  @@map("linked_phones")
+}
+
+model Address {
+  id                BigInt    @id @default(autoincrement())
+  userId            BigInt?   @map("user_id")
+  kitchenId         BigInt    @map("kitchen_id")
+  addressLine       String    @map("address_line")
+  street            String?   @db.VarChar(150)
+  exteriorNumber    String?   @map("exterior_number") @db.VarChar(30)
+  interiorNumber    String?   @map("interior_number") @db.VarChar(30)
+  neighborhood      String?   @db.VarChar(150)
+  municipality      String?   @db.VarChar(150)
+  city              String?   @db.VarChar(150)
+  state             String?   @db.VarChar(100)
+  postalCode        String?   @map("postal_code") @db.VarChar(10)
+  countryCode       String    @default("MX") @map("country_code") @db.Char(2)
+  reference         String?
+  normalizedAddress String    @map("normalized_address") @db.VarChar(500)
+  isDefault         Boolean   @default(false) @map("is_default")
+  isActive          Boolean   @default(true) @map("is_active")
+  description       String?   @db.VarChar(255)
+  createdAt         DateTime  @default(now()) @map("created_at") @db.Timestamp(6)
+  updatedAt         DateTime  @default(now()) @map("updated_at") @db.Timestamp(6)
+  user              User?     @relation(fields: [userId], references: [id])
+  kitchen           Kitchen   @relation(fields: [kitchenId], references: [id])
+  orders            Order[]
+
+  @@index([userId], map: "idx_addresses_user_id")
+  @@index([kitchenId], map: "idx_addresses_kitchen_id")
+  @@index([normalizedAddress], map: "idx_addresses_normalized_address")
+  @@map("addresses")
+}
+
+model WhatsappSession {
+  id               BigInt                     @id @default(autoincrement())
+  kitchenId        BigInt                     @map("kitchen_id")
+  externalSessionId String?                   @map("external_session_id") @db.VarChar(150)
+  sessionStatus    WhatsappSessionStatusEnum  @default(PENDING_LINK) @map("session_status")
+  /// Safe provider QR media reference; do not store raw QR secret payloads.
+  qrCode           String?                    @map("qr_code")
+  expiresAt        DateTime?                  @map("expires_at") @db.Timestamp(6)
+  connectedAt      DateTime?                  @map("connected_at") @db.Timestamp(6)
+  createdAt        DateTime                   @default(now()) @map("created_at") @db.Timestamp(6)
+  updatedAt        DateTime                   @default(now()) @map("updated_at") @db.Timestamp(6)
+  kitchen          Kitchen                    @relation(fields: [kitchenId], references: [id])
+
+  @@index([kitchenId], map: "idx_whatsapp_sessions_kitchen_id")
+  @@index([sessionStatus], map: "idx_whatsapp_sessions_status")
+  @@map("whatsapp_sessions")
+}
+
+model Product {
+  id              BigInt           @id @default(autoincrement())
+  kitchenId       BigInt           @map("kitchen_id")
+  name            String           @db.VarChar(150)
+  normalizedName  String           @map("normalized_name") @db.VarChar(150)
+  description     String?
+  /// Legacy/product-level stock reference; MVP operational sellable stock is MenuItem.stockQuantity.
+  stock           Int
+  createdAt       DateTime         @default(now()) @map("created_at") @db.Timestamp(6)
+  updatedAt       DateTime         @default(now()) @map("updated_at") @db.Timestamp(6)
+  kitchen         Kitchen          @relation(fields: [kitchenId], references: [id])
+  productPortions ProductPortion[]
+
+  @@unique([kitchenId, normalizedName], map: "products_kitchen_id_normalized_name_key")
+  @@index([kitchenId], map: "idx_products_kitchen_id")
+  @@index([normalizedName], map: "idx_products_normalized_name")
+  @@map("products")
+}
+
+model Portion {
+  id              BigInt           @id @default(autoincrement())
+  size            String           @db.VarChar(50)
+  price           Decimal          @db.Decimal(10, 2)
+  createdAt       DateTime         @default(now()) @map("created_at") @db.Timestamp(6)
+  updatedAt       DateTime         @default(now()) @map("updated_at") @db.Timestamp(6)
+  productPortions ProductPortion[]
+
+  @@map("portions")
+}
+
+model ProductPortion {
+  id                BigInt                @id @default(autoincrement())
+  productId         BigInt                @map("product_id")
+  portionId         BigInt                @map("portion_id")
+  createdAt         DateTime              @default(now()) @map("created_at") @db.Timestamp(6)
+  updatedAt         DateTime              @default(now()) @map("updated_at") @db.Timestamp(6)
+  product           Product               @relation(fields: [productId], references: [id])
+  portion           Portion               @relation(fields: [portionId], references: [id])
+  menuItems         MenuItem[]
+  orderProductItems OrderProductPortion[]
+
+  @@unique([productId, portionId], map: "product_portions_product_id_portion_id_key")
+  @@index([productId], map: "idx_product_portions_product_id")
+  @@index([portionId], map: "idx_product_portions_portion_id")
+  @@map("product_portions")
+}
+
+model Menu {
+  id               BigInt          @id @default(autoincrement())
+  kitchenId        BigInt          @map("kitchen_id")
+  name             String          @db.VarChar(150)
+  status           MenuStatusEnum  @default(DRAFT)
+  isCurrent        Boolean         @default(false) @map("is_current")
+  publishedAt      DateTime?       @map("published_at") @db.Timestamp(6)
+  startsAt         DateTime?       @map("starts_at") @db.Timestamp(6)
+  endsAt           DateTime?       @map("ends_at") @db.Timestamp(6)
+  createdByUserId  BigInt?         @map("created_by_user_id")
+  createdAt        DateTime        @default(now()) @map("created_at") @db.Timestamp(6)
+  updatedAt        DateTime        @default(now()) @map("updated_at") @db.Timestamp(6)
+  kitchen          Kitchen         @relation(fields: [kitchenId], references: [id])
+  createdByUser    User?           @relation(fields: [createdByUserId], references: [id])
+  menuItems        MenuItem[]
+
+  @@index([kitchenId], map: "idx_menus_kitchen_id")
+  @@index([kitchenId, isCurrent], map: "idx_menus_is_current")
+  @@map("menus")
+}
+
+model MenuItem {
+  id                 BigInt                    @id @default(autoincrement())
+  menuId             BigInt                    @map("menu_id")
+  productPortionId   BigInt                    @map("product_portion_id")
+  displayName        String                    @map("display_name") @db.VarChar(150)
+  normalizedDisplayName String                 @map("normalized_display_name") @db.VarChar(150)
+  description        String?
+  /// Display/menu price only. MVP order-line unit price is derived from ProductPortion -> Portion.price.
+  price              Decimal                   @db.Decimal(10, 2)
+  /// Operational MVP stock for sellable WhatsApp menu entries.
+  stockQuantity      Int                       @map("stock_quantity")
+  availabilityStatus MenuItemAvailabilityEnum  @default(AVAILABLE) @map("availability_status")
+  createdAt          DateTime                  @default(now()) @map("created_at") @db.Timestamp(6)
+  updatedAt          DateTime                  @default(now()) @map("updated_at") @db.Timestamp(6)
+  menu               Menu                      @relation(fields: [menuId], references: [id])
+  productPortion     ProductPortion            @relation(fields: [productPortionId], references: [id])
+  orderItems         OrderProductPortion[]
+
+  @@unique([menuId, productPortionId], map: "menu_items_menu_id_product_portion_id_key")
+  @@unique([menuId, normalizedDisplayName], map: "menu_items_menu_id_normalized_display_name_key")
+  @@index([menuId], map: "idx_menu_items_menu_id")
+  @@index([productPortionId], map: "idx_menu_items_product_portion_id")
+  @@index([normalizedDisplayName], map: "idx_menu_items_normalized_display_name")
+  @@map("menu_items")
+}
+
+model Printer {
+  id         BigInt            @id @default(autoincrement())
+  kitchenId  BigInt            @map("kitchen_id")
+  name       String?           @db.VarChar(100)
+  identifier String?           @db.VarChar(100)
+  status     PrinterStatusEnum @default(NOT_CONNECTED)
+  isActive   Boolean           @default(true) @map("is_active")
+  createdAt  DateTime          @default(now()) @map("created_at") @db.Timestamp(6)
+  updatedAt  DateTime          @default(now()) @map("updated_at") @db.Timestamp(6)
+  kitchen    Kitchen           @relation(fields: [kitchenId], references: [id])
+
+  @@index([kitchenId], map: "idx_printers_kitchen_id")
+  @@index([status], map: "idx_printers_status")
+  @@map("printers")
+}
+
+model Order {
+  id                   BigInt             @id @default(autoincrement())
+  clientUserId         BigInt             @map("client_user_id")
+  kitchenId            BigInt             @map("kitchen_id")
+  linkedPhoneId        BigInt             @map("linked_phone_id")
+  addressId            BigInt?            @map("address_id")
+  deliveryDriverUserId BigInt?            @map("delivery_driver_user_id")
+  orderNumber          Int?               @map("order_number")
+  status               OrderStatusEnum    @default(DRAFT)
+  paymentMethod        PaymentMethodEnum? @map("payment_method")
+  paymentStatus        PaymentStatusEnum? @map("payment_status")
+  paymentReference     String?            @map("payment_reference") @db.VarChar(150)
+  printStatus          PrintStatusEnum    @default(NOT_REQUIRED) @map("print_status")
+  revision             Int                @default(1)
+  deliveryFee          Decimal            @default(0) @map("delivery_fee") @db.Decimal(10, 2)
+  deliveryAddressSnapshot Json?           @map("delivery_address_snapshot") @db.JsonB
+  comments             String?
+  cancellationDescription String?         @map("cancellation_description")
+  deliveryType         DeliveryTypeEnum?  @map("delivery_type")
+  estimatedReadyAt     DateTime?          @map("estimated_ready_at") @db.Timestamp(6)
+  confirmedAt          DateTime?          @map("confirmed_at") @db.Timestamp(6)
+  printedAt            DateTime?          @map("printed_at") @db.Timestamp(6)
+  scheduledDeliveryAt  DateTime?          @map("scheduled_delivery_at") @db.Timestamp(6)
+  createdAt            DateTime           @default(now()) @map("created_at") @db.Timestamp(6)
+  updatedAt            DateTime           @default(now()) @map("updated_at") @db.Timestamp(6)
+  clientUser           User               @relation("ClientOrders", fields: [clientUserId], references: [id])
+  kitchen              Kitchen            @relation(fields: [kitchenId], references: [id])
+  linkedPhone          LinkedPhone        @relation(fields: [linkedPhoneId], references: [id])
+  address              Address?           @relation(fields: [addressId], references: [id])
+  deliveryDriverUser   User?              @relation("DeliveryOrders", fields: [deliveryDriverUserId], references: [id])
+  conversations        Conversation[]
+  orderItems           OrderProductPortion[]
+
+  @@index([clientUserId], map: "idx_orders_client_user_id")
+  @@index([kitchenId], map: "idx_orders_kitchen_id")
+  @@index([linkedPhoneId], map: "idx_orders_linked_phone_id")
+  @@index([addressId], map: "idx_orders_address_id")
+  @@index([deliveryDriverUserId], map: "idx_orders_delivery_driver_user_id")
+  @@index([status], map: "idx_orders_status")
+  @@index([paymentStatus], map: "idx_orders_payment_status")
+  @@index([createdAt], map: "idx_orders_created_at")
+  @@index([revision], map: "idx_orders_revision")
+  @@map("orders")
+}
+
+model Conversation {
+  id             BigInt                 @id @default(autoincrement())
+  kitchenId      BigInt                 @map("kitchen_id")
+  clientUserId   BigInt?                @map("client_user_id")
+  linkedPhoneId  BigInt                 @map("linked_phone_id")
+  currentOrderId BigInt?                @map("current_order_id")
+  status         ConversationStatusEnum @default(BOT_ACTIVE)
+  assignedUserId BigInt?                @map("assigned_user_id")
+  createdAt      DateTime               @default(now()) @map("created_at") @db.Timestamp(6)
+  updatedAt      DateTime               @default(now()) @map("updated_at") @db.Timestamp(6)
+  kitchen        Kitchen                @relation(fields: [kitchenId], references: [id])
+  clientUser     User?                  @relation("ConversationClient", fields: [clientUserId], references: [id])
+  linkedPhone    LinkedPhone            @relation(fields: [linkedPhoneId], references: [id])
+  currentOrder   Order?                 @relation(fields: [currentOrderId], references: [id])
+  assignedUser   User?                  @relation("ConversationAssigned", fields: [assignedUserId], references: [id])
+  chatLogs       ChatLog[]
+
+  @@index([kitchenId], map: "idx_conversations_kitchen_id")
+  @@index([clientUserId], map: "idx_conversations_client_user_id")
+  @@index([linkedPhoneId], map: "idx_conversations_linked_phone_id")
+  @@index([status], map: "idx_conversations_status")
+  @@map("conversations")
+}
+
+model OrderProductPortion {
+  id               BigInt         @id @default(autoincrement())
+  orderId          BigInt         @map("order_id")
+  productPortionId BigInt         @map("product_portion_id")
+  menuItemId       BigInt?        @map("menu_item_id")
+  nameSnapshot     String         @map("name_snapshot") @db.VarChar(150)
+  quantity         Int
+  unitPrice        Decimal        @map("unit_price") @db.Decimal(10, 2)
+  createdAt        DateTime       @default(now()) @map("created_at") @db.Timestamp(6)
+  updatedAt        DateTime       @default(now()) @map("updated_at") @db.Timestamp(6)
+  order            Order          @relation(fields: [orderId], references: [id])
+  productPortion   ProductPortion @relation(fields: [productPortionId], references: [id])
+  menuItem         MenuItem?      @relation(fields: [menuItemId], references: [id])
+
+  @@index([orderId], map: "idx_order_product_portions_order_id")
+  @@index([productPortionId], map: "idx_order_product_portions_product_portion_id")
+  @@index([menuItemId], map: "idx_order_product_portions_menu_item_id")
+  @@map("order_product_portions")
+}
+
+model ChatLog {
+  id             BigInt        @id @default(autoincrement())
+  conversationId BigInt?       @map("conversation_id")
+  userId         BigInt?       @map("user_id")
+  linkedPhoneId  BigInt?       @map("linked_phone_id")
+  message        String
+  createdAt      DateTime      @default(now()) @map("created_at") @db.Timestamp(6)
+  conversation   Conversation? @relation(fields: [conversationId], references: [id])
+  user           User?         @relation(fields: [userId], references: [id])
+  linkedPhone    LinkedPhone?  @relation(fields: [linkedPhoneId], references: [id])
+
+  @@index([conversationId], map: "idx_chat_logs_conversation_id")
+  @@index([userId], map: "idx_chat_logs_user_id")
+  @@index([linkedPhoneId], map: "idx_chat_logs_linked_phone_id")
+  @@index([createdAt], map: "idx_chat_logs_created_at")
+  @@map("chat_logs")
+}
+
+model ActivityLog {
+  id          BigInt   @id @default(autoincrement())
+  kitchenId   BigInt?  @map("kitchen_id")
+  userId      BigInt?  @map("user_id")
+  entityType  String?  @map("entity_type") @db.VarChar(50)
+  entityId    BigInt?  @map("entity_id")
+  eventType   String?  @map("event_type") @db.VarChar(100)
+  description String
+  metadata    String?
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamp(6)
+  kitchen     Kitchen? @relation(fields: [kitchenId], references: [id])
+  user        User?    @relation(fields: [userId], references: [id])
+
+  @@index([kitchenId], map: "idx_activity_logs_kitchen_id")
+  @@index([userId], map: "idx_activity_logs_user_id")
+  @@index([eventType], map: "idx_activity_logs_event_type")
+  @@index([entityType, entityId], map: "idx_activity_logs_entity")
+  @@map("activity_logs")
+}
+
+model ProcessedEvent {
+  id          BigInt   @id @default(autoincrement())
+  kitchenId   BigInt?  @map("kitchen_id")
+  messageId   String   @map("message_id") @db.VarChar(150)
+  handlerName String   @map("handler_name") @db.VarChar(100)
+  result      Json     @db.JsonB
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamp(6)
+  kitchen     Kitchen? @relation(fields: [kitchenId], references: [id])
+
+  @@unique([kitchenId, messageId, handlerName], map: "processed_events_message_id_handler_name_key")
+  @@index([kitchenId], map: "idx_processed_events_kitchen_id")
+  @@index([messageId], map: "idx_processed_events_message_id")
+  @@map("processed_events")
+}
+
+model WhatsAppManagerConversationState {
+  conversationId String   @id @map("conversation_id") @db.VarChar(150)
+  senderId       String?  @map("sender_id") @db.VarChar(150)
+  phone          String?  @db.VarChar(30)
+  kitchenId      String?  @map("kitchen_id") @db.VarChar(150)
+  orderId        String?  @map("order_id") @db.VarChar(150)
+  actorRole      String?  @map("actor_role") @db.VarChar(30)
+  lastAction     String?  @map("last_action") @db.VarChar(100)
+  metadata       Json?    @db.JsonB
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamp(6)
+  updatedAt      DateTime @default(now()) @map("updated_at") @db.Timestamp(6)
+
+  @@index([senderId], map: "idx_whatsapp_manager_conversation_states_sender_id")
+  @@index([phone], map: "idx_whatsapp_manager_conversation_states_phone")
+  @@index([kitchenId], map: "idx_whatsapp_manager_conversation_states_kitchen_id")
+  @@index([updatedAt], map: "idx_whatsapp_manager_conversation_states_updated_at")
+  @@map("whatsapp_manager_conversation_states")
+}
+
+model WhatsAppManagerProviderMessage {
+  id                BigInt   @id @default(autoincrement())
+  provider          String   @db.VarChar(50)
+  conversationId    String?  @map("conversation_id") @db.VarChar(150)
+  providerMessageId String   @map("provider_message_id") @db.VarChar(150)
+  recipientId       String?  @map("recipient_id") @db.VarChar(150)
+  deliveryStatus    String?  @map("delivery_status") @db.VarChar(50)
+  deliveryAt        DateTime? @map("delivery_at") @db.Timestamp(6)
+  errorCode         String?  @map("error_code") @db.VarChar(100)
+  metadata          Json?    @db.JsonB
+  createdAt         DateTime @default(now()) @map("created_at") @db.Timestamp(6)
+  updatedAt         DateTime @default(now()) @map("updated_at") @db.Timestamp(6)
+
+  @@unique([provider, providerMessageId], map: "whatsapp_manager_provider_messages_provider_message_key")
+  @@index([conversationId], map: "idx_whatsapp_manager_provider_messages_conversation_id")
+  @@index([recipientId], map: "idx_whatsapp_manager_provider_messages_recipient_id")
+  @@index([deliveryStatus], map: "idx_whatsapp_manager_provider_messages_delivery_status")
+  @@map("whatsapp_manager_provider_messages")
+}
+
+model WhatsAppManagerDeliveryJob {
+  id               BigInt   @id @default(autoincrement())
+  provider         String   @db.VarChar(50)
+  conversationId   String?  @map("conversation_id") @db.VarChar(150)
+  dedupeKey        String?  @unique(map: "whatsapp_manager_delivery_jobs_dedupe_key_key") @map("dedupe_key") @db.VarChar(200)
+  queueStatus      String   @map("queue_status") @db.VarChar(50)
+  recipientId      String   @map("recipient_id") @db.VarChar(150)
+  payload          Json     @db.JsonB
+  providerMessageId String? @map("provider_message_id") @db.VarChar(150)
+  attemptCount     Int      @default(0) @map("attempt_count")
+  maxAttempts      Int      @map("max_attempts")
+  nextAttemptAt    DateTime @map("next_attempt_at") @db.Timestamp(6)
+  lastAttemptAt    DateTime? @map("last_attempt_at") @db.Timestamp(6)
+  leaseToken       String?  @map("lease_token") @db.VarChar(120)
+  deadLetteredAt   DateTime? @map("dead_lettered_at") @db.Timestamp(6)
+  lastErrorCode    String?  @map("last_error_code") @db.VarChar(100)
+  lastErrorMessage String?  @map("last_error_message")
+  lastStatusCode   Int?     @map("last_status_code")
+  metadata         Json?    @db.JsonB
+  createdAt        DateTime @default(now()) @map("created_at") @db.Timestamp(6)
+  updatedAt        DateTime @default(now()) @map("updated_at") @db.Timestamp(6)
+
+  @@index([queueStatus], map: "idx_whatsapp_manager_delivery_jobs_queue_status")
+  @@index([nextAttemptAt], map: "idx_whatsapp_manager_delivery_jobs_next_attempt_at")
+  @@index([providerMessageId], map: "idx_whatsapp_manager_delivery_jobs_provider_message_id")
+  @@index([conversationId], map: "idx_whatsapp_manager_delivery_jobs_conversation_id")
+  @@map("whatsapp_manager_delivery_jobs")
+}
