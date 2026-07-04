@@ -644,6 +644,7 @@ button:disabled {
 }
 
 .postback-account-view {
+  align-content: start;
   display: grid;
   gap: 0;
 }
@@ -1942,9 +1943,12 @@ button {
 }
 
 .postback-settings {
+  align-content: start;
   display: grid;
   gap: 14px;
+  max-width: 1180px;
   padding: 18px;
+  width: 100%;
 }
 
 .section-heading-row {
@@ -2011,12 +2015,26 @@ button {
 .postback-form {
   display: grid;
   gap: 12px;
-  grid-template-columns: repeat(2, minmax(180px, 1fr));
+  grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
 .postback-form .field,
 .postback-form .toggle-row {
   gap: 6px;
+}
+
+.postback-mode-note {
+  align-items: center;
+  background: #f5f8f6;
+  border: 1px solid #d5e1da;
+  border-radius: 6px;
+  color: #344139;
+  display: flex;
+  font-size: 0.9rem;
+  font-weight: 700;
+  grid-column: 1 / -1;
+  min-height: 38px;
+  padding: 8px 10px;
 }
 
 .postback-form input,
@@ -2045,28 +2063,61 @@ button {
 }
 
 .postback-list {
+  align-content: start;
   display: grid;
   gap: 8px;
 }
 
-.postback-row {
-  align-items: center;
-  border: 1px solid #e5ebe6;
+.postback-master-detail {
+  align-items: start;
   display: grid;
-  gap: 10px;
-  grid-template-columns: minmax(0, 1fr) auto auto;
-  padding: 10px 12px;
+  gap: 14px;
+  grid-template-columns: minmax(320px, 0.86fr) minmax(420px, 1.14fr);
+  min-height: 0;
 }
 
-.postback-row div {
+.postback-row {
+  align-items: center;
+  background: #ffffff;
+  border: 1px solid #e5ebe6;
+  border-radius: 8px;
+  display: grid;
+  gap: 12px;
+  grid-template-columns: minmax(220px, 1fr) auto auto;
+  min-height: 58px;
+  padding: 9px 10px 9px 12px;
+}
+
+.postback-row-active {
+  background: #f4faf6;
+  border-color: #b9dbc8;
+  box-shadow: inset 3px 0 0 #118b5f;
+}
+
+.postback-row-main {
+  background: transparent;
+  border: 0;
+  color: #17211d;
+  cursor: pointer;
   display: grid;
   gap: 3px;
+  justify-items: start;
+  min-height: auto;
   min-width: 0;
+  padding: 0;
+  text-align: left;
+}
+
+.postback-row-main:hover,
+.postback-row-main:focus {
+  color: #09643f;
+  outline: 0;
 }
 
 .postback-row span {
   color: #66746c;
-  font-size: 0.82rem;
+  font-size: 0.8rem;
+  line-height: 1.25;
   overflow-wrap: anywhere;
 }
 
@@ -2082,12 +2133,58 @@ button {
 .postback-row-actions {
   display: inline-flex;
   gap: 6px;
+  justify-content: end;
 }
 
 .postback-row-actions .icon-button {
   min-height: 34px;
   min-width: 34px;
   padding: 7px;
+}
+
+.postback-detail-panel {
+  background: #ffffff;
+  border: 1px solid #e5ebe6;
+  border-radius: 8px;
+  min-width: 0;
+  padding: 14px;
+}
+
+.postback-detail-panel form {
+  display: grid;
+  gap: 14px;
+}
+
+.postback-detail-header {
+  align-items: start;
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+}
+
+.postback-detail-header h3,
+.postback-detail-empty h3 {
+  font-size: 1rem;
+  margin: 2px 0 0;
+}
+
+.postback-detail-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: end;
+}
+
+.postback-detail-empty {
+  align-content: center;
+  color: #66746c;
+  display: grid;
+  min-height: 220px;
+  padding: 18px;
+}
+
+.postback-detail-empty p {
+  margin: 6px 0 0;
 }
 
 .log-filterbar {
@@ -2506,6 +2603,7 @@ button {
   .chat-workspace,
   .summary-strip,
   .rule-form,
+  .postback-master-detail,
   .postback-form {
     grid-template-columns: 1fr;
   }

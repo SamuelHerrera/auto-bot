@@ -1071,6 +1071,7 @@ function parsePostbackActionInput(body: unknown, existing?: PostbackActionInput 
   if (actionType === "http" && !readString(config.url, "").trim()) {
     throw badRequest("HTTP postback actions require config.url");
   }
+  const normalizedConfig = actionType === "agent" ? normalizeAgentPostbackConfig(config) : config;
 
   return {
     name,
@@ -1079,8 +1080,17 @@ function parsePostbackActionInput(body: unknown, existing?: PostbackActionInput 
     ...(enabled !== undefined ? { enabled } : {}),
     ...(accountId ? { accountId } : {}),
     ...(chatJid ? { chatJid } : {}),
-    config,
+    config: normalizedConfig,
   };
+}
+
+function normalizeAgentPostbackConfig(config: Record<string, unknown>) {
+  const normalized: Record<string, unknown> = {
+    ...config,
+    deliveryMode: "platform",
+  };
+  delete normalized.replyToWhatsApp;
+  return normalized;
 }
 
 function normalizePostbackActionType(value: string): PostbackActionInput["actionType"] | "" {

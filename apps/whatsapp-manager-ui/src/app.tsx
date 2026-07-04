@@ -1115,8 +1115,7 @@ export function App() {
           },
         }
       : {
-          deliveryMode: draft.callbackDeliveryMode,
-          replyToWhatsApp: draft.callbackDeliveryMode === "platform" ? false : draft.replyToWhatsApp,
+          deliveryMode: "platform",
         };
   }
 

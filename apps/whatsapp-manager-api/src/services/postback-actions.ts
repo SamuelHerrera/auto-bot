@@ -1,17 +1,14 @@
 import { randomUUID } from "node:crypto";
 import type {
-  AgentReply,
   PostbackActionRecord,
   PostbackActionRunRecord,
   WhatsAppMessageEvent,
 } from "../domain/types.js";
-import type { AgentPlatformEventStore, InMemoryChatSessionRouter, PostbackActionStore } from "./chat-session-router.js";
+import type { AgentPlatformEventStore, PostbackActionStore } from "./chat-session-router.js";
 
 export interface PostbackActionDispatcherOptions {
   store?: PostbackActionStore;
   agentPlatformEventStore?: AgentPlatformEventStore;
-  router: InMemoryChatSessionRouter;
-  onAgentReply?: (event: WhatsAppMessageEvent, reply: AgentReply) => Promise<void>;
 }
 
 export class PostbackActionDispatcher {
@@ -79,30 +76,15 @@ export class PostbackActionDispatcher {
 
   private async executeAgentAction(action: PostbackActionRecord, event: WhatsAppMessageEvent) {
     const config = parseConfig(action);
-    if (readConfigString(config.deliveryMode) === "platform") {
-      const queued = this.options.agentPlatformEventStore?.appendAgentPlatformEvent(event);
-      if (!queued) {
-        throw new Error("Agent platform event storage is not configured.");
-      }
-      return {
-        requestJson: JSON.stringify({ event, config }),
-        responseBody: JSON.stringify({
-          deliveryMode: "platform",
-          sequence: queued.sequence,
-        }),
-      };
-    }
-
-    const result = await this.options.router.handleInboundMessage(event);
-    if (result.reply && readBoolean(config.replyToWhatsApp, true)) {
-      await this.options.onAgentReply?.(result.event ?? event, result.reply);
+    const queued = this.options.agentPlatformEventStore?.appendAgentPlatformEvent(event);
+    if (!queued) {
+      throw new Error("Agent platform event storage is not configured.");
     }
     return {
       requestJson: JSON.stringify({ event, config }),
       responseBody: JSON.stringify({
-        duplicate: result.duplicate,
-        agentSessionId: result.session?.id ?? null,
-        reply: result.reply?.outputText ?? null,
+        deliveryMode: "platform",
+        sequence: queued.sequence,
       }),
     };
   }
@@ -219,8 +201,4 @@ function readConfigString(value: unknown) {
 
 function readPositiveInteger(value: unknown, fallback: number) {
   return typeof value === "number" && Number.isFinite(value) && value > 0 ? Math.trunc(value) : fallback;
-}
-
-function readBoolean(value: unknown, fallback: boolean) {
-  return typeof value === "boolean" ? value : fallback;
 }

@@ -63,21 +63,6 @@ export function buildServices(config: AppConfig): AppServices {
   const postbackDispatcher = new PostbackActionDispatcher({
     ...(postbackActionStore ? { store: postbackActionStore } : {}),
     ...(agentPlatformEventStore ? { agentPlatformEventStore } : {}),
-    router,
-    onAgentReply: async (event, reply) => {
-      const delivery = await sendReplyWithDeliveryRecord({
-        ...(deliveryStore ? { deliveryStore } : {}),
-        event,
-        text: reply.outputText,
-        whatsappGateway,
-      });
-      eventBus.publish("activity", {
-        accountId: event.accountId,
-        chatJid: event.chatJid,
-        source: "delivery",
-        deliveries: [delivery],
-      });
-    },
   });
 
   function recordAuditLog(input: AuditLogInput) {

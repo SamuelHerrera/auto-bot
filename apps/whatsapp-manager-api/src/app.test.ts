@@ -296,6 +296,7 @@ describe("whatsapp-manager-api", () => {
           trigger: "inbound_message",
           accountId: "ops-main",
           config: {
+            deliveryMode: "api",
             replyToWhatsApp: true,
           },
         },
@@ -307,6 +308,9 @@ describe("whatsapp-manager-api", () => {
         actionType: "agent",
         accountId: "ops-main",
       }));
+      expect(JSON.parse(createResponse.json().configJson)).toEqual({
+        deliveryMode: "platform",
+      });
       const actionId = createResponse.json().id;
 
       const testResponse = await postbackApp.inject({
@@ -330,6 +334,10 @@ describe("whatsapp-manager-api", () => {
         actionName: "Agent inbound",
         actionType: "agent",
         status: "success",
+      }));
+      expect(JSON.parse(testResponse.json().responseBody)).toEqual(expect.objectContaining({
+        deliveryMode: "platform",
+        sequence: expect.any(Number),
       }));
 
       const inboundResponse = await postbackApp.inject({
@@ -2817,15 +2825,6 @@ function createTestServices(config: AppConfig): AppServices {
   const postbackDispatcher = new PostbackActionDispatcher({
     ...(postbackActionStore ? { store: postbackActionStore } : {}),
     ...(agentPlatformEventStore ? { agentPlatformEventStore } : {}),
-    router,
-    onAgentReply: async (event, reply) => {
-      await sendReplyWithDeliveryRecord({
-        ...(postbackActionStore ? { deliveryStore: postbackActionStore } : {}),
-        event,
-        text: reply.outputText,
-        whatsappGateway,
-      });
-    },
   });
 
   function recordAuditLog(input: AuditLogInput) {

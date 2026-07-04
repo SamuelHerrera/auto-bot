@@ -10,8 +10,6 @@ export interface PostbackActionDraft {
   accountId: string;
   chatJid: string;
   url: string;
-  callbackDeliveryMode: "api" | "platform";
-  replyToWhatsApp: boolean;
 }
 
 export function PostbackSettings({
@@ -41,8 +39,6 @@ export function PostbackSettings({
   const [accountId, setAccountId] = useState(scopedAccountId ?? "");
   const [chatJid, setChatJid] = useState("");
   const [url, setUrl] = useState("");
-  const [callbackDeliveryMode, setCallbackDeliveryMode] = useState<"api" | "platform">("api");
-  const [replyToWhatsApp, setReplyToWhatsApp] = useState(true);
   const [isFormOpen, setIsFormOpen] = useState(false);
   const editingAction = actions.find((action) => action.id === editingActionId) ?? null;
   const nativeActions = actions.filter((action) => action.actionType === "agent" && parseActionConfig(action).deliveryMode === "platform");
@@ -58,15 +54,20 @@ export function PostbackSettings({
       accountId: scopedAccountId ?? accountId,
       chatJid,
       url,
-      callbackDeliveryMode,
-      replyToWhatsApp,
     };
     if (editingAction) {
       onSave(editingAction, draft);
     } else {
       onCreate(draft);
+      closeForm();
     }
-    closeForm();
+  }
+
+  function deleteAction(action: PostbackAction) {
+    onDelete(action.id);
+    if (action.id === editingActionId) {
+      closeForm();
+    }
   }
 
   function editAction(action: PostbackAction) {
@@ -77,8 +78,6 @@ export function PostbackSettings({
     setAccountId(scopedAccountId ?? action.accountId ?? "");
     setChatJid(action.chatJid ?? "");
     setUrl(typeof config.url === "string" ? config.url : "");
-    setCallbackDeliveryMode(config.deliveryMode === "platform" ? "platform" : "api");
-    setReplyToWhatsApp(typeof config.replyToWhatsApp === "boolean" ? config.replyToWhatsApp : true);
     setIsFormOpen(true);
   }
 
@@ -89,8 +88,6 @@ export function PostbackSettings({
     setAccountId(scopedAccountId ?? "");
     setChatJid("");
     setUrl("");
-    setCallbackDeliveryMode("api");
-    setReplyToWhatsApp(true);
   }
 
   function openCreateForm() {
@@ -121,97 +118,94 @@ export function PostbackSettings({
         </div>
       ) : null}
 
-      <div className="postback-list">
-        {actions.map((action) => (
-          <article className="postback-row" key={action.id}>
-            <div>
-              <strong>{action.name}</strong>
-              <span>{getActionSummary(action)}</span>
-            </div>
-            <label className="switch-label">
-              <input type="checkbox" checked={action.enabled} onChange={(event) => onToggle(action, event.target.checked)} />
-              <span>{action.enabled ? "Enabled" : "Disabled"}</span>
-            </label>
-            <div className="postback-row-actions">
-              <IconButton icon="mdi:pencil-outline" label={`Edit ${action.name}`} variant="secondary" onClick={() => editAction(action)} disabled={isBusy} />
-              <IconButton icon="mdi:play-outline" label={`Test ${action.name}`} variant="secondary" onClick={() => onTest(action)} disabled={isBusy} />
-              <IconButton icon="mdi:trash-can-outline" label={`Delete ${action.name}`} variant="danger" onClick={() => onDelete(action.id)} disabled={isBusy} />
-            </div>
-          </article>
-        ))}
-        {actions.length === 0 ? <p className="muted-copy">No postback actions configured for this account.</p> : null}
-      </div>
+      <div className="postback-master-detail">
+        <div className="postback-list" aria-label="Postback actions">
+          {actions.map((action) => (
+            <article className={`postback-row${action.id === editingActionId ? " postback-row-active" : ""}`} key={action.id}>
+              <button className="postback-row-main" type="button" onClick={() => editAction(action)} aria-pressed={action.id === editingActionId}>
+                <strong>{action.name}</strong>
+                <span>{getActionSummary(action)}</span>
+              </button>
+              <label className="switch-label">
+                <input type="checkbox" checked={action.enabled} onChange={(event) => onToggle(action, event.target.checked)} />
+                <span>{action.enabled ? "Enabled" : "Disabled"}</span>
+              </label>
+              <div className="postback-row-actions">
+                <IconButton icon="mdi:trash-can-outline" label={`Delete ${action.name}`} variant="danger" onClick={() => deleteAction(action)} disabled={isBusy} />
+              </div>
+            </article>
+          ))}
+          {actions.length === 0 ? <p className="muted-copy">No postback actions configured for this account.</p> : null}
+        </div>
 
-      {isFormOpen ? (
-        <div className="dialog-backdrop" role="presentation">
-          <section className="postback-dialog" role="dialog" aria-modal="true" aria-labelledby="postback-dialog-title">
+        <section className="postback-detail-panel" aria-labelledby="postback-detail-title">
+          {isFormOpen ? (
             <form onSubmit={submit}>
-              <div className="dialog-header">
+              <div className="postback-detail-header">
                 <div>
                   <span className="panel-kicker">Postback</span>
-                  <h3 id="postback-dialog-title">{editingAction ? "Edit postback" : "Create postback"}</h3>
+                  <h3 id="postback-detail-title">{editingAction ? "Edit postback" : "Create postback"}</h3>
                   <p className="dialog-subtitle">{scopedAccountId ?? "All accounts"}</p>
                 </div>
-                <IconButton icon="mdi:close" label="Close postback dialog" variant="text" onClick={closeForm} type="button" />
+                <IconButton icon="mdi:close" label="Close postback form" variant="text" onClick={closeForm} type="button" />
               </div>
 
-              <div className="dialog-body postback-dialog-body">
-                <div className="postback-form">
+              <div className="postback-form">
+                <label className="field">
+                  <span>Name</span>
+                  <input autoFocus value={name} onChange={(event) => setName(event.target.value)} placeholder="Notify CRM" />
+                </label>
+                <label className="field">
+                  <span>Action</span>
+                  <select value={actionType} onChange={(event) => setActionType(event.target.value as PostbackActionType)}>
+                    <option value="http">HTTP webhook</option>
+                    <option value="agent">Agent callback</option>
+                  </select>
+                </label>
+                {scopedAccountId ? null : (
                   <label className="field">
-                    <span>Name</span>
-                    <input autoFocus value={name} onChange={(event) => setName(event.target.value)} placeholder="Notify CRM" />
+                    <span>Account scope</span>
+                    <input value={accountId} onChange={(event) => setAccountId(event.target.value)} placeholder="All accounts" />
                   </label>
-                  <label className="field">
-                    <span>Action</span>
-                    <select value={actionType} onChange={(event) => setActionType(event.target.value as PostbackActionType)}>
-                      <option value="http">HTTP webhook</option>
-                      <option value="agent">Agent callback</option>
-                    </select>
+                )}
+                <label className="field">
+                  <span>Chat scope</span>
+                  <input value={chatJid} onChange={(event) => setChatJid(event.target.value)} placeholder="All chats in this account" />
+                </label>
+                {actionType === "http" ? (
+                  <label className="field postback-url-field">
+                    <span>Webhook URL</span>
+                    <input value={url} onChange={(event) => setUrl(event.target.value)} placeholder="https://example.com/webhook" />
                   </label>
-                  {scopedAccountId ? null : (
-                    <label className="field">
-                      <span>Account scope</span>
-                      <input value={accountId} onChange={(event) => setAccountId(event.target.value)} placeholder="All accounts" />
-                    </label>
-                  )}
-                  <label className="field">
-                    <span>Chat scope</span>
-                    <input value={chatJid} onChange={(event) => setChatJid(event.target.value)} placeholder="All chats in this account" />
-                  </label>
-                  {actionType === "http" ? (
-                    <label className="field postback-url-field">
-                      <span>Webhook URL</span>
-                      <input value={url} onChange={(event) => setUrl(event.target.value)} placeholder="https://example.com/webhook" />
-                    </label>
-                  ) : (
-                    <>
-                      <label className="field">
-                        <span>Callback mode</span>
-                        <select value={callbackDeliveryMode} onChange={(event) => setCallbackDeliveryMode(event.target.value as "api" | "platform")}>
-                          <option value="api">Direct callback - immediate reply</option>
-                          <option value="platform">Platform queue - adapter replies later</option>
-                        </select>
-                      </label>
-                      <label className="toggle-row">
-                        <input type="checkbox" checked={replyToWhatsApp} onChange={(event) => setReplyToWhatsApp(event.target.checked)} disabled={callbackDeliveryMode === "platform"} />
-                        <span>Send callback reply back to WhatsApp</span>
-                      </label>
-                    </>
-                  )}
-                </div>
-                <div className="dialog-actions">
-                  <IconButton icon="mdi:close" label="Cancel" type="button" variant="secondary" onClick={closeForm} disabled={isBusy}>
-                    Cancel
+                ) : (
+                  <div className="postback-mode-note">
+                    Platform queue - adapter replies later
+                  </div>
+                )}
+              </div>
+              <div className="postback-detail-actions">
+                <IconButton icon="mdi:close" label="Cancel" type="button" variant="secondary" onClick={closeForm} disabled={isBusy}>
+                  Cancel
+                </IconButton>
+                {editingAction ? (
+                  <IconButton icon="mdi:play-outline" label={`Test ${editingAction.name}`} type="button" variant="secondary" onClick={() => onTest(editingAction)} disabled={isBusy}>
+                    Test
                   </IconButton>
-                  <IconButton icon={editingAction ? "mdi:content-save-outline" : "mdi:plus"} label={editingAction ? "Save postback" : "Create postback"} type="submit" disabled={isBusy || !name.trim()}>
-                    {editingAction ? "Save" : "Create"}
-                  </IconButton>
-                </div>
+                ) : null}
+                <IconButton icon={editingAction ? "mdi:content-save-outline" : "mdi:plus"} label={editingAction ? "Save postback" : "Create postback"} type="submit" disabled={isBusy || !name.trim()}>
+                  {editingAction ? "Save" : "Create"}
+                </IconButton>
               </div>
             </form>
-          </section>
-        </div>
-      ) : null}
+          ) : (
+            <div className="postback-detail-empty">
+              <span className="panel-kicker">Postback</span>
+              <h3 id="postback-detail-title">Select a postback</h3>
+              <p>Choose an action from the list or create a new one.</p>
+            </div>
+          )}
+        </section>
+      </div>
     </section>
   );
 }
@@ -226,9 +220,8 @@ function parseActionConfig(action: PostbackAction): Record<string, unknown> {
 }
 
 function getActionSummary(action: PostbackAction) {
-  const config = parseActionConfig(action);
   const mode = action.actionType === "agent"
-    ? config.deliveryMode === "platform" ? "Platform queue" : "Direct callback"
+    ? "Platform queue"
     : "HTTP";
   return `${mode} | ${action.accountId || "all accounts"} | ${action.chatJid || "all chats"}`;
 }
