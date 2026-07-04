@@ -12,6 +12,9 @@ const configSchema = z.object({
   WHATSAPP_MEDIA_DIR: z.string().min(1).default("/opt/data/whatsapp-manager/media"),
   BRIDGE_DATABASE_FILE: z.string().default("/opt/data/whatsapp-manager/bridge-state.sqlite"),
   BRIDGE_STATE_FILE: z.string().default(""),
+  AGENT_API_BASE_URL: z.string().url().optional(),
+  AGENT_API_MODEL: z.string().optional(),
+  AGENT_PLATFORM_EVENT_RETENTION_DAYS: z.coerce.number().int().nonnegative().optional(),
   HERMES_API_BASE_URL: z.string().url().default("http://127.0.0.1:8642"),
   HERMES_API_MODEL: z.string().default("hermes-agent"),
   POSTBACK_RUN_RETENTION_DAYS: z.coerce.number().int().nonnegative().default(30),
@@ -26,6 +29,9 @@ const configSchema = z.object({
 type ParsedConfig = z.infer<typeof configSchema>;
 
 export type AppConfig = ParsedConfig & {
+  AGENT_API_BASE_URL: string;
+  AGENT_API_MODEL: string;
+  AGENT_PLATFORM_EVENT_RETENTION_DAYS: number;
   internalApiKey: string;
 };
 
@@ -33,6 +39,9 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
   const config = configSchema.parse(env);
   return {
     ...config,
+    AGENT_API_BASE_URL: config.AGENT_API_BASE_URL ?? config.HERMES_API_BASE_URL,
+    AGENT_API_MODEL: config.AGENT_API_MODEL ?? config.HERMES_API_MODEL,
+    AGENT_PLATFORM_EVENT_RETENTION_DAYS: config.AGENT_PLATFORM_EVENT_RETENTION_DAYS ?? config.HERMES_PLATFORM_EVENT_RETENTION_DAYS,
     internalApiKey: getInternalApiKey(),
   };
 }

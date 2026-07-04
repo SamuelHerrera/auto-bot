@@ -33,7 +33,7 @@ export function FailuresView({
 }
 
 function formatFailureStage(stage: DeliveryRecord["failureStage"]) {
-  if (stage === "hermes") {
+  if (stage === "agent") {
     return "inbound";
   }
   return stage ?? "unknown";

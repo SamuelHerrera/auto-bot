@@ -90,7 +90,7 @@ export function getAuditLogDisplay(entry: AuditLogRecord): AuditLogDisplay {
       return {
         icon: "mdi:plus-box-outline",
         title: `Routing session created for ${chatJid}`,
-        description: `Messages for account ${accountId} now route through session ${entry.resourceId ?? detailString(entry, "hermesSessionId") ?? "unknown"}.`,
+        description: `Messages for account ${accountId} now route through session ${entry.resourceId ?? detailString(entry, "agentSessionId") ?? "unknown"}.`,
       };
     case "session.reset":
       return {
@@ -102,7 +102,7 @@ export function getAuditLogDisplay(entry: AuditLogRecord): AuditLogDisplay {
       return {
         icon: "mdi:swap-horizontal",
         title: `Chat route remapped for ${chatJid}`,
-        description: `The chat route now points to session ${detailString(entry, "hermesSessionId") ?? entry.resourceId ?? "unknown"}.`,
+        description: `The chat route now points to session ${detailString(entry, "agentSessionId") ?? entry.resourceId ?? "unknown"}.`,
       };
     case "number-rule.create":
       return {
@@ -138,6 +138,8 @@ export function getAuditLogDisplay(entry: AuditLogRecord): AuditLogDisplay {
       };
     case "message.inbound":
       return describeInboundMessage(entry);
+    case "postback-action.run":
+      return describePostbackRun(entry);
     case "ui-branding.update":
       return describeBrandingUpdate(entry);
     case "ui-branding.reset":
@@ -154,6 +156,40 @@ export function getAuditLogDisplay(entry: AuditLogRecord): AuditLogDisplay {
         description: describeFallback(entry),
       };
   }
+}
+
+function describePostbackRun(entry: AuditLogRecord): AuditLogDisplay {
+  const actionName = detailString(entry, "actionName") ?? entry.resourceId ?? "Postback";
+  const accountId = detailString(entry, "accountId") ?? "the account";
+  const chatJid = detailString(entry, "chatJid") ?? "the chat";
+  const status = detailString(entry, "status") ?? entry.outcome;
+  const responseStatus = detailNumber(entry, "responseStatus");
+  const error = detailString(entry, "error");
+
+  if (entry.outcome === "failure") {
+    return {
+      icon: "mdi:webhook-off",
+      title: `${actionName} postback failed`,
+      description: error ?? `The postback action failed for ${chatJid}.`,
+      summary: `${actionName} failed · ${accountId} · ${chatJid}`,
+    };
+  }
+
+  if (entry.outcome === "ignored") {
+    return {
+      icon: "mdi:debug-step-over",
+      title: `${actionName} postback ignored`,
+      description: `The postback run was ignored for ${chatJid}.`,
+      summary: `${actionName} ignored · ${accountId} · ${chatJid}`,
+    };
+  }
+
+  return {
+    icon: "mdi:webhook",
+    title: `${actionName} postback completed`,
+    description: `The postback run completed with status ${status}${responseStatus ? ` and HTTP ${responseStatus}` : ""}.`,
+    summary: `${actionName} completed · ${accountId} · ${chatJid}`,
+  };
 }
 
 function describeBrandingUpdate(entry: AuditLogRecord): AuditLogDisplay {
@@ -212,7 +248,7 @@ function describeInboundMessage(entry: AuditLogRecord): AuditLogDisplay {
     };
   }
 
-  const routeSessionId = detailString(entry, "hermesSessionId");
+  const routeSessionId = detailString(entry, "agentSessionId");
   const duplicate = detailBoolean(entry, "duplicate");
   return {
     icon: duplicate ? "mdi:content-duplicate" : "mdi:message-arrow-right-outline",

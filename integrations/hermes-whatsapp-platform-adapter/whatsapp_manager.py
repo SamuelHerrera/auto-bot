@@ -12,6 +12,7 @@ import asyncio
 import logging
 import os
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, Optional
 
 import httpx
@@ -37,6 +38,7 @@ class WhatsAppManagerClientConfig:
     api_token: str
     poll_interval_seconds: float = 1.0
     page_size: int = 50
+    cursor_file: str = ""
 
 
 class WhatsAppManagerAdapter(BasePlatformAdapter):
@@ -50,7 +52,8 @@ class WhatsAppManagerAdapter(BasePlatformAdapter):
         self.client_config = self._read_client_config(config)
         self._client: Optional[httpx.AsyncClient] = None
         self._poll_task: Optional[asyncio.Task] = None
-        self._cursor = str(config.extra.get("cursor") or os.environ.get("WHATSAPP_MANAGER_CURSOR") or "0")
+        explicit_cursor = str(config.extra.get("cursor") or os.environ.get("WHATSAPP_MANAGER_CURSOR") or "").strip()
+        self._cursor = explicit_cursor or self._read_cursor_file() or "0"
 
     async def connect(self, *, is_reconnect: bool = False) -> bool:
         if not self.client_config.base_url or not self.client_config.api_token:
@@ -106,7 +109,7 @@ class WhatsAppManagerAdapter(BasePlatformAdapter):
 
         try:
             response = await self._client.post(
-                "/hermes/platform/replies",
+                "/agent/platform/replies",
                 json={
                     "accountId": account_id,
                     "chatJid": chat_jid,
@@ -153,7 +156,7 @@ class WhatsAppManagerAdapter(BasePlatformAdapter):
         if not self._client:
             return
         response = await self._client.get(
-            "/hermes/platform/events",
+            "/agent/platform/events",
             params={
                 "cursor": self._cursor,
                 "limit": self.client_config.page_size,
@@ -167,6 +170,7 @@ class WhatsAppManagerAdapter(BasePlatformAdapter):
                 await self.handle_message(self._to_message_event(item))
         if isinstance(payload, dict) and payload.get("nextCursor") is not None:
             self._cursor = str(payload["nextCursor"])
+            self._write_cursor_file(self._cursor)
 
     def _to_message_event(self, item: dict[str, Any]) -> MessageEvent:
         account_id = str(item["accountId"])
@@ -201,12 +205,41 @@ class WhatsAppManagerAdapter(BasePlatformAdapter):
 
     def _read_client_config(self, config: PlatformConfig) -> WhatsAppManagerClientConfig:
         extra = config.extra or {}
+        cursor_file = str(
+            extra.get("cursor_file")
+            or os.environ.get("WHATSAPP_MANAGER_CURSOR_FILE")
+            or default_cursor_file()
+        ).strip()
         return WhatsAppManagerClientConfig(
             base_url=str(extra.get("base_url") or os.environ.get("WHATSAPP_MANAGER_API_URL") or "").strip(),
             api_token=str(extra.get("api_token") or os.environ.get("WHATSAPP_MANAGER_API_TOKEN") or "").strip(),
             poll_interval_seconds=float(extra.get("poll_interval_seconds") or os.environ.get("WHATSAPP_MANAGER_POLL_INTERVAL") or 1),
             page_size=int(extra.get("page_size") or os.environ.get("WHATSAPP_MANAGER_PAGE_SIZE") or 50),
+            cursor_file=cursor_file,
         )
+
+    def _read_cursor_file(self) -> str:
+        if not self.client_config.cursor_file:
+            return ""
+        try:
+            return Path(self.client_config.cursor_file).read_text(encoding="utf-8").strip()
+        except FileNotFoundError:
+            return ""
+        except Exception as exc:
+            logger.warning("[whatsapp-manager] Could not read cursor file %s: %s", self.client_config.cursor_file, exc)
+            return ""
+
+    def _write_cursor_file(self, cursor: str) -> None:
+        if not self.client_config.cursor_file:
+            return
+        try:
+            path = Path(self.client_config.cursor_file)
+            path.parent.mkdir(parents=True, exist_ok=True)
+            tmp_path = path.with_name(f"{path.name}.tmp")
+            tmp_path.write_text(cursor, encoding="utf-8")
+            tmp_path.replace(path)
+        except Exception as exc:
+            logger.warning("[whatsapp-manager] Could not write cursor file %s: %s", self.client_config.cursor_file, exc)
 
 
 def check_requirements() -> bool:
@@ -226,6 +259,11 @@ def split_manager_chat_id(chat_id: str) -> tuple[str, str]:
         return "", chat_id
     account_id, _, raw_chat_id = chat_id.partition(":")
     return account_id, raw_chat_id
+
+
+def default_cursor_file() -> str:
+    home = os.environ.get("HERMES_HOME") or "/opt/data"
+    return str(Path(home) / "whatsapp-manager" / "platform-cursor")
 
 
 def register_platform() -> None:

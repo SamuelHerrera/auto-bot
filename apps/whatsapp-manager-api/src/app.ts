@@ -71,7 +71,7 @@ export function createApp({ config, services = buildServices(config) }: CreateAp
     status: "ok",
     dependencies: {
       databaseUrlConfigured: Boolean(config.DATABASE_URL),
-      hermesApiBaseUrl: config.HERMES_API_BASE_URL,
+      agentApiBaseUrl: config.AGENT_API_BASE_URL,
       internalApiKeyConfigured: Boolean(config.internalApiKey),
     },
   }));
@@ -200,7 +200,7 @@ export function createApp({ config, services = buildServices(config) }: CreateAp
       const session = await services.router.getOrCreateSession(getRouteFromRequest(request.params.chatId, request.body));
       audit({
         action: "session.create",
-        resourceType: "hermes-session",
+        resourceType: "agent-session",
         resourceId: session.id,
         details: {
           accountId: session.accountId,
@@ -218,7 +218,7 @@ export function createApp({ config, services = buildServices(config) }: CreateAp
       const session = await services.router.resetSession(getRouteFromRequest(request.params.chatId, request.body));
       audit({
         action: "session.reset",
-        resourceType: "hermes-session",
+        resourceType: "agent-session",
         resourceId: session.id,
         details: {
           accountId: session.accountId,
@@ -232,11 +232,11 @@ export function createApp({ config, services = buildServices(config) }: CreateAp
 
   app.post<{
     Params: { chatId: string };
-    Body: { hermesSessionId: string } & Partial<RoutingInput>;
+    Body: { agentSessionId: string } & Partial<RoutingInput>;
   }>("/chats/:chatId/session/remap", async (request) => {
     const mapping = await services.router.remapSession(
       getRouteFromRequest(request.params.chatId, request.body),
-      request.body.hermesSessionId,
+      request.body.agentSessionId,
     );
     audit({
       action: "session.remap",
@@ -245,7 +245,7 @@ export function createApp({ config, services = buildServices(config) }: CreateAp
       details: {
         accountId: mapping.accountId,
         chatJid: mapping.chatJid,
-        hermesSessionId: mapping.hermesSessionId,
+        agentSessionId: mapping.agentSessionId,
       },
     });
     return mapping;
@@ -612,11 +612,11 @@ export function createApp({ config, services = buildServices(config) }: CreateAp
   app.get("/postback-maintenance", async () => ({
     retention: {
       postbackRunRetentionDays: config.POSTBACK_RUN_RETENTION_DAYS,
-      hermesPlatformEventRetentionDays: config.HERMES_PLATFORM_EVENT_RETENTION_DAYS,
+      agentPlatformEventRetentionDays: config.AGENT_PLATFORM_EVENT_RETENTION_DAYS,
     },
     stats: services.postbackActionStore?.getPostbackMaintenanceStats?.() ?? {
       postbackActionRuns: 0,
-      hermesPlatformEvents: 0,
+      agentPlatformEvents: 0,
     },
   }));
 
@@ -628,7 +628,7 @@ export function createApp({ config, services = buildServices(config) }: CreateAp
     };
     const stats = services.postbackActionStore?.getPostbackMaintenanceStats?.() ?? {
       postbackActionRuns: 0,
-      hermesPlatformEvents: 0,
+      agentPlatformEvents: 0,
     };
     audit({
       action: "postback-maintenance.cleanup",
@@ -643,7 +643,7 @@ export function createApp({ config, services = buildServices(config) }: CreateAp
   });
 
   app.get("/runtime/status", async () => ({
-    hermesNativeAdapter: {
+    agentAdapter: {
       enabled: config.WHATSAPP_MANAGER_NATIVE_ADAPTER_ENABLED,
       apiUrlConfigured: Boolean(config.WHATSAPP_MANAGER_API_URL.trim()),
       apiTokenConfigured: Boolean(config.WHATSAPP_MANAGER_API_TOKEN.trim()),
@@ -657,13 +657,13 @@ export function createApp({ config, services = buildServices(config) }: CreateAp
     },
   }));
 
-  app.get<{ Querystring: { cursor?: string; limit?: string } }>("/hermes/platform/events", async (request, reply) => {
-    if (!services.hermesPlatformEventStore) {
-      return reply.code(503).send({ error: "Hermes platform event storage is not configured" });
+  app.get<{ Querystring: { cursor?: string; limit?: string } }>("/agent/platform/events", async (request, reply) => {
+    if (!services.agentPlatformEventStore) {
+      return reply.code(503).send({ error: "Agent platform event storage is not configured" });
     }
 
     const afterSequence = readCursor(request.query.cursor);
-    const items = services.hermesPlatformEventStore.listHermesPlatformEvents({
+    const items = services.agentPlatformEventStore.listAgentPlatformEvents({
       afterSequence,
       limit: readLimit(request.query.limit, 100),
     });
@@ -685,8 +685,8 @@ export function createApp({ config, services = buildServices(config) }: CreateAp
     };
   });
 
-  app.post<{ Body: unknown }>("/hermes/platform/replies", async (request, reply) => {
-    const input = parseHermesPlatformReplyInput(request.body);
+  app.post<{ Body: unknown }>("/agent/platform/replies", async (request, reply) => {
+    const input = parseAgentPlatformReplyInput(request.body);
     const chatType = input.chatType ?? getWhatsAppChatType(input.chatJid);
     const sessionKey = input.sessionKey ?? getWhatsAppSessionKey({
       accountId: input.accountId,
@@ -701,7 +701,7 @@ export function createApp({ config, services = buildServices(config) }: CreateAp
         chatJid: input.chatJid,
         chatType,
         chatId: input.chatJid,
-        messageId: input.inboundMessageId ?? `hermes-platform:${Date.now()}`,
+        messageId: input.inboundMessageId ?? `agent-platform:${Date.now()}`,
         sessionKey,
       },
       text: input.text,
@@ -714,7 +714,7 @@ export function createApp({ config, services = buildServices(config) }: CreateAp
       deliveries: [delivery],
     });
     audit({
-      action: "hermes-platform.reply",
+      action: "agent-platform.reply",
       resourceType: "whatsapp-message",
       resourceId: input.chatJid,
       details: {
@@ -736,9 +736,9 @@ export function createApp({ config, services = buildServices(config) }: CreateAp
       return reply.code(409).send({ error: record.error ?? "Ignored delivery cannot be retried" });
     }
 
-    if (record.failureStage === "hermes") {
+    if (record.failureStage === "agent") {
       if (!record.inboundText?.trim()) {
-        return reply.code(409).send({ error: "Hermes failure record has no inbound text to retry" });
+        return reply.code(409).send({ error: "Inbound processing failure record has no inbound text to retry" });
       }
 
       const retryEvent = {
@@ -779,7 +779,7 @@ export function createApp({ config, services = buildServices(config) }: CreateAp
       const result = await services.router.retryInboundMessage(retryEvent);
 
       if (!result.reply) {
-        return reply.code(409).send({ error: "Hermes retry produced no reply" });
+        return reply.code(409).send({ error: "Inbound retry produced no reply" });
       }
 
       await sendReplyWithDeliveryRecord({
@@ -968,7 +968,7 @@ export function createApp({ config, services = buildServices(config) }: CreateAp
         accountId: event.accountId,
         chatJid: event.chatJid,
         duplicate: result.duplicate,
-        hermesSessionId: result.session?.id ?? null,
+        agentSessionId: result.session?.id ?? null,
       },
     });
     return result;
@@ -1046,7 +1046,7 @@ function parsePostbackActionInput(body: unknown, existing?: PostbackActionInput 
       ? (existing as PostbackActionInput).config
       : {};
   const name = readString(value.name, "name" in (existing ?? {}) ? (existing as PostbackActionInput).name : "").trim();
-  const actionType = readString(value.actionType, "actionType" in (existing ?? {}) ? (existing as PostbackActionInput).actionType : "");
+  const actionType = normalizePostbackActionType(readString(value.actionType, "actionType" in (existing ?? {}) ? (existing as PostbackActionInput).actionType : ""));
   const trigger = readString(value.trigger, "trigger" in (existing ?? {}) && (existing as PostbackActionInput).trigger ? (existing as PostbackActionInput).trigger! : "inbound_message");
   const enabled = typeof value.enabled === "boolean"
     ? value.enabled
@@ -1062,8 +1062,8 @@ function parsePostbackActionInput(body: unknown, existing?: PostbackActionInput 
   if (!name) {
     throw badRequest("name is required");
   }
-  if (actionType !== "hermes" && actionType !== "http") {
-    throw badRequest("actionType must be hermes or http");
+  if (actionType !== "agent" && actionType !== "http") {
+    throw badRequest("actionType must be agent or http");
   }
   if (trigger !== "inbound_message") {
     throw badRequest("trigger must be inbound_message");
@@ -1083,11 +1083,19 @@ function parsePostbackActionInput(body: unknown, existing?: PostbackActionInput 
   };
 }
 
+function normalizePostbackActionType(value: string): PostbackActionInput["actionType"] | "" {
+  const normalized = value.trim();
+  if (normalized === "hermes") {
+    return "agent";
+  }
+  return normalized === "agent" || normalized === "http" ? normalized : "";
+}
+
 function parsePostbackMaintenanceCleanupInput(body: unknown, config: AppConfig) {
   const value = body && typeof body === "object" && !Array.isArray(body) ? body as Record<string, unknown> : {};
   return {
     runRetentionDays: readRetentionDays(value.runRetentionDays, config.POSTBACK_RUN_RETENTION_DAYS),
-    platformEventRetentionDays: readRetentionDays(value.platformEventRetentionDays, config.HERMES_PLATFORM_EVENT_RETENTION_DAYS),
+    platformEventRetentionDays: readRetentionDays(value.platformEventRetentionDays, config.AGENT_PLATFORM_EVENT_RETENTION_DAYS),
   };
 }
 
@@ -1152,9 +1160,9 @@ function parsePostbackTestEventInput(body: unknown, action: PostbackActionRecord
   };
 }
 
-function parseHermesPlatformReplyInput(body: unknown) {
+function parseAgentPlatformReplyInput(body: unknown) {
   if (!body || typeof body !== "object") {
-    throw badRequest("Hermes platform reply payload must be an object");
+    throw badRequest("Agent platform reply payload must be an object");
   }
 
   const value = body as Record<string, unknown>;

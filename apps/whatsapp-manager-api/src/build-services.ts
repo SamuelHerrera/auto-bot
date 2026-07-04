@@ -3,7 +3,7 @@ import {
   type AccountMetadataStore,
   type AuditLogStore,
   type BridgeDeliveryStore,
-  type HermesPlatformEventStore,
+  type AgentPlatformEventStore,
   InMemoryChatSessionRouter,
   type ManagerChatMetadataStore,
   type NumberRuleStore,
@@ -11,9 +11,9 @@ import {
   type WhatsAppSyncStore,
 } from "./services/chat-session-router.js";
 import {
-  HermesApiAdapter,
-  type HermesAdapter,
-} from "./services/hermes-adapter.js";
+  HermesAgentAdapter,
+  type AgentAdapter,
+} from "./services/agent-adapter.js";
 import { BaileysWhatsAppGateway } from "./services/baileys-whatsapp-gateway.js";
 import { FileBridgeStateStore } from "./services/bridge-state-store.js";
 import { SqliteBridgeStateStore } from "./services/sqlite-bridge-state-store.js";
@@ -25,7 +25,7 @@ import { PostbackActionDispatcher } from "./services/postback-actions.js";
 import type { AuditLogInput, DeliveryRecord, NumberRuleRecord, WhatsAppAccountStatus } from "./domain/types.js";
 
 export interface AppServices {
-  hermesAdapter: HermesAdapter;
+  agentAdapter: AgentAdapter;
   router: InMemoryChatSessionRouter;
   whatsappGateway: WhatsAppGateway;
   deliveryStore?: BridgeDeliveryStore;
@@ -35,36 +35,36 @@ export interface AppServices {
   managerChatMetadataStore?: ManagerChatMetadataStore;
   whatsappSyncStore?: WhatsAppSyncStore;
   postbackActionStore?: PostbackActionStore;
-  hermesPlatformEventStore?: HermesPlatformEventStore;
+  agentPlatformEventStore?: AgentPlatformEventStore;
   postbackDispatcher?: PostbackActionDispatcher;
   eventBus: AppEventBus;
 }
 
 export function buildServices(config: AppConfig): AppServices {
-  const hermesAdapter = buildHermesAdapter(config);
+  const agentAdapter = buildAgentAdapter(config);
   const eventBus = new AppEventBus();
   const whatsappGateway = new BaileysWhatsAppGateway(config.BAILEYS_STATE_DIR, config.WHATSAPP_MEDIA_DIR);
   const bridgeStore = config.BRIDGE_DATABASE_FILE
     ? new SqliteBridgeStateStore(config.BRIDGE_DATABASE_FILE, {
       runRetentionDays: config.POSTBACK_RUN_RETENTION_DAYS,
-      platformEventRetentionDays: config.HERMES_PLATFORM_EVENT_RETENTION_DAYS,
+      platformEventRetentionDays: config.AGENT_PLATFORM_EVENT_RETENTION_DAYS,
     })
     : config.BRIDGE_STATE_FILE
       ? new FileBridgeStateStore(config.BRIDGE_STATE_FILE)
       : undefined;
   const router = new InMemoryChatSessionRouter(
-    hermesAdapter,
+    agentAdapter,
     bridgeStore,
     bridgeStore instanceof SqliteBridgeStateStore ? bridgeStore : undefined,
   );
   const postbackActionStore = bridgeStore instanceof SqliteBridgeStateStore ? bridgeStore : undefined;
-  const hermesPlatformEventStore = bridgeStore instanceof SqliteBridgeStateStore ? bridgeStore : undefined;
+  const agentPlatformEventStore = bridgeStore instanceof SqliteBridgeStateStore ? bridgeStore : undefined;
   const deliveryStore = bridgeStore instanceof SqliteBridgeStateStore ? bridgeStore : undefined;
   const postbackDispatcher = new PostbackActionDispatcher({
     ...(postbackActionStore ? { store: postbackActionStore } : {}),
-    ...(hermesPlatformEventStore ? { hermesPlatformEventStore } : {}),
+    ...(agentPlatformEventStore ? { agentPlatformEventStore } : {}),
     router,
-    onHermesReply: async (event, reply) => {
+    onAgentReply: async (event, reply) => {
       const delivery = await sendReplyWithDeliveryRecord({
         ...(deliveryStore ? { deliveryStore } : {}),
         event,
@@ -186,8 +186,8 @@ export function buildServices(config: AppConfig): AppServices {
           outboundText: "",
           status: "failed",
           attempts: 0,
-          failureStage: "hermes",
-          error: error instanceof Error ? error.message : "Hermes turn failed",
+          failureStage: "agent",
+          error: error instanceof Error ? error.message : "Inbound processing failed",
           createdAt: now,
           updatedAt: now,
         } as const;
@@ -199,7 +199,7 @@ export function buildServices(config: AppConfig): AppServices {
           deliveries: [delivery],
         });
       }
-      console.error("Hermes inbound turn failed", error);
+      console.error("Inbound processing failed", error);
       recordAuditLog({
         action: "message.inbound",
         outcome: "failure",
@@ -208,7 +208,7 @@ export function buildServices(config: AppConfig): AppServices {
         details: {
           accountId: event.accountId,
           chatJid: event.chatJid,
-          reason: error instanceof Error ? error.message : "Hermes turn failed",
+          reason: error instanceof Error ? error.message : "Inbound processing failed",
         },
       });
       return;
@@ -246,7 +246,7 @@ export function buildServices(config: AppConfig): AppServices {
         accountId: event.accountId,
         chatJid: event.chatJid,
         duplicate: false,
-        hermesSessionId: result.session?.id ?? null,
+        agentSessionId: result.session?.id ?? null,
         replied: true,
       },
     });
@@ -259,7 +259,7 @@ export function buildServices(config: AppConfig): AppServices {
   });
 
   return {
-    hermesAdapter,
+    agentAdapter,
     router,
     whatsappGateway,
     eventBus,
@@ -270,7 +270,7 @@ export function buildServices(config: AppConfig): AppServices {
     ...(bridgeStore instanceof SqliteBridgeStateStore ? { managerChatMetadataStore: bridgeStore } : {}),
     ...(bridgeStore instanceof SqliteBridgeStateStore ? { whatsappSyncStore: bridgeStore } : {}),
     ...(postbackActionStore ? { postbackActionStore } : {}),
-    ...(hermesPlatformEventStore ? { hermesPlatformEventStore } : {}),
+    ...(agentPlatformEventStore ? { agentPlatformEventStore } : {}),
     postbackDispatcher,
   };
 }
@@ -359,10 +359,10 @@ export async function sendReplyWithDeliveryRecord(input: {
   }
 }
 
-function buildHermesAdapter(config: AppConfig): HermesAdapter {
-  return new HermesApiAdapter({
+function buildAgentAdapter(config: AppConfig): AgentAdapter {
+  return new HermesAgentAdapter({
     apiKey: config.internalApiKey,
-    baseUrl: config.HERMES_API_BASE_URL,
-    model: config.HERMES_API_MODEL,
+    baseUrl: config.AGENT_API_BASE_URL,
+    model: config.AGENT_API_MODEL,
   });
 }

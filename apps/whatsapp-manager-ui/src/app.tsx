@@ -44,6 +44,31 @@ interface AccountMetadata {
   alias?: string;
 }
 
+function postbackRunToAuditLog(run: PostbackActionRun): AuditLogRecord {
+  return {
+    id: `postback-run:${run.id}`,
+    action: "postback-action.run",
+    actor: "system",
+    outcome: run.status === "failed" ? "failure" : run.status === "ignored" ? "ignored" : "success",
+    resourceType: "postback-action",
+    resourceId: run.actionId,
+    createdAt: run.createdAt,
+    details: {
+      actionName: run.actionName,
+      actionType: run.actionType,
+      accountId: run.accountId,
+      chatJid: run.chatJid,
+      inboundMessageId: run.inboundMessageId,
+      status: run.status,
+      attempts: run.attempts,
+      responseStatus: run.responseStatus ?? null,
+      responseBody: run.responseBody ?? null,
+      error: run.error ?? null,
+      updatedAt: run.updatedAt,
+    },
+  };
+}
+
 export function App() {
   const [branding, setBranding] = useState<BrandingSettings>(getInitialBranding);
   const [accounts, setAccounts] = useState<WhatsAppAccount[]>([]);
@@ -1238,7 +1263,13 @@ export function App() {
   const failedDeliveries = deliveries.filter((delivery) => delivery.status === "failed");
   const activeAccountFailedDeliveries = failedDeliveries.filter((delivery) => delivery.accountId === activeAccountId);
   const activeAccountPostbackActions = postbackActions.filter((action) => action.accountId === activeAccountId);
-  const activeAccountPostbackRuns = postbackRuns.filter((run) => run.accountId === activeAccountId);
+  const auditLogsWithPostbackRuns = useMemo(
+    () => sortAuditLogs([
+      ...auditLogs,
+      ...postbackRuns.map(postbackRunToAuditLog),
+    ]),
+    [auditLogs, postbackRuns],
+  );
   const statusTone = errorMessage ? "error" : isBusy ? "syncing" : "live";
 
   return (
@@ -1281,7 +1312,7 @@ export function App() {
 
           {activeTabId === "logs" && isLogsTabOpen ? (
             <LogsView
-              auditLogs={auditLogs}
+              auditLogs={auditLogsWithPostbackRuns}
             />
           ) : null}
 
@@ -1299,7 +1330,6 @@ export function App() {
               mappings={activeAccountMappings}
               matchType={ruleMatchType}
               postbackActions={activeAccountPostbackActions}
-              postbackRuns={activeAccountPostbackRuns}
               aliasDraft={activeAccount ? accountAliasDrafts[activeAccount.accountId] ?? activeAccount.alias ?? "" : ""}
               onActionChange={setRuleAction}
               onAliasChange={(value) => {

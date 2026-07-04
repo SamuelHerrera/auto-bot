@@ -1,17 +1,17 @@
 import { randomUUID } from "node:crypto";
 import type {
-  HermesReply,
+  AgentReply,
   PostbackActionRecord,
   PostbackActionRunRecord,
   WhatsAppMessageEvent,
 } from "../domain/types.js";
-import type { HermesPlatformEventStore, InMemoryChatSessionRouter, PostbackActionStore } from "./chat-session-router.js";
+import type { AgentPlatformEventStore, InMemoryChatSessionRouter, PostbackActionStore } from "./chat-session-router.js";
 
 export interface PostbackActionDispatcherOptions {
   store?: PostbackActionStore;
-  hermesPlatformEventStore?: HermesPlatformEventStore;
+  agentPlatformEventStore?: AgentPlatformEventStore;
   router: InMemoryChatSessionRouter;
-  onHermesReply?: (event: WhatsAppMessageEvent, reply: HermesReply) => Promise<void>;
+  onAgentReply?: (event: WhatsAppMessageEvent, reply: AgentReply) => Promise<void>;
 }
 
 export class PostbackActionDispatcher {
@@ -52,8 +52,8 @@ export class PostbackActionDispatcher {
     this.options.store?.savePostbackActionRun(run);
 
     try {
-      const result = action.actionType === "hermes"
-        ? await this.executeHermesAction(action, event)
+      const result = action.actionType === "agent"
+        ? await this.executeAgentAction(action, event)
         : await this.executeHttpAction(action, event);
       const completed: PostbackActionRunRecord = {
         ...run,
@@ -77,12 +77,12 @@ export class PostbackActionDispatcher {
     }
   }
 
-  private async executeHermesAction(action: PostbackActionRecord, event: WhatsAppMessageEvent) {
+  private async executeAgentAction(action: PostbackActionRecord, event: WhatsAppMessageEvent) {
     const config = parseConfig(action);
     if (readConfigString(config.deliveryMode) === "platform") {
-      const queued = this.options.hermesPlatformEventStore?.appendHermesPlatformEvent(event);
+      const queued = this.options.agentPlatformEventStore?.appendAgentPlatformEvent(event);
       if (!queued) {
-        throw new Error("Hermes platform event storage is not configured.");
+        throw new Error("Agent platform event storage is not configured.");
       }
       return {
         requestJson: JSON.stringify({ event, config }),
@@ -95,13 +95,13 @@ export class PostbackActionDispatcher {
 
     const result = await this.options.router.handleInboundMessage(event);
     if (result.reply && readBoolean(config.replyToWhatsApp, true)) {
-      await this.options.onHermesReply?.(result.event ?? event, result.reply);
+      await this.options.onAgentReply?.(result.event ?? event, result.reply);
     }
     return {
       requestJson: JSON.stringify({ event, config }),
       responseBody: JSON.stringify({
         duplicate: result.duplicate,
-        hermesSessionId: result.session?.id ?? null,
+        agentSessionId: result.session?.id ?? null,
         reply: result.reply?.outputText ?? null,
       }),
     };

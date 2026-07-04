@@ -71,7 +71,7 @@ export function buildChatSummaries(
       chatJid: mapping.chatJid,
       ...contactDisplayIndex.get(mapping.chatJid),
       sessionKey: mapping.sessionKey,
-      hermesSessionId: mapping.hermesSessionId,
+      agentSessionId: mapping.agentSessionId,
       createdAt: current?.createdAt ?? mapping.createdAt,
       updatedAt: maxTimestamp(current?.updatedAt, mapping.updatedAt),
       deliveryCount: current?.deliveryCount ?? 0,
@@ -101,7 +101,7 @@ export function buildChatSummaries(
       ...(current?.unreadCount !== undefined ? { unreadCount: current.unreadCount } : {}),
       managerArchived: managerMetadataByChatJid.get(delivery.chatJid)?.archived ?? current?.managerArchived ?? false,
       source: current?.source === "synced" || current?.source === "mixed" ? "mixed" : "routed",
-      ...(current?.hermesSessionId ? { hermesSessionId: current.hermesSessionId } : {}),
+      ...(current?.agentSessionId ? { agentSessionId: current.agentSessionId } : {}),
       ...(lastText ? { lastText } : {}),
     });
   }

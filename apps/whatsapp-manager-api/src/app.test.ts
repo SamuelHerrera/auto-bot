@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { DatabaseSync } from "node:sqlite";
 import { createApp } from "./app.js";
 import {
   ensureDefaultDenyAllNumberRule,
@@ -12,7 +13,7 @@ import { loadConfig } from "./config.js";
 import { evaluateNumberRules, recordBlockedNumberDelivery } from "./services/number-rules.js";
 import { recordWhatsAppSyncEvent } from "./services/whatsapp-sync-recorder.js";
 import { AppEventBus } from "./services/event-bus.js";
-import { HermesApiAdapter, type HermesAdapter } from "./services/hermes-adapter.js";
+import { HermesAgentAdapter, type AgentAdapter } from "./services/agent-adapter.js";
 import { PostbackActionDispatcher } from "./services/postback-actions.js";
 import { FileBridgeStateStore } from "./services/bridge-state-store.js";
 import { InMemoryChatSessionRouter } from "./services/chat-session-router.js";
@@ -22,8 +23,8 @@ import type { WhatsAppSyncEvent } from "./services/whatsapp-service.js";
 import type { AppConfig } from "./config.js";
 import type {
   AuditLogInput,
-  HermesReply,
-  HermesSession,
+  AgentReply,
+  AgentSession,
   OutboundWhatsAppMessage,
   WhatsAppAccountStatus,
   WhatsAppMessageEvent,
@@ -63,7 +64,7 @@ describe("whatsapp-manager-api", () => {
     expect(response.json()).toEqual({ status: "ok" });
   });
 
-  it("creates and reuses a hermes session per chat", async () => {
+  it("creates and reuses an agent session per chat", async () => {
     const first = await app.inject({
       method: "POST",
       url: "/messages/inbound",
@@ -266,7 +267,7 @@ describe("whatsapp-manager-api", () => {
     }
   });
 
-  it("creates postback actions and records Hermes action runs", async () => {
+  it("creates postback actions and records agent action runs", async () => {
     const dir = mkdtempSync(path.join(tmpdir(), "auto-bot-postbacks-"));
     const postbackConfig = loadConfig({
       ...process.env,
@@ -290,8 +291,8 @@ describe("whatsapp-manager-api", () => {
           authorization: "Bearer test-token",
         },
         payload: {
-          name: "Hermes inbound",
-          actionType: "hermes",
+          name: "Agent inbound",
+          actionType: "agent",
           trigger: "inbound_message",
           accountId: "ops-main",
           config: {
@@ -302,8 +303,8 @@ describe("whatsapp-manager-api", () => {
 
       expect(createResponse.statusCode).toBe(200);
       expect(createResponse.json()).toEqual(expect.objectContaining({
-        name: "Hermes inbound",
-        actionType: "hermes",
+        name: "Agent inbound",
+        actionType: "agent",
         accountId: "ops-main",
       }));
       const actionId = createResponse.json().id;
@@ -326,8 +327,8 @@ describe("whatsapp-manager-api", () => {
 
       expect(testResponse.statusCode).toBe(200);
       expect(testResponse.json()).toEqual(expect.objectContaining({
-        actionName: "Hermes inbound",
-        actionType: "hermes",
+        actionName: "Agent inbound",
+        actionType: "agent",
         status: "success",
       }));
 
@@ -348,8 +349,8 @@ describe("whatsapp-manager-api", () => {
       expect(inboundResponse.statusCode).toBe(200);
       expect(inboundResponse.json().postbackRuns).toEqual([
         expect.objectContaining({
-          actionName: "Hermes inbound",
-          actionType: "hermes",
+          actionName: "Agent inbound",
+          actionType: "agent",
           status: "success",
         }),
       ]);
@@ -365,12 +366,12 @@ describe("whatsapp-manager-api", () => {
       expect(runsResponse.statusCode).toBe(200);
       expect(runsResponse.json().items).toEqual(expect.arrayContaining([
         expect.objectContaining({
-          actionName: "Hermes inbound",
+          actionName: "Agent inbound",
           inboundMessageId: "wamid.postback.1",
           status: "success",
         }),
         expect.objectContaining({
-          actionName: "Hermes inbound",
+          actionName: "Agent inbound",
           inboundMessageId: "wamid.postback.test",
           status: "success",
         }),
@@ -381,8 +382,8 @@ describe("whatsapp-manager-api", () => {
     }
   });
 
-  it("queues Hermes platform events and accepts native adapter replies", async () => {
-    const dir = mkdtempSync(path.join(tmpdir(), "auto-bot-hermes-platform-"));
+  it("queues agent platform events and accepts platform adapter replies", async () => {
+    const dir = mkdtempSync(path.join(tmpdir(), "auto-bot-agent-platform-"));
     const platformConfig = loadConfig({
       ...process.env,
       API_TOKEN: "test-token",
@@ -406,8 +407,8 @@ describe("whatsapp-manager-api", () => {
           authorization: "Bearer test-token",
         },
         payload: {
-          name: "Native Hermes",
-          actionType: "hermes",
+          name: "Native agent",
+          actionType: "agent",
           trigger: "inbound_message",
           config: {
             deliveryMode: "platform",
@@ -432,14 +433,14 @@ describe("whatsapp-manager-api", () => {
       expect(inboundResponse.statusCode).toBe(200);
       expect(inboundResponse.json().postbackRuns).toEqual([
         expect.objectContaining({
-          actionName: "Native Hermes",
+          actionName: "Native agent",
           status: "success",
         }),
       ]);
 
       const eventsResponse = await platformApp.inject({
         method: "GET",
-        url: "/hermes/platform/events?cursor=0",
+        url: "/agent/platform/events?cursor=0",
         headers: {
           authorization: "Bearer test-token",
         },
@@ -461,7 +462,7 @@ describe("whatsapp-manager-api", () => {
 
       const replyResponse = await platformApp.inject({
         method: "POST",
-        url: "/hermes/platform/replies",
+        url: "/agent/platform/replies",
         headers: {
           authorization: "Bearer test-token",
         },
@@ -527,7 +528,7 @@ describe("whatsapp-manager-api", () => {
         headers: { authorization: "Bearer test-token" },
         payload: {
           name: "Native fake adapter",
-          actionType: "hermes",
+          actionType: "agent",
           trigger: "inbound_message",
           accountId: "ops-main",
           chatJid: "12345@s.whatsapp.net",
@@ -546,7 +547,7 @@ describe("whatsapp-manager-api", () => {
 
       const eventsResponse = await nativeApp.inject({
         method: "GET",
-        url: "/hermes/platform/events?cursor=0",
+        url: "/agent/platform/events?cursor=0",
         headers: { authorization: "Bearer test-token" },
       });
       expect(eventsResponse.statusCode).toBe(200);
@@ -560,7 +561,7 @@ describe("whatsapp-manager-api", () => {
 
       const replyResponse = await nativeApp.inject({
         method: "POST",
-        url: "/hermes/platform/replies",
+        url: "/agent/platform/replies",
         headers: { authorization: "Bearer test-token" },
         payload: {
           accountId: "ops-main",
@@ -613,7 +614,7 @@ describe("whatsapp-manager-api", () => {
         id: "old-run",
         actionId: "action-1",
         actionName: "old",
-        actionType: "hermes",
+        actionType: "agent",
         accountId: "ops-main",
         chatJid: "12345@s.whatsapp.net",
         inboundMessageId: "old-message",
@@ -626,7 +627,7 @@ describe("whatsapp-manager-api", () => {
         id: "new-run",
         actionId: "action-1",
         actionName: "new",
-        actionType: "hermes",
+        actionType: "agent",
         accountId: "ops-main",
         chatJid: "12345@s.whatsapp.net",
         inboundMessageId: "new-message",
@@ -635,7 +636,7 @@ describe("whatsapp-manager-api", () => {
         createdAt: "2026-07-02T00:00:00.000Z",
         updatedAt: "2026-07-02T00:00:00.000Z",
       });
-      services.hermesPlatformEventStore!.appendHermesPlatformEvent({
+      services.agentPlatformEventStore!.appendAgentPlatformEvent({
         accountId: "ops-main",
         chatJid: "12345@s.whatsapp.net",
         chatType: "direct",
@@ -654,7 +655,7 @@ describe("whatsapp-manager-api", () => {
         headers: { authorization: "Bearer test-token" },
       });
       expect(statusResponse.statusCode).toBe(200);
-      expect(statusResponse.json().hermesNativeAdapter).toEqual(expect.objectContaining({
+      expect(statusResponse.json().agentAdapter).toEqual(expect.objectContaining({
         ready: true,
         apiUrlConfigured: true,
         apiTokenConfigured: true,
@@ -981,7 +982,7 @@ describe("whatsapp-manager-api", () => {
     ]);
   });
 
-  it("routes gateway inbound messages to Hermes and sends replies back to WhatsApp", async () => {
+  it("routes gateway inbound messages to the agent and sends replies back to WhatsApp", async () => {
     const services = createTestServices(config);
     const gateway = services.whatsappGateway as TestWhatsAppGateway;
 
@@ -1009,12 +1010,12 @@ describe("whatsapp-manager-api", () => {
         accountId: "ops-main",
         chatJid: "12345@s.whatsapp.net",
         chatId: "12345@s.whatsapp.net",
-        text: "test-hermes-response: hello through gateway",
+        text: "test-agent-response: hello through gateway",
       },
     ]);
   });
 
-  it("deduplicates repeated WhatsApp messages before routing to Hermes", async () => {
+  it("deduplicates repeated WhatsApp messages before routing to the agent", async () => {
     const services = createTestServices(config);
     const gateway = services.whatsappGateway as TestWhatsAppGateway;
 
@@ -1036,7 +1037,7 @@ describe("whatsapp-manager-api", () => {
         accountId: "ops-main",
         chatJid: "12345@s.whatsapp.net",
         chatId: "12345@s.whatsapp.net",
-        text: "test-hermes-response: only process once",
+        text: "test-agent-response: only process once",
       },
     ]);
   });
@@ -1131,7 +1132,7 @@ describe("whatsapp-manager-api", () => {
     }
   });
 
-  it("ignores group messages before routing them to Hermes", async () => {
+  it("ignores group messages before routing them to the agent", async () => {
     const services = createTestServices(config);
     const gateway = services.whatsappGateway as TestWhatsAppGateway;
 
@@ -1246,7 +1247,7 @@ describe("whatsapp-manager-api", () => {
         outboundText: "",
         status: "failed",
         attempts: 0,
-        failureStage: "hermes",
+        failureStage: "agent",
         error: "Blocked by number rule: Default deny all",
         createdAt: now,
         updatedAt: now,
@@ -1255,7 +1256,7 @@ describe("whatsapp-manager-api", () => {
       expect(originalStore.listDeliveries()[0]).toEqual(
         expect.objectContaining({
           status: "failed",
-          failureStage: "hermes",
+          failureStage: "agent",
         }),
       );
 
@@ -1274,8 +1275,223 @@ describe("whatsapp-manager-api", () => {
     }
   });
 
-  it("records failed Hermes turns and retries them through the API", async () => {
-    const dir = mkdtempSync(path.join(tmpdir(), "auto-bot-hermes-retry-"));
+  it("migrates legacy Hermes-named state into neutral agent records", async () => {
+    const dir = mkdtempSync(path.join(tmpdir(), "auto-bot-agent-terminology-migration-"));
+    const databaseFile = path.join(dir, "bridge-state.sqlite");
+    const now = "2026-07-03T00:00:00.000Z";
+    const sessionKey = "whatsapp:ops-main:direct:12345@s.whatsapp.net";
+
+    try {
+      const db = new DatabaseSync(databaseFile);
+      db.exec(`
+        CREATE TABLE hermes_sessions (
+          id TEXT PRIMARY KEY,
+          session_key TEXT NOT NULL,
+          account_id TEXT NOT NULL,
+          chat_jid TEXT NOT NULL,
+          chat_type TEXT NOT NULL,
+          chat_id TEXT NOT NULL,
+          created_at TEXT NOT NULL,
+          last_activity_at TEXT NOT NULL,
+          status TEXT NOT NULL
+        );
+        CREATE TABLE hermes_chat_sessions (
+          session_key TEXT PRIMARY KEY,
+          account_id TEXT NOT NULL,
+          chat_jid TEXT NOT NULL,
+          chat_type TEXT NOT NULL,
+          chat_id TEXT NOT NULL,
+          hermes_session_id TEXT NOT NULL,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL
+        );
+        CREATE TABLE hermes_platform_events (
+          sequence INTEGER PRIMARY KEY AUTOINCREMENT,
+          account_id TEXT NOT NULL,
+          chat_jid TEXT NOT NULL,
+          chat_type TEXT NOT NULL,
+          sender_jid TEXT NOT NULL,
+          session_key TEXT NOT NULL,
+          message_id TEXT NOT NULL,
+          participant_jid TEXT,
+          text TEXT NOT NULL,
+          timestamp TEXT NOT NULL,
+          payload_json TEXT NOT NULL,
+          created_at TEXT NOT NULL
+        );
+        CREATE TABLE delivery_records (
+          id TEXT PRIMARY KEY,
+          account_id TEXT NOT NULL,
+          chat_jid TEXT NOT NULL,
+          chat_type TEXT NOT NULL,
+          session_key TEXT NOT NULL,
+          inbound_message_id TEXT NOT NULL,
+          inbound_text TEXT,
+          outbound_text TEXT NOT NULL,
+          status TEXT NOT NULL,
+          attempts INTEGER NOT NULL,
+          failure_stage TEXT,
+          error TEXT,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL
+        );
+        CREATE TABLE postback_actions (
+          id TEXT PRIMARY KEY,
+          name TEXT NOT NULL,
+          enabled INTEGER NOT NULL,
+          trigger TEXT NOT NULL,
+          action_type TEXT NOT NULL,
+          account_id TEXT,
+          chat_jid TEXT,
+          config_json TEXT NOT NULL,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL
+        );
+        CREATE TABLE postback_action_runs (
+          id TEXT PRIMARY KEY,
+          action_id TEXT NOT NULL,
+          action_name TEXT NOT NULL,
+          action_type TEXT NOT NULL,
+          account_id TEXT NOT NULL,
+          chat_jid TEXT NOT NULL,
+          inbound_message_id TEXT NOT NULL,
+          status TEXT NOT NULL,
+          attempts INTEGER NOT NULL,
+          request_json TEXT,
+          response_status INTEGER,
+          response_body TEXT,
+          error TEXT,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL
+        );
+      `);
+      db.prepare("INSERT INTO hermes_sessions VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)").run(
+        "legacy-session",
+        sessionKey,
+        "ops-main",
+        "12345@s.whatsapp.net",
+        "direct",
+        "12345@s.whatsapp.net",
+        now,
+        now,
+        "active",
+      );
+      db.prepare("INSERT INTO hermes_chat_sessions VALUES (?, ?, ?, ?, ?, ?, ?, ?)").run(
+        sessionKey,
+        "ops-main",
+        "12345@s.whatsapp.net",
+        "direct",
+        "12345@s.whatsapp.net",
+        "legacy-session",
+        now,
+        now,
+      );
+      db.prepare(`
+        INSERT INTO hermes_platform_events
+          (account_id, chat_jid, chat_type, sender_jid, session_key, message_id, participant_jid, text, timestamp, payload_json, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `).run(
+        "ops-main",
+        "12345@s.whatsapp.net",
+        "direct",
+        "12345@s.whatsapp.net",
+        sessionKey,
+        "wamid.legacy.platform",
+        null,
+        "queued legacy",
+        now,
+        "{}",
+        now,
+      );
+      db.prepare("INSERT INTO delivery_records VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)").run(
+        "legacy-delivery",
+        "ops-main",
+        "12345@s.whatsapp.net",
+        "direct",
+        sessionKey,
+        "wamid.legacy.delivery",
+        "inbound",
+        "",
+        "failed",
+        1,
+        "hermes",
+        "legacy failure",
+        now,
+        now,
+      );
+      db.prepare("INSERT INTO postback_actions VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)").run(
+        "legacy-action",
+        "Legacy callback",
+        1,
+        "inbound_message",
+        "hermes",
+        "ops-main",
+        "12345@s.whatsapp.net",
+        JSON.stringify({ deliveryMode: "platform" }),
+        now,
+        now,
+      );
+      db.prepare("INSERT INTO postback_action_runs VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)").run(
+        "legacy-run",
+        "legacy-action",
+        "Legacy callback",
+        "hermes",
+        "ops-main",
+        "12345@s.whatsapp.net",
+        "wamid.legacy.delivery",
+        "success",
+        1,
+        null,
+        null,
+        null,
+        null,
+        now,
+        now,
+      );
+      db.close();
+
+      const migratedStore = new SqliteBridgeStateStore(databaseFile);
+
+      expect(migratedStore.load()).toEqual(expect.objectContaining({
+        mappings: [
+          expect.objectContaining({
+            sessionKey,
+            agentSessionId: "legacy-session",
+          }),
+        ],
+        sessions: [
+          expect.objectContaining({
+            id: "legacy-session",
+            sessionKey,
+          }),
+        ],
+      }));
+      expect(migratedStore.listAgentPlatformEvents()).toEqual([
+        expect.objectContaining({
+          sequence: 1,
+          messageId: "wamid.legacy.platform",
+          text: "queued legacy",
+        }),
+      ]);
+      expect(migratedStore.listDeliveries()).toEqual([
+        expect.objectContaining({
+          id: "legacy-delivery",
+          failureStage: "agent",
+        }),
+      ]);
+      expect(migratedStore.getPostbackAction("legacy-action")).toEqual(expect.objectContaining({
+        actionType: "agent",
+      }));
+      expect(migratedStore.getPostbackActionRun("legacy-run")).toEqual(expect.objectContaining({
+        actionType: "agent",
+      }));
+    } finally {
+      rmSync(dir, { force: true, recursive: true });
+    }
+  });
+
+  it("records failed inbound processing and retries it through the API", async () => {
+    const dir = mkdtempSync(path.join(tmpdir(), "auto-bot-agent-retry-"));
     const retryConfig = loadConfig({
       ...process.env,
       API_TOKEN: "test-token",
@@ -1291,28 +1507,28 @@ describe("whatsapp-manager-api", () => {
       const gateway = services.whatsappGateway as TestWhatsAppGateway;
       app = createApp({ config: retryConfig, services });
 
-      vi.spyOn(services.hermesAdapter, "sendMessage")
-        .mockRejectedValueOnce(new Error("forced Hermes failure"))
+      vi.spyOn(services.agentAdapter, "sendMessage")
+        .mockRejectedValueOnce(new Error("forced agent failure"))
         .mockResolvedValueOnce({
           sessionId: "retry-session",
-          outputText: "Hermes retry reply",
+          outputText: "Agent retry reply",
         });
 
       await expect(
         gateway.injectInboundMessage({
           accountId: "ops-main",
           chatId: "12345@s.whatsapp.net",
-          messageId: "wamid.hermes.retry",
+          messageId: "wamid.agent.retry",
           senderId: "12345@s.whatsapp.net",
-          text: "retry hermes",
+          text: "retry agent",
         }),
       ).resolves.toBeUndefined();
 
       const delivery = services.deliveryStore?.listDeliveries()[0];
       expect(delivery).toEqual(
         expect.objectContaining({
-          failureStage: "hermes",
-          inboundText: "retry hermes",
+          failureStage: "agent",
+          inboundText: "retry agent",
           status: "failed",
         }),
       );
@@ -1331,7 +1547,7 @@ describe("whatsapp-manager-api", () => {
         expect.objectContaining({
           accountId: "ops-main",
           chatJid: "12345@s.whatsapp.net",
-          text: "Hermes retry reply",
+          text: "Agent retry reply",
         }),
       ]);
     } finally {
@@ -1586,7 +1802,7 @@ describe("whatsapp-manager-api", () => {
     }
   });
 
-  it("blocks denied gateway numbers before creating Hermes sessions", async () => {
+  it("blocks denied gateway numbers before creating agent sessions", async () => {
     const dir = mkdtempSync(path.join(tmpdir(), "auto-bot-number-rules-deny-"));
     const rulesConfig = loadConfig({
       ...process.env,
@@ -1704,7 +1920,7 @@ describe("whatsapp-manager-api", () => {
       expect(gateway.getSentMessages()).toEqual([
         expect.objectContaining({
           chatJid: "12345@s.whatsapp.net",
-          text: "test-hermes-response: allowed by allow list",
+          text: "test-agent-response: allowed by allow list",
         }),
       ]);
       expect(services.deliveryStore?.listDeliveries()).toEqual(
@@ -1777,7 +1993,7 @@ describe("whatsapp-manager-api", () => {
       expect(gateway.getSentMessages()).toEqual([
         expect.objectContaining({
           chatJid: "12345@s.whatsapp.net",
-          text: "test-hermes-response: allowed by first allow",
+          text: "test-agent-response: allowed by first allow",
         }),
       ]);
       expect(services.deliveryStore?.listDeliveries()).toEqual(
@@ -2014,7 +2230,7 @@ describe("whatsapp-manager-api", () => {
     }
   });
 
-  it("stores live WhatsApp upsert messages independently from Hermes delivery records", async () => {
+  it("stores live WhatsApp upsert messages independently from delivery records", async () => {
     const dir = mkdtempSync(path.join(tmpdir(), "auto-bot-whatsapp-live-sync-"));
     const syncConfig = loadConfig({
       ...process.env,
@@ -2468,7 +2684,7 @@ describe("whatsapp-manager-api", () => {
       });
     vi.stubGlobal("fetch", fetchMock);
 
-    const adapter = new HermesApiAdapter({
+    const adapter = new HermesAgentAdapter({
       apiKey: "test-key",
       baseUrl: "http://127.0.0.1:8642/v1/",
       model: "hermes-agent",
@@ -2520,7 +2736,7 @@ describe("whatsapp-manager-api", () => {
     );
   });
 
-  it("updates mappings when Hermes API rotates the effective session ID", async () => {
+  it("updates mappings when the agent runtime rotates the effective session ID", async () => {
     const services = createTestServices(config);
     const router = services.router;
     const session = await router.getOrCreateSession({
@@ -2529,8 +2745,8 @@ describe("whatsapp-manager-api", () => {
     });
     const originalSessionId = session.id;
 
-    vi.spyOn(services.hermesAdapter, "sendMessage").mockResolvedValue({
-      sessionId: "hermes-rotated-session",
+    vi.spyOn(services.agentAdapter, "sendMessage").mockResolvedValue({
+      sessionId: "agent-rotated-session",
       outputText: "rotated reply",
     });
 
@@ -2547,19 +2763,19 @@ describe("whatsapp-manager-api", () => {
       timestamp: "2026-06-29T00:00:00.000Z",
     });
 
-    expect(originalSessionId).not.toBe("hermes-rotated-session");
+    expect(originalSessionId).not.toBe("agent-rotated-session");
     expect(await router.getMappings()).toEqual([
       expect.objectContaining({
-        hermesSessionId: "hermes-rotated-session",
+        agentSessionId: "agent-rotated-session",
       }),
     ]);
     await expect(router.getSession("whatsapp:ops-main:direct:12345@s.whatsapp.net")).resolves.toEqual(
-      expect.objectContaining({ id: "hermes-rotated-session" }),
+      expect.objectContaining({ id: "agent-rotated-session" }),
     );
   });
 
   it("requires an API key for the Hermes API adapter", async () => {
-    const adapter = new HermesApiAdapter({
+    const adapter = new HermesAgentAdapter({
       apiKey: "",
       baseUrl: "http://127.0.0.1:8642/v1",
       model: "hermes-agent",
@@ -2583,7 +2799,7 @@ describe("whatsapp-manager-api", () => {
 });
 
 function createTestServices(config: AppConfig): AppServices {
-  const hermesAdapter = new TestHermesAdapter();
+  const agentAdapter = new TestAgentAdapter();
   const eventBus = new AppEventBus();
   const whatsappGateway = new TestWhatsAppGateway();
   const bridgeStore = config.BRIDGE_DATABASE_FILE
@@ -2592,17 +2808,17 @@ function createTestServices(config: AppConfig): AppServices {
       ? new FileBridgeStateStore(config.BRIDGE_STATE_FILE)
       : undefined;
   const router = new InMemoryChatSessionRouter(
-    hermesAdapter,
+    agentAdapter,
     bridgeStore,
     bridgeStore instanceof SqliteBridgeStateStore ? bridgeStore : undefined,
   );
   const postbackActionStore = bridgeStore instanceof SqliteBridgeStateStore ? bridgeStore : undefined;
-  const hermesPlatformEventStore = bridgeStore instanceof SqliteBridgeStateStore ? bridgeStore : undefined;
+  const agentPlatformEventStore = bridgeStore instanceof SqliteBridgeStateStore ? bridgeStore : undefined;
   const postbackDispatcher = new PostbackActionDispatcher({
     ...(postbackActionStore ? { store: postbackActionStore } : {}),
-    ...(hermesPlatformEventStore ? { hermesPlatformEventStore } : {}),
+    ...(agentPlatformEventStore ? { agentPlatformEventStore } : {}),
     router,
-    onHermesReply: async (event, reply) => {
+    onAgentReply: async (event, reply) => {
       await sendReplyWithDeliveryRecord({
         ...(postbackActionStore ? { deliveryStore: postbackActionStore } : {}),
         event,
@@ -2698,8 +2914,8 @@ function createTestServices(config: AppConfig): AppServices {
           outboundText: "",
           status: "failed",
           attempts: 0,
-          failureStage: "hermes",
-          error: error instanceof Error ? error.message : "Hermes turn failed",
+          failureStage: "agent",
+          error: error instanceof Error ? error.message : "Inbound processing failed",
           createdAt: now,
           updatedAt: now,
         });
@@ -2722,7 +2938,7 @@ function createTestServices(config: AppConfig): AppServices {
   });
 
   return {
-    hermesAdapter,
+    agentAdapter,
     router,
     whatsappGateway,
     eventBus,
@@ -2733,16 +2949,16 @@ function createTestServices(config: AppConfig): AppServices {
     ...(bridgeStore instanceof SqliteBridgeStateStore ? { managerChatMetadataStore: bridgeStore } : {}),
     ...(bridgeStore instanceof SqliteBridgeStateStore ? { whatsappSyncStore: bridgeStore } : {}),
     ...(postbackActionStore ? { postbackActionStore } : {}),
-    ...(hermesPlatformEventStore ? { hermesPlatformEventStore } : {}),
+    ...(agentPlatformEventStore ? { agentPlatformEventStore } : {}),
     postbackDispatcher,
   };
 }
 
-class TestHermesAdapter implements HermesAdapter {
-  async createSession(sessionKey: string): Promise<HermesSession> {
+class TestAgentAdapter implements AgentAdapter {
+  async createSession(sessionKey: string): Promise<AgentSession> {
     const now = new Date().toISOString();
     return {
-      id: `hermes_${sessionKey}_${Date.now()}`,
+      id: `agent_${sessionKey}_${Date.now()}`,
       sessionKey,
       accountId: "unassigned",
       chatJid: sessionKey,
@@ -2754,10 +2970,10 @@ class TestHermesAdapter implements HermesAdapter {
     };
   }
 
-  async sendMessage(sessionId: string, event: WhatsAppMessageEvent): Promise<HermesReply> {
+  async sendMessage(sessionId: string, event: WhatsAppMessageEvent): Promise<AgentReply> {
     return {
       sessionId,
-      outputText: `test-hermes-response: ${event.text}`,
+      outputText: `test-agent-response: ${event.text}`,
     };
   }
 

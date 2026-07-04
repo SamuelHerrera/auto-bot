@@ -1,22 +1,22 @@
 import { createHash } from "node:crypto";
-import type { HermesReply, HermesSession, WhatsAppMessageEvent } from "../domain/types.js";
+import type { AgentReply, AgentSession, WhatsAppMessageEvent } from "../domain/types.js";
 
-export interface HermesAdapter {
-  createSession(sessionKey: string): Promise<HermesSession>;
-  sendMessage(sessionId: string, event: WhatsAppMessageEvent): Promise<HermesReply>;
+export interface AgentAdapter {
+  createSession(sessionKey: string): Promise<AgentSession>;
+  sendMessage(sessionId: string, event: WhatsAppMessageEvent): Promise<AgentReply>;
   resetSession(sessionId: string): Promise<void>;
 }
 
-export interface HermesApiAdapterOptions {
+export interface HermesAgentAdapterOptions {
   baseUrl: string;
   apiKey: string;
   model: string;
 }
 
-export class HermesApiAdapter implements HermesAdapter {
-  constructor(private readonly options: HermesApiAdapterOptions) {}
+export class HermesAgentAdapter implements AgentAdapter {
+  constructor(private readonly options: HermesAgentAdapterOptions) {}
 
-  async createSession(sessionKey: string): Promise<HermesSession> {
+  async createSession(sessionKey: string): Promise<AgentSession> {
     if (!this.options.apiKey) {
       throw new Error("Internal Hermes API key is required.");
     }
@@ -42,11 +42,11 @@ export class HermesApiAdapter implements HermesAdapter {
       throw new Error(`Hermes session create failed with ${response.status}: ${await response.text()}`);
     }
 
-    const payload = (await response.json()) as HermesSessionResponse;
-    return this.toHermesSession(payload.session, sessionKey);
+    const payload = (await response.json()) as AgentSessionResponse;
+    return this.toAgentSession(payload.session, sessionKey);
   }
 
-  async sendMessage(sessionId: string, event: WhatsAppMessageEvent): Promise<HermesReply> {
+  async sendMessage(sessionId: string, event: WhatsAppMessageEvent): Promise<AgentReply> {
     if (!this.options.apiKey) {
       throw new Error("Internal Hermes API key is required.");
     }
@@ -73,7 +73,7 @@ export class HermesApiAdapter implements HermesAdapter {
       throw new Error(`Hermes session chat failed with ${response.status}: ${await response.text()}`);
     }
 
-    const payload = (await response.json()) as HermesSessionChatResponse;
+    const payload = (await response.json()) as AgentSessionChatResponse;
     const outputText = payload.message?.content?.trim();
     if (!outputText) {
       throw new Error("Hermes API returned an empty response.");
@@ -107,7 +107,7 @@ export class HermesApiAdapter implements HermesAdapter {
     }
   }
 
-  private async getSession(sessionId: string, sessionKey: string): Promise<HermesSession> {
+  private async getSession(sessionId: string, sessionKey: string): Promise<AgentSession> {
     const response = await fetch(
       `${getHermesApiRoot(this.options.baseUrl)}/api/sessions/${encodeURIComponent(sessionId)}`,
       {
@@ -120,11 +120,11 @@ export class HermesApiAdapter implements HermesAdapter {
       throw new Error(`Hermes session lookup failed with ${response.status}: ${await response.text()}`);
     }
 
-    const payload = (await response.json()) as HermesSessionResponse;
-    return this.toHermesSession(payload.session, sessionKey);
+    const payload = (await response.json()) as AgentSessionResponse;
+    return this.toAgentSession(payload.session, sessionKey);
   }
 
-  private toHermesSession(session: HermesApiSessionPayload, sessionKey: string): HermesSession {
+  private toAgentSession(session: HermesApiSessionPayload, sessionKey: string): AgentSession {
     const now = new Date().toISOString();
     return {
       id: session.id,
@@ -148,7 +148,7 @@ export class HermesApiAdapter implements HermesAdapter {
   }
 }
 
-interface HermesSessionResponse {
+interface AgentSessionResponse {
   session: HermesApiSessionPayload;
 }
 
@@ -159,7 +159,7 @@ interface HermesApiSessionPayload {
   end_reason?: string;
 }
 
-interface HermesSessionChatResponse {
+interface AgentSessionChatResponse {
   session_id?: string;
   message?: {
     content?: string;

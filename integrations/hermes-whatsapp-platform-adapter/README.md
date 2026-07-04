@@ -13,13 +13,13 @@ It is packaged with `plugin.yaml` and `__init__.py`, so it can be installed as a
 
 The adapter expects WhatsApp Manager to expose HTTP endpoints for inbound event polling and outbound replies. Those endpoints are implemented by `apps/whatsapp-manager-api`.
 
-To route a chat through this native adapter, create a Hermes postback action in the manager UI and choose `Native platform adapter` as the Hermes mode. That stores inbound messages in the platform event queue instead of calling the manager's direct Hermes API adapter.
+To route a chat through this native adapter, create an Agent callback postback action in the manager UI and choose `Platform queue - adapter replies later` as the callback mode. That stores inbound messages in the platform event queue instead of calling the manager's direct callback adapter.
 
 Required manager contract:
 
 ```text
-GET  /hermes/platform/events?cursor=<cursor>
-POST /hermes/platform/replies
+GET  /agent/platform/events?cursor=<cursor>
+POST /agent/platform/replies
 ```
 
 Install shape:
@@ -43,6 +43,7 @@ Optional environment:
 ```bash
 WHATSAPP_MANAGER_POLL_INTERVAL=1
 WHATSAPP_MANAGER_PAGE_SIZE=50
+WHATSAPP_MANAGER_CURSOR_FILE=/opt/data/whatsapp-manager/platform-cursor
 WHATSAPP_MANAGER_ALLOWED_USERS=
 WHATSAPP_MANAGER_ALLOW_ALL_USERS=true
 ```
@@ -75,6 +76,6 @@ Reply payload:
   "accountId": "ops-main",
   "chatJid": "15551234567@s.whatsapp.net",
   "inboundMessageId": "wamid.123",
-  "text": "Hermes response text"
+  "text": "Agent response text"
 }
 ```

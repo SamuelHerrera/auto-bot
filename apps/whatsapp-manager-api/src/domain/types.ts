@@ -1,14 +1,14 @@
 export type WhatsAppChatId = string;
-export type HermesSessionId = string;
+export type AgentSessionId = string;
 export type WhatsAppChatType = "direct" | "group";
 export type WhatsAppGroupRoutingPolicy = "group" | "participant";
 export type DeliveryStatus = "pending" | "sent" | "failed" | "ignored";
-export type DeliveryFailureStage = "hermes" | "whatsapp";
+export type DeliveryFailureStage = "agent" | "whatsapp";
 export type MediaType = "image" | "video" | "audio" | "document";
 export type NumberRuleAction = "allow" | "deny";
 export type NumberRuleMatchType = "all" | "exact" | "regex";
 export type AuditLogOutcome = "success" | "failure" | "ignored";
-export type PostbackActionType = "hermes" | "http";
+export type PostbackActionType = "agent" | "http";
 export type PostbackTrigger = "inbound_message";
 export type PostbackRunStatus = "pending" | "success" | "failed" | "ignored";
 export type WhatsAppSyncEventType =
@@ -59,8 +59,8 @@ export interface WhatsAppMessageEvent {
   timestamp: string;
 }
 
-export interface HermesSession {
-  id: HermesSessionId;
+export interface AgentSession {
+  id: AgentSessionId;
   sessionKey: string;
   accountId: string;
   chatJid: WhatsAppChatId;
@@ -77,13 +77,13 @@ export interface ChatSessionMapping {
   chatJid: WhatsAppChatId;
   chatType: WhatsAppChatType;
   chatId: WhatsAppChatId;
-  hermesSessionId: HermesSessionId;
+  agentSessionId: AgentSessionId;
   createdAt: string;
   updatedAt: string;
 }
 
-export interface HermesReply {
-  sessionId: HermesSessionId;
+export interface AgentReply {
+  sessionId: AgentSessionId;
   outputText: string;
 }
 
@@ -124,8 +124,8 @@ export interface ManagerChatMetadata {
 export interface InboundMessageResult {
   duplicate: boolean;
   mapping?: ChatSessionMapping;
-  reply?: HermesReply;
-  session?: HermesSession;
+  reply?: AgentReply;
+  session?: AgentSession;
   event?: WhatsAppMessageEvent;
 }
 
@@ -236,7 +236,7 @@ export interface PostbackActionRunRecord {
   updatedAt: string;
 }
 
-export interface HermesPlatformEventRecord {
+export interface AgentPlatformEventRecord {
   sequence: number;
   accountId: string;
   chatJid: WhatsAppChatId;

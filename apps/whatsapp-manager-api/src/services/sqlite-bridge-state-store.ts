@@ -8,8 +8,8 @@ import type {
   ChatSessionMapping,
   DeliveryRecord,
   GroupRoutingPolicyRecord,
-  HermesPlatformEventRecord,
-  HermesSession,
+  AgentPlatformEventRecord,
+  AgentSession,
   ManagerChatMetadata,
   NumberRuleInput,
   NumberRuleRecord,
@@ -41,7 +41,7 @@ import type {
   ChatSessionRouterSnapshot,
   ChatSessionRouterStore,
   GroupRoutingPolicyStore,
-  HermesPlatformEventStore,
+  AgentPlatformEventStore,
   ManagerChatMetadataStore,
   NumberRuleStore,
   PostbackActionStore,
@@ -53,7 +53,7 @@ export class SqliteBridgeStateStore
     ChatSessionRouterStore,
     BridgeDeliveryStore,
     GroupRoutingPolicyStore,
-    HermesPlatformEventStore,
+    AgentPlatformEventStore,
     NumberRuleStore,
     AuditLogStore,
     AccountMetadataStore,
@@ -78,10 +78,10 @@ export class SqliteBridgeStateStore
   load(): ChatSessionRouterSnapshot {
     return {
       mappings: this.db
-        .prepare("SELECT * FROM hermes_chat_sessions ORDER BY created_at")
+        .prepare("SELECT * FROM agent_chat_sessions ORDER BY created_at")
         .all()
         .map(rowToMapping),
-      sessions: this.db.prepare("SELECT * FROM hermes_sessions ORDER BY created_at").all().map(rowToSession),
+      sessions: this.db.prepare("SELECT * FROM agent_sessions ORDER BY created_at").all().map(rowToSession),
       processedMessages: this.db
         .prepare("SELECT processed_key FROM processed_messages ORDER BY processed_at")
         .all()
@@ -92,12 +92,12 @@ export class SqliteBridgeStateStore
   save(snapshot: ChatSessionRouterSnapshot): void {
     this.db.exec("BEGIN");
     try {
-      this.db.exec("DELETE FROM hermes_chat_sessions");
-      this.db.exec("DELETE FROM hermes_sessions");
+      this.db.exec("DELETE FROM agent_chat_sessions");
+      this.db.exec("DELETE FROM agent_sessions");
       this.db.exec("DELETE FROM processed_messages");
 
       const insertSession = this.db.prepare(`
-        INSERT INTO hermes_sessions
+        INSERT INTO agent_sessions
           (id, session_key, account_id, chat_jid, chat_type, chat_id, created_at, last_activity_at, status)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
       `);
@@ -116,8 +116,8 @@ export class SqliteBridgeStateStore
       }
 
       const insertMapping = this.db.prepare(`
-        INSERT INTO hermes_chat_sessions
-          (session_key, account_id, chat_jid, chat_type, chat_id, hermes_session_id, created_at, updated_at)
+        INSERT INTO agent_chat_sessions
+          (session_key, account_id, chat_jid, chat_type, chat_id, agent_session_id, created_at, updated_at)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?)
       `);
       for (const mapping of snapshot.mappings) {
@@ -127,7 +127,7 @@ export class SqliteBridgeStateStore
           mapping.chatJid,
           mapping.chatType,
           mapping.chatId,
-          mapping.hermesSessionId,
+          mapping.agentSessionId,
           mapping.createdAt,
           mapping.updatedAt,
         );
@@ -676,7 +676,7 @@ export class SqliteBridgeStateStore
     const platformEventRetentionDays = input.platformEventRetentionDays ?? this.platformEventRetentionDays;
     return {
       deletedRuns: cleanupByCreatedAt(this.db, "postback_action_runs", runRetentionDays, now),
-      deletedPlatformEvents: cleanupByCreatedAt(this.db, "hermes_platform_events", platformEventRetentionDays, now),
+      deletedPlatformEvents: cleanupByCreatedAt(this.db, "agent_platform_events", platformEventRetentionDays, now),
     };
   }
 
@@ -685,22 +685,22 @@ export class SqliteBridgeStateStore
       .prepare("SELECT COUNT(*) AS count, MIN(created_at) AS oldest FROM postback_action_runs")
       .get() as { count: number; oldest?: string | null };
     const eventStats = this.db
-      .prepare("SELECT COUNT(*) AS count, MIN(created_at) AS oldest FROM hermes_platform_events")
+      .prepare("SELECT COUNT(*) AS count, MIN(created_at) AS oldest FROM agent_platform_events")
       .get() as { count: number; oldest?: string | null };
     return {
       postbackActionRuns: Number(runStats.count ?? 0),
-      hermesPlatformEvents: Number(eventStats.count ?? 0),
+      agentPlatformEvents: Number(eventStats.count ?? 0),
       ...(runStats.oldest ? { oldestPostbackActionRun: String(runStats.oldest) } : {}),
-      ...(eventStats.oldest ? { oldestHermesPlatformEvent: String(eventStats.oldest) } : {}),
+      ...(eventStats.oldest ? { oldestAgentPlatformEvent: String(eventStats.oldest) } : {}),
     };
   }
 
-  appendHermesPlatformEvent(event: WhatsAppMessageEvent): HermesPlatformEventRecord {
+  appendAgentPlatformEvent(event: WhatsAppMessageEvent): AgentPlatformEventRecord {
     const createdAt = new Date().toISOString();
     const payloadJson = JSON.stringify(event);
     const result = this.db
       .prepare(`
-        INSERT INTO hermes_platform_events
+        INSERT INTO agent_platform_events
           (account_id, chat_jid, chat_type, sender_jid, session_key, message_id, participant_jid, text, timestamp, payload_json, created_at)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `)
@@ -734,17 +734,17 @@ export class SqliteBridgeStateStore
     };
   }
 
-  listHermesPlatformEvents(input: { afterSequence?: number; limit?: number } = {}): HermesPlatformEventRecord[] {
+  listAgentPlatformEvents(input: { afterSequence?: number; limit?: number } = {}): AgentPlatformEventRecord[] {
     return this.db
       .prepare(`
         SELECT *
-        FROM hermes_platform_events
+        FROM agent_platform_events
         WHERE sequence > ?
         ORDER BY sequence ASC
         LIMIT ?
       `)
       .all(input.afterSequence ?? 0, safeLimit(input.limit))
-      .map(rowToHermesPlatformEvent);
+      .map(rowToAgentPlatformEvent);
   }
 
   saveWhatsAppContact(record: WhatsAppContactRecord): void {
@@ -1163,7 +1163,7 @@ export class SqliteBridgeStateStore
 
   private migrate() {
     this.db.exec(`
-      CREATE TABLE IF NOT EXISTS hermes_sessions (
+      CREATE TABLE IF NOT EXISTS agent_sessions (
         id TEXT PRIMARY KEY,
         session_key TEXT NOT NULL,
         account_id TEXT NOT NULL,
@@ -1175,13 +1175,13 @@ export class SqliteBridgeStateStore
         status TEXT NOT NULL
       );
 
-      CREATE TABLE IF NOT EXISTS hermes_chat_sessions (
+      CREATE TABLE IF NOT EXISTS agent_chat_sessions (
         session_key TEXT PRIMARY KEY,
         account_id TEXT NOT NULL,
         chat_jid TEXT NOT NULL,
         chat_type TEXT NOT NULL,
         chat_id TEXT NOT NULL,
-        hermes_session_id TEXT NOT NULL,
+        agent_session_id TEXT NOT NULL,
         created_at TEXT NOT NULL,
         updated_at TEXT NOT NULL
       );
@@ -1302,7 +1302,7 @@ export class SqliteBridgeStateStore
       CREATE INDEX IF NOT EXISTS postback_action_runs_lookup_idx
         ON postback_action_runs(account_id, chat_jid, created_at DESC);
 
-      CREATE TABLE IF NOT EXISTS hermes_platform_events (
+      CREATE TABLE IF NOT EXISTS agent_platform_events (
         sequence INTEGER PRIMARY KEY AUTOINCREMENT,
         account_id TEXT NOT NULL,
         chat_jid TEXT NOT NULL,
@@ -1317,8 +1317,8 @@ export class SqliteBridgeStateStore
         created_at TEXT NOT NULL
       );
 
-      CREATE INDEX IF NOT EXISTS hermes_platform_events_sequence_idx
-        ON hermes_platform_events(sequence);
+      CREATE INDEX IF NOT EXISTS agent_platform_events_sequence_idx
+        ON agent_platform_events(sequence);
 
       CREATE TABLE IF NOT EXISTS whatsapp_contacts (
         account_id TEXT NOT NULL,
@@ -1462,10 +1462,47 @@ export class SqliteBridgeStateStore
       CREATE INDEX IF NOT EXISTS whatsapp_sync_events_account_idx
         ON whatsapp_sync_events(account_id, received_at DESC);
     `);
+    this.copyLegacyAgentTables();
     this.ensureColumn("delivery_records", "inbound_text", "TEXT");
     this.ensureColumn("delivery_records", "failure_stage", "TEXT");
+    this.migrateAgentTerminology();
     this.cleanupPostbackRecords();
     this.cleanupBlockedNumberRuleDeliveries();
+  }
+
+  private copyLegacyAgentTables() {
+    if (this.tableExists("hermes_sessions")) {
+      this.db.exec(`
+        INSERT OR IGNORE INTO agent_sessions
+          (id, session_key, account_id, chat_jid, chat_type, chat_id, created_at, last_activity_at, status)
+        SELECT id, session_key, account_id, chat_jid, chat_type, chat_id, created_at, last_activity_at, status
+        FROM hermes_sessions
+      `);
+    }
+
+    if (this.tableExists("hermes_chat_sessions")) {
+      this.db.exec(`
+        INSERT OR IGNORE INTO agent_chat_sessions
+          (session_key, account_id, chat_jid, chat_type, chat_id, agent_session_id, created_at, updated_at)
+        SELECT session_key, account_id, chat_jid, chat_type, chat_id, hermes_session_id, created_at, updated_at
+        FROM hermes_chat_sessions
+      `);
+    }
+
+    if (this.tableExists("hermes_platform_events")) {
+      this.db.exec(`
+        INSERT OR IGNORE INTO agent_platform_events
+          (sequence, account_id, chat_jid, chat_type, sender_jid, session_key, message_id, participant_jid, text, timestamp, payload_json, created_at)
+        SELECT sequence, account_id, chat_jid, chat_type, sender_jid, session_key, message_id, participant_jid, text, timestamp, payload_json, created_at
+        FROM hermes_platform_events
+      `);
+    }
+  }
+
+  private migrateAgentTerminology() {
+    this.db.prepare("UPDATE delivery_records SET failure_stage = 'agent' WHERE failure_stage = 'hermes'").run();
+    this.db.prepare("UPDATE postback_actions SET action_type = 'agent' WHERE action_type = 'hermes'").run();
+    this.db.prepare("UPDATE postback_action_runs SET action_type = 'agent' WHERE action_type = 'hermes'").run();
   }
 
   private cleanupBlockedNumberRuleDeliveries() {
@@ -1485,6 +1522,13 @@ export class SqliteBridgeStateStore
     if (!rows.some((row) => row.name === column)) {
       this.db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${type}`);
     }
+  }
+
+  private tableExists(table: string) {
+    const row = this.db
+      .prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?")
+      .get(table);
+    return Boolean(row);
   }
 
   private countRows(table: string, accountId?: string): number {
@@ -1508,30 +1552,30 @@ function rowToMapping(row: unknown): ChatSessionMapping {
     chatJid: requiredString(value, "chat_jid"),
     chatType: requiredString(value, "chat_type") as ChatSessionMapping["chatType"],
     chatId: requiredString(value, "chat_id"),
-    hermesSessionId: requiredString(value, "hermes_session_id"),
+    agentSessionId: requiredString(value, "agent_session_id"),
     createdAt: requiredString(value, "created_at"),
     updatedAt: requiredString(value, "updated_at"),
   };
 }
 
-function rowToSession(row: unknown): HermesSession {
+function rowToSession(row: unknown): AgentSession {
   const value = row as Record<string, unknown>;
   return {
     id: requiredString(value, "id"),
     sessionKey: requiredString(value, "session_key"),
     accountId: requiredString(value, "account_id"),
     chatJid: requiredString(value, "chat_jid"),
-    chatType: requiredString(value, "chat_type") as HermesSession["chatType"],
+    chatType: requiredString(value, "chat_type") as AgentSession["chatType"],
     chatId: requiredString(value, "chat_id"),
     createdAt: requiredString(value, "created_at"),
     lastActivityAt: requiredString(value, "last_activity_at"),
-    status: requiredString(value, "status") as HermesSession["status"],
+    status: requiredString(value, "status") as AgentSession["status"],
   };
 }
 
 function rowToDelivery(row: unknown): DeliveryRecord {
   const value = row as Record<string, string | number | null>;
-  const failureStage = value.failure_stage;
+  const failureStage = normalizeFailureStage(value.failure_stage);
   return {
     id: String(value.id),
     accountId: String(value.account_id),
@@ -1543,7 +1587,7 @@ function rowToDelivery(row: unknown): DeliveryRecord {
     outboundText: String(value.outbound_text),
     status: String(value.status) as DeliveryRecord["status"],
     attempts: Number(value.attempts),
-    ...(failureStage === "hermes" || failureStage === "whatsapp" ? { failureStage } : {}),
+    ...(failureStage === "agent" || failureStage === "whatsapp" ? { failureStage } : {}),
     ...(value.error ? { error: String(value.error) } : {}),
     createdAt: String(value.created_at),
     updatedAt: String(value.updated_at),
@@ -1619,7 +1663,7 @@ function rowToPostbackAction(row: unknown): PostbackActionRecord {
     name: String(value.name),
     enabled: Boolean(value.enabled),
     trigger: String(value.trigger) as PostbackActionRecord["trigger"],
-    actionType: String(value.action_type) as PostbackActionRecord["actionType"],
+    actionType: normalizePostbackActionType(value.action_type) as PostbackActionRecord["actionType"],
     ...(value.account_id ? { accountId: String(value.account_id) } : {}),
     ...(value.chat_jid ? { chatJid: String(value.chat_jid) } : {}),
     configJson: String(value.config_json ?? "{}"),
@@ -1634,7 +1678,7 @@ function rowToPostbackActionRun(row: unknown): PostbackActionRunRecord {
     id: String(value.id),
     actionId: String(value.action_id),
     actionName: String(value.action_name),
-    actionType: String(value.action_type) as PostbackActionRunRecord["actionType"],
+    actionType: normalizePostbackActionType(value.action_type) as PostbackActionRunRecord["actionType"],
     accountId: String(value.account_id),
     chatJid: String(value.chat_jid),
     inboundMessageId: String(value.inbound_message_id),
@@ -1649,13 +1693,24 @@ function rowToPostbackActionRun(row: unknown): PostbackActionRunRecord {
   };
 }
 
-function rowToHermesPlatformEvent(row: unknown): HermesPlatformEventRecord {
+function normalizePostbackActionType(value: unknown): PostbackActionRecord["actionType"] {
+  return String(value) === "hermes" ? "agent" : String(value) as PostbackActionRecord["actionType"];
+}
+
+function normalizeFailureStage(value: unknown): DeliveryRecord["failureStage"] | undefined {
+  if (value === "hermes") {
+    return "agent";
+  }
+  return value === "agent" || value === "whatsapp" ? value : undefined;
+}
+
+function rowToAgentPlatformEvent(row: unknown): AgentPlatformEventRecord {
   const value = row as Record<string, string | number | null>;
   return {
     sequence: Number(value.sequence),
     accountId: String(value.account_id),
     chatJid: String(value.chat_jid),
-    chatType: String(value.chat_type) as HermesPlatformEventRecord["chatType"],
+    chatType: String(value.chat_type) as AgentPlatformEventRecord["chatType"],
     senderJid: String(value.sender_jid),
     sessionKey: String(value.session_key),
     messageId: String(value.message_id),
@@ -1844,7 +1899,7 @@ function safeLimit(limit: number | undefined) {
   return Math.min(Math.max(Math.trunc(limit ?? 200), 1), 1000);
 }
 
-function cleanupByCreatedAt(db: DatabaseSync, tableName: "postback_action_runs" | "hermes_platform_events", retentionDays: number, now: Date) {
+function cleanupByCreatedAt(db: DatabaseSync, tableName: "postback_action_runs" | "agent_platform_events", retentionDays: number, now: Date) {
   if (!Number.isFinite(retentionDays) || retentionDays <= 0) {
     return 0;
   }

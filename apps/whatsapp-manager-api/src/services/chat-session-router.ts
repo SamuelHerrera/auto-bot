@@ -4,8 +4,8 @@ import type {
   ChatSessionMapping,
   DeliveryRecord,
   GroupRoutingPolicyRecord,
-  HermesPlatformEventRecord,
-  HermesSession,
+  AgentPlatformEventRecord,
+  AgentSession,
   InboundMessageResult,
   ManagerChatMetadata,
   NumberRuleInput,
@@ -31,16 +31,16 @@ import type {
   WhatsAppSyncSummary,
 } from "../domain/types.js";
 import { getWhatsAppSessionKey } from "../domain/types.js";
-import type { HermesAdapter } from "./hermes-adapter.js";
+import type { AgentAdapter } from "./agent-adapter.js";
 
 export class InMemoryChatSessionRouter {
-  private readonly sessions = new Map<string, HermesSession>();
+  private readonly sessions = new Map<string, AgentSession>();
   private readonly mappings = new Map<string, ChatSessionMapping>();
   private readonly processedMessages = new Set<string>();
   private readonly sessionQueues = new Map<string, Promise<InboundMessageResult>>();
 
   constructor(
-    private readonly hermesAdapter: HermesAdapter,
+    private readonly agentAdapter: AgentAdapter,
     private readonly store?: ChatSessionRouterStore,
     private readonly groupPolicyStore?: GroupRoutingPolicyStore,
   ) {
@@ -84,29 +84,29 @@ export class InMemoryChatSessionRouter {
     };
   }
 
-  async getSession(sessionKey: string): Promise<HermesSession | null> {
+  async getSession(sessionKey: string): Promise<AgentSession | null> {
     const mapping = this.mappings.get(sessionKey);
     if (!mapping) {
       return null;
     }
 
-    return this.sessions.get(mapping.hermesSessionId) ?? null;
+    return this.sessions.get(mapping.agentSessionId) ?? null;
   }
 
-  async getSessionForRoute(input: RoutingInput): Promise<HermesSession | null> {
+  async getSessionForRoute(input: RoutingInput): Promise<AgentSession | null> {
     return this.getSession(this.normalizeRoutingInput(input).sessionKey);
   }
 
-  async getOrCreateSession(input: RoutingInput): Promise<HermesSession> {
+  async getOrCreateSession(input: RoutingInput): Promise<AgentSession> {
     const route = this.normalizeRoutingInput(input);
     const existing = await this.getSession(route.sessionKey);
     if (existing) {
       return existing;
     }
 
-    const session = await this.hermesAdapter.createSession(route.sessionKey);
+    const session = await this.agentAdapter.createSession(route.sessionKey);
     const now = new Date().toISOString();
-    const enrichedSession: HermesSession = {
+    const enrichedSession: AgentSession = {
       ...session,
       sessionKey: route.sessionKey,
       accountId: route.accountId,
@@ -122,7 +122,7 @@ export class InMemoryChatSessionRouter {
       chatJid: route.chatJid,
       chatType: route.chatType,
       chatId: route.chatJid,
-      hermesSessionId: session.id,
+      agentSessionId: session.id,
       createdAt: now,
       updatedAt: now,
     });
@@ -131,11 +131,11 @@ export class InMemoryChatSessionRouter {
     return enrichedSession;
   }
 
-  async resetSession(input: RoutingInput): Promise<HermesSession> {
+  async resetSession(input: RoutingInput): Promise<AgentSession> {
     const route = this.normalizeRoutingInput(input);
     const existing = await this.getSession(route.sessionKey);
     if (existing) {
-      await this.hermesAdapter.resetSession(existing.id);
+      await this.agentAdapter.resetSession(existing.id);
       this.sessions.delete(existing.id);
     }
 
@@ -144,15 +144,15 @@ export class InMemoryChatSessionRouter {
     return this.getOrCreateSession(route);
   }
 
-  async remapSession(input: RoutingInput, hermesSessionId: string): Promise<ChatSessionMapping> {
+  async remapSession(input: RoutingInput, agentSessionId: string): Promise<ChatSessionMapping> {
     const route = this.normalizeRoutingInput(input);
-    const current = this.sessions.get(hermesSessionId);
+    const current = this.sessions.get(agentSessionId);
     const now = new Date().toISOString();
 
     if (!current) {
-      const created = await this.hermesAdapter.createSession(route.sessionKey);
+      const created = await this.agentAdapter.createSession(route.sessionKey);
       this.sessions.set(created.id, created);
-      hermesSessionId = created.id;
+      agentSessionId = created.id;
     }
 
     const mapping: ChatSessionMapping = {
@@ -161,7 +161,7 @@ export class InMemoryChatSessionRouter {
       chatJid: route.chatJid,
       chatType: route.chatType,
       chatId: route.chatJid,
-      hermesSessionId,
+      agentSessionId,
       createdAt: this.mappings.get(route.sessionKey)?.createdAt ?? now,
       updatedAt: now,
     };
@@ -202,7 +202,7 @@ export class InMemoryChatSessionRouter {
 
   private async processInboundMessage(event: WhatsAppMessageEvent): Promise<InboundMessageResult> {
     const session = await this.getOrCreateSession(event);
-    const reply = await this.hermesAdapter.sendMessage(session.id, event);
+    const reply = await this.agentAdapter.sendMessage(session.id, event);
 
     if (reply.sessionId !== session.id) {
       this.sessions.delete(session.id);
@@ -211,7 +211,7 @@ export class InMemoryChatSessionRouter {
       if (currentMapping) {
         this.mappings.set(session.sessionKey, {
           ...currentMapping,
-          hermesSessionId: reply.sessionId,
+          agentSessionId: reply.sessionId,
           updatedAt: new Date().toISOString(),
         });
       }
@@ -303,7 +303,7 @@ export class InMemoryChatSessionRouter {
 
 export interface ChatSessionRouterSnapshot {
   mappings: ChatSessionMapping[];
-  sessions: HermesSession[];
+  sessions: AgentSession[];
   processedMessages: string[];
 }
 
@@ -357,15 +357,15 @@ export interface PostbackActionStore {
   };
   getPostbackMaintenanceStats?(): {
     postbackActionRuns: number;
-    hermesPlatformEvents: number;
+    agentPlatformEvents: number;
     oldestPostbackActionRun?: string;
-    oldestHermesPlatformEvent?: string;
+    oldestAgentPlatformEvent?: string;
   };
 }
 
-export interface HermesPlatformEventStore {
-  appendHermesPlatformEvent(event: WhatsAppMessageEvent): HermesPlatformEventRecord;
-  listHermesPlatformEvents(input?: { afterSequence?: number; limit?: number }): HermesPlatformEventRecord[];
+export interface AgentPlatformEventStore {
+  appendAgentPlatformEvent(event: WhatsAppMessageEvent): AgentPlatformEventRecord;
+  listAgentPlatformEvents(input?: { afterSequence?: number; limit?: number }): AgentPlatformEventRecord[];
 }
 
 export interface AccountMetadataStore {

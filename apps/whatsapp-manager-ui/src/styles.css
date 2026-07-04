@@ -1190,12 +1190,18 @@ button {
 }
 
 .link-dialog,
-.alias-dialog {
+.alias-dialog,
+.postback-dialog {
   background: #ffffff;
   border: 1px solid #ccd7cf;
   box-shadow: 0 24px 60px rgba(23, 33, 29, 0.22);
   max-width: 420px;
   width: min(100%, 420px);
+}
+
+.postback-dialog {
+  max-width: 640px;
+  width: min(100%, 640px);
 }
 
 .number-panel {
@@ -1229,11 +1235,13 @@ button {
   padding: 20px;
 }
 
-.alias-dialog form {
+.alias-dialog form,
+.postback-dialog form {
   margin: 0;
 }
 
-.alias-dialog-body {
+.alias-dialog-body,
+.postback-dialog-body {
   display: grid;
   gap: 18px;
 }
@@ -1946,8 +1954,7 @@ button {
   gap: 16px;
 }
 
-.section-heading-row h2,
-.postback-runs h3 {
+.section-heading-row h2 {
   font-size: 1rem;
   margin: 0;
 }
@@ -2002,11 +2009,9 @@ button {
 }
 
 .postback-form {
-  border: 1px solid #e5ebe6;
   display: grid;
   gap: 12px;
   grid-template-columns: repeat(2, minmax(180px, 1fr));
-  padding: 12px;
 }
 
 .postback-form .field,
@@ -2059,8 +2064,7 @@ button {
   min-width: 0;
 }
 
-.postback-row span,
-.postback-run small {
+.postback-row span {
   color: #66746c;
   font-size: 0.82rem;
   overflow-wrap: anywhere;
@@ -2084,33 +2088,6 @@ button {
   min-height: 34px;
   min-width: 34px;
   padding: 7px;
-}
-
-.postback-runs {
-  display: grid;
-  gap: 8px;
-}
-
-.postback-run {
-  align-items: center;
-  border-left: 3px solid #9aa8a0;
-  display: grid;
-  gap: 4px 10px;
-  grid-template-columns: minmax(0, 1fr) auto;
-  padding: 8px 10px;
-  background: #fafbfa;
-}
-
-.postback-run small {
-  grid-column: 1 / -1;
-}
-
-.postback-run-success {
-  border-left-color: #168a55;
-}
-
-.postback-run-failed {
-  border-left-color: #c24b3b;
 }
 
 .log-filterbar {

@@ -1,7 +1,7 @@
-import { useMemo, useState } from "react";
+import { useState } from "react";
 import type { FormEvent } from "react";
 
-import type { NumberRule, PostbackAction, PostbackActionRun, PostbackActionType } from "../domain/models";
+import type { NumberRule, PostbackAction, PostbackActionType } from "../domain/models";
 import { IconButton } from "./shared";
 
 export interface PostbackActionDraft {
@@ -43,8 +43,9 @@ export function PostbackSettings({
   const [url, setUrl] = useState("");
   const [callbackDeliveryMode, setCallbackDeliveryMode] = useState<"api" | "platform">("api");
   const [replyToWhatsApp, setReplyToWhatsApp] = useState(true);
+  const [isFormOpen, setIsFormOpen] = useState(false);
   const editingAction = actions.find((action) => action.id === editingActionId) ?? null;
-  const nativeActions = actions.filter((action) => action.actionType === "hermes" && parseActionConfig(action).deliveryMode === "platform");
+  const nativeActions = actions.filter((action) => action.actionType === "agent" && parseActionConfig(action).deliveryMode === "platform");
   const nativeWarnings = nativeActions
     .map((action) => getNativeActionRuleWarning(action, numberRules))
     .filter(Boolean);
@@ -65,7 +66,7 @@ export function PostbackSettings({
     } else {
       onCreate(draft);
     }
-    clearForm();
+    closeForm();
   }
 
   function editAction(action: PostbackAction) {
@@ -78,6 +79,7 @@ export function PostbackSettings({
     setUrl(typeof config.url === "string" ? config.url : "");
     setCallbackDeliveryMode(config.deliveryMode === "platform" ? "platform" : "api");
     setReplyToWhatsApp(typeof config.replyToWhatsApp === "boolean" ? config.replyToWhatsApp : true);
+    setIsFormOpen(true);
   }
 
   function clearForm() {
@@ -91,6 +93,16 @@ export function PostbackSettings({
     setReplyToWhatsApp(true);
   }
 
+  function openCreateForm() {
+    clearForm();
+    setIsFormOpen(true);
+  }
+
+  function closeForm() {
+    clearForm();
+    setIsFormOpen(false);
+  }
+
   return (
     <section className="postback-settings">
       <div className="section-heading-row">
@@ -98,6 +110,9 @@ export function PostbackSettings({
           <h2>Postbacks</h2>
           <p>Configure inbound chat actions for this WhatsApp account.</p>
         </div>
+        <IconButton icon="mdi:plus" label="Create postback" onClick={openCreateForm} disabled={isBusy}>
+          Create
+        </IconButton>
       </div>
 
       {nativeWarnings.length > 0 ? (
@@ -105,60 +120,6 @@ export function PostbackSettings({
           {nativeWarnings.map((warning) => <p key={warning}>{warning}</p>)}
         </div>
       ) : null}
-
-      <form className="postback-form" onSubmit={submit}>
-        <label className="field">
-          <span>Name</span>
-          <input value={name} onChange={(event) => setName(event.target.value)} placeholder="Notify CRM" />
-        </label>
-        <label className="field">
-          <span>Action</span>
-          <select value={actionType} onChange={(event) => setActionType(event.target.value as PostbackActionType)}>
-            <option value="http">HTTP webhook</option>
-            <option value="hermes">Agent callback</option>
-          </select>
-        </label>
-        {scopedAccountId ? null : (
-          <label className="field">
-            <span>Account scope</span>
-            <input value={accountId} onChange={(event) => setAccountId(event.target.value)} placeholder="All accounts" />
-          </label>
-        )}
-        <label className="field">
-          <span>Chat scope</span>
-          <input value={chatJid} onChange={(event) => setChatJid(event.target.value)} placeholder="All chats in this account" />
-        </label>
-        {actionType === "http" ? (
-          <label className="field postback-url-field">
-            <span>Webhook URL</span>
-            <input value={url} onChange={(event) => setUrl(event.target.value)} placeholder="https://example.com/webhook" />
-          </label>
-        ) : (
-          <>
-            <label className="field">
-              <span>Callback mode</span>
-              <select value={callbackDeliveryMode} onChange={(event) => setCallbackDeliveryMode(event.target.value as "api" | "platform")}>
-                <option value="api">Direct callback</option>
-                <option value="platform">Platform event queue</option>
-              </select>
-            </label>
-            <label className="toggle-row">
-              <input type="checkbox" checked={replyToWhatsApp} onChange={(event) => setReplyToWhatsApp(event.target.checked)} disabled={callbackDeliveryMode === "platform"} />
-              <span>Send callback reply back to WhatsApp</span>
-            </label>
-          </>
-        )}
-        <div className="settings-actions">
-          <IconButton icon={editingAction ? "mdi:content-save-outline" : "mdi:plus"} label={editingAction ? "Save postback" : "Create postback"} type="submit" disabled={isBusy || !name.trim()}>
-            {editingAction ? "Save" : "Create"}
-          </IconButton>
-          {editingAction ? (
-            <IconButton icon="mdi:close" label="Cancel edit" type="button" variant="secondary" onClick={clearForm} disabled={isBusy}>
-              Cancel
-            </IconButton>
-          ) : null}
-        </div>
-      </form>
 
       <div className="postback-list">
         {actions.map((action) => (
@@ -180,31 +141,77 @@ export function PostbackSettings({
         ))}
         {actions.length === 0 ? <p className="muted-copy">No postback actions configured for this account.</p> : null}
       </div>
-    </section>
-  );
-}
 
-export function PostbackRunHistory({ runs }: { runs: PostbackActionRun[] }) {
-  const recentRuns = useMemo(() => runs.slice(0, 25), [runs]);
+      {isFormOpen ? (
+        <div className="dialog-backdrop" role="presentation">
+          <section className="postback-dialog" role="dialog" aria-modal="true" aria-labelledby="postback-dialog-title">
+            <form onSubmit={submit}>
+              <div className="dialog-header">
+                <div>
+                  <span className="panel-kicker">Postback</span>
+                  <h3 id="postback-dialog-title">{editingAction ? "Edit postback" : "Create postback"}</h3>
+                  <p className="dialog-subtitle">{scopedAccountId ?? "All accounts"}</p>
+                </div>
+                <IconButton icon="mdi:close" label="Close postback dialog" variant="text" onClick={closeForm} type="button" />
+              </div>
 
-  return (
-    <section className="postback-settings">
-      <div className="postback-runs">
-        <div className="section-heading-row">
-          <div>
-            <h2>Run History</h2>
-            <p>Postback runs are execution records for configured postback actions after inbound chat events.</p>
-          </div>
+              <div className="dialog-body postback-dialog-body">
+                <div className="postback-form">
+                  <label className="field">
+                    <span>Name</span>
+                    <input autoFocus value={name} onChange={(event) => setName(event.target.value)} placeholder="Notify CRM" />
+                  </label>
+                  <label className="field">
+                    <span>Action</span>
+                    <select value={actionType} onChange={(event) => setActionType(event.target.value as PostbackActionType)}>
+                      <option value="http">HTTP webhook</option>
+                      <option value="agent">Agent callback</option>
+                    </select>
+                  </label>
+                  {scopedAccountId ? null : (
+                    <label className="field">
+                      <span>Account scope</span>
+                      <input value={accountId} onChange={(event) => setAccountId(event.target.value)} placeholder="All accounts" />
+                    </label>
+                  )}
+                  <label className="field">
+                    <span>Chat scope</span>
+                    <input value={chatJid} onChange={(event) => setChatJid(event.target.value)} placeholder="All chats in this account" />
+                  </label>
+                  {actionType === "http" ? (
+                    <label className="field postback-url-field">
+                      <span>Webhook URL</span>
+                      <input value={url} onChange={(event) => setUrl(event.target.value)} placeholder="https://example.com/webhook" />
+                    </label>
+                  ) : (
+                    <>
+                      <label className="field">
+                        <span>Callback mode</span>
+                        <select value={callbackDeliveryMode} onChange={(event) => setCallbackDeliveryMode(event.target.value as "api" | "platform")}>
+                          <option value="api">Direct callback - immediate reply</option>
+                          <option value="platform">Platform queue - adapter replies later</option>
+                        </select>
+                      </label>
+                      <label className="toggle-row">
+                        <input type="checkbox" checked={replyToWhatsApp} onChange={(event) => setReplyToWhatsApp(event.target.checked)} disabled={callbackDeliveryMode === "platform"} />
+                        <span>Send callback reply back to WhatsApp</span>
+                      </label>
+                    </>
+                  )}
+                </div>
+                <div className="dialog-actions">
+                  <IconButton icon="mdi:close" label="Cancel" type="button" variant="secondary" onClick={closeForm} disabled={isBusy}>
+                    Cancel
+                  </IconButton>
+                  <IconButton icon={editingAction ? "mdi:content-save-outline" : "mdi:plus"} label={editingAction ? "Save postback" : "Create postback"} type="submit" disabled={isBusy || !name.trim()}>
+                    {editingAction ? "Save" : "Create"}
+                  </IconButton>
+                </div>
+              </div>
+            </form>
+          </section>
         </div>
-        {recentRuns.map((run) => (
-          <div className={`postback-run postback-run-${run.status}`} key={run.id}>
-            <span>{run.actionName}</span>
-            <strong>{run.status}</strong>
-            <small>{run.accountId} | {run.chatJid}</small>
-          </div>
-        ))}
-        {recentRuns.length === 0 ? <p className="muted-copy">No postback actions have run for this account yet.</p> : null}
-      </div>
+      ) : null}
     </section>
   );
 }
@@ -220,8 +227,8 @@ function parseActionConfig(action: PostbackAction): Record<string, unknown> {
 
 function getActionSummary(action: PostbackAction) {
   const config = parseActionConfig(action);
-  const mode = action.actionType === "hermes"
-    ? config.deliveryMode === "platform" ? "Platform callback" : "Direct callback"
+  const mode = action.actionType === "agent"
+    ? config.deliveryMode === "platform" ? "Platform queue" : "Direct callback"
     : "HTTP";
   return `${mode} | ${action.accountId || "all accounts"} | ${action.chatJid || "all chats"}`;
 }

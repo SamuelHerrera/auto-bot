@@ -25,6 +25,10 @@ optional_env:
     description: "Maximum events fetched per poll"
     prompt: "Page size"
     password: false
+  - name: WHATSAPP_MANAGER_CURSOR_FILE
+    description: "Persistent cursor file used to resume platform event polling after restart"
+    prompt: "Cursor file"
+    password: false
   - name: WHATSAPP_MANAGER_ALLOWED_USERS
     description: "Comma-separated WhatsApp sender IDs allowed to talk to Hermes"
     prompt: "Allowed WhatsApp senders"

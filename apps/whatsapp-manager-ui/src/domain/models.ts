@@ -3,7 +3,7 @@ export type NumberSubview = "home" | "messages" | "rules" | "postbacks" | "failu
 export type NumberRuleAction = "allow" | "deny";
 export type NumberRuleMatchType = "all" | "exact" | "regex";
 export type RefreshScope = "accounts" | "directory" | "activity" | "chat" | "rules" | "logs" | "postbacks";
-export type PostbackActionType = "hermes" | "http";
+export type PostbackActionType = "agent" | "http";
 export type PostbackRunStatus = "pending" | "success" | "failed" | "ignored";
 export type AuditLogOutcome = "success" | "failure" | "ignored";
 export type AuditLogFilter = "all" | AuditLogOutcome;
@@ -32,7 +32,7 @@ export interface SessionMapping {
   chatJid: string;
   chatType: "direct" | "group";
   chatId: string;
-  hermesSessionId: string;
+  agentSessionId: string;
   createdAt: string;
   updatedAt: string;
 }
@@ -48,7 +48,7 @@ export interface DeliveryRecord {
   outboundText: string;
   status: "pending" | "sent" | "failed" | "ignored";
   attempts: number;
-  failureStage?: "hermes" | "whatsapp";
+  failureStage?: "agent" | "whatsapp";
   error?: string;
   createdAt: string;
   updatedAt: string;
@@ -204,7 +204,7 @@ export interface ChatSummary {
   lidJid?: string;
   pnJid?: string;
   sessionKey?: string;
-  hermesSessionId?: string;
+  agentSessionId?: string;
   createdAt?: string;
   updatedAt: string;
   deliveryCount: number;

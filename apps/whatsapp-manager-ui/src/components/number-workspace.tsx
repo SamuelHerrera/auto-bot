@@ -2,12 +2,12 @@ import { FormEvent, useState } from "react";
 import { Icon } from "@iconify/react";
 
 import { getAccountStatusDetail, isPendingAccountId } from "../domain/accounts";
-import type { ChatMessage, ChatSummary, DeliveryRecord, NumberRule, NumberRuleAction, NumberRuleMatchType, NumberSubview, PostbackAction, PostbackActionRun, SessionMapping, WhatsAppAccount } from "../domain/models";
+import type { ChatMessage, ChatSummary, DeliveryRecord, NumberRule, NumberRuleAction, NumberRuleMatchType, NumberSubview, PostbackAction, SessionMapping, WhatsAppAccount } from "../domain/models";
 import { FailuresView } from "./number-failures-view";
 import { HomeView } from "./number-home-view";
 import { MessagesView } from "./number-messages-view";
 import { RulesView } from "./number-rules-view";
-import { PostbackRunHistory, PostbackSettings } from "./postback-settings";
+import { PostbackSettings } from "./postback-settings";
 import type { PostbackActionDraft } from "./postback-settings";
 import { EmptyState, IconButton, TabButton } from "./shared";
 
@@ -25,7 +25,6 @@ export function NumberWorkspace({
   mappings,
   matchType,
   postbackActions,
-  postbackRuns,
   onActionChange,
   onAliasChange,
   onAliasSave,
@@ -63,7 +62,6 @@ export function NumberWorkspace({
   mappings: SessionMapping[];
   matchType: NumberRuleMatchType;
   postbackActions: PostbackAction[];
-  postbackRuns: PostbackActionRun[];
   onActionChange: (value: NumberRuleAction) => void;
   onAliasChange: (value: string) => void;
   onAliasSave: (alias: string) => void;
@@ -207,7 +205,6 @@ export function NumberWorkspace({
             onTest={onTestPostbackAction}
             onToggle={onTogglePostbackAction}
           />
-          <PostbackRunHistory runs={postbackRuns} />
         </div>
       ) : null}
 

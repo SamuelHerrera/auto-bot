@@ -1,11 +1,11 @@
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
-import type { ChatSessionMapping, HermesSession } from "../domain/types.js";
+import type { ChatSessionMapping, AgentSession } from "../domain/types.js";
 import type { ChatSessionRouterSnapshot, ChatSessionRouterStore } from "./chat-session-router.js";
 
 interface PersistedBridgeState {
   mappings: ChatSessionMapping[];
-  sessions: HermesSession[];
+  sessions: AgentSession[];
   processedMessages: string[];
 }
 
