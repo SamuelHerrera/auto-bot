@@ -484,16 +484,12 @@ export class SqliteBridgeStateStore
     };
   }
 
-  listPostbackActions(input: { accountId?: string; chatJid?: string } = {}): PostbackActionRecord[] {
+  listPostbackActions(input: { accountId?: string } = {}): PostbackActionRecord[] {
     const filters: string[] = [];
     const args: string[] = [];
     if (input.accountId?.trim()) {
       filters.push("(account_id IS NULL OR account_id = ?)");
       args.push(input.accountId.trim());
-    }
-    if (input.chatJid?.trim()) {
-      filters.push("(chat_jid IS NULL OR chat_jid = ?)");
-      args.push(input.chatJid.trim());
     }
     const clause = filters.length ? `WHERE ${filters.join(" AND ")}` : "";
     return this.db
@@ -516,7 +512,6 @@ export class SqliteBridgeStateStore
       trigger: input.trigger ?? "inbound_message",
       actionType: input.actionType,
       ...(input.accountId?.trim() ? { accountId: input.accountId.trim() } : {}),
-      ...(input.chatJid?.trim() ? { chatJid: input.chatJid.trim() } : {}),
       configJson: JSON.stringify(input.config ?? {}),
       createdAt: now,
       updatedAt: now,
@@ -535,7 +530,7 @@ export class SqliteBridgeStateStore
         record.trigger,
         record.actionType,
         record.accountId ?? null,
-        record.chatJid ?? null,
+        null,
         record.configJson,
         record.createdAt,
         record.updatedAt,
@@ -566,13 +561,7 @@ export class SqliteBridgeStateStore
         delete record.accountId;
       }
     }
-    if (input.chatJid !== undefined) {
-      if (input.chatJid.trim()) {
-        record.chatJid = input.chatJid.trim();
-      } else {
-        delete record.chatJid;
-      }
-    }
+    delete record.chatJid;
 
     this.db
       .prepare(`
@@ -593,7 +582,7 @@ export class SqliteBridgeStateStore
         record.trigger,
         record.actionType,
         record.accountId ?? null,
-        record.chatJid ?? null,
+        null,
         record.configJson,
         record.updatedAt,
         id,
@@ -1466,6 +1455,8 @@ export class SqliteBridgeStateStore
     this.ensureColumn("delivery_records", "inbound_text", "TEXT");
     this.ensureColumn("delivery_records", "failure_stage", "TEXT");
     this.migrateAgentTerminology();
+    this.cleanupPostbackActionScopes();
+    this.cleanupLegacyAgentPostbackActions();
     this.cleanupPostbackRecords();
     this.cleanupBlockedNumberRuleDeliveries();
   }
@@ -1503,6 +1494,14 @@ export class SqliteBridgeStateStore
     this.db.prepare("UPDATE delivery_records SET failure_stage = 'agent' WHERE failure_stage = 'hermes'").run();
     this.db.prepare("UPDATE postback_actions SET action_type = 'agent' WHERE action_type = 'hermes'").run();
     this.db.prepare("UPDATE postback_action_runs SET action_type = 'agent' WHERE action_type = 'hermes'").run();
+  }
+
+  private cleanupPostbackActionScopes() {
+    this.db.prepare("UPDATE postback_actions SET chat_jid = NULL WHERE chat_jid IS NOT NULL").run();
+  }
+
+  private cleanupLegacyAgentPostbackActions() {
+    this.db.prepare("DELETE FROM postback_actions WHERE action_type = 'agent'").run();
   }
 
   private cleanupBlockedNumberRuleDeliveries() {

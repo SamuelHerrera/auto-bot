@@ -13,7 +13,9 @@ It is packaged with `plugin.yaml` and `__init__.py`, so it can be installed as a
 
 The adapter expects WhatsApp Manager to expose HTTP endpoints for inbound event polling and outbound replies. Those endpoints are implemented by `apps/whatsapp-manager-api`.
 
-To route a chat through this native adapter, create an Agent callback postback action in the manager UI and choose `Platform queue - adapter replies later` as the callback mode. That stores inbound messages in the platform event queue instead of calling the manager's direct callback adapter.
+To route a WhatsApp account through this native adapter, connect the account and allow the desired inbound senders through number rules. WhatsApp Manager stores allowed inbound messages in the neutral platform event queue automatically; the adapter consumes the queue and posts replies back to WhatsApp Manager. Direct callback mode is intentionally not supported.
+
+See `../../docs/whatsapp-manager-postbacks.md` for the native platform adapter and HTTP webhook flow diagrams.
 
 Required manager contract:
 

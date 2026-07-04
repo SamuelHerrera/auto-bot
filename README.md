@@ -87,7 +87,7 @@ pnpm sync:compare -- --before before.json --after after.json
 - The WhatsApp manager always uses live Baileys transport and persists auth state under `/opt/data/whatsapp-manager/baileys`.
 - Bridge mappings, processed WhatsApp message IDs, delivery records, and WhatsApp sync tables persist in SQLite at `/opt/data/whatsapp-manager/bridge-state.sqlite` by default.
 - Live WhatsApp media files are retained under `/opt/data/whatsapp-manager/media` by default, and the corresponding sync media row stores the local path.
-- Run `hermes gateway run --force --accept-hooks` when using the Hermes platform plugin. WhatsApp Manager exposes neutral agent callback and platform queue APIs; the bundled Hermes adapter is one compatible implementation. The container creates a persistent internal key at `/opt/data/whatsapp-manager/internal-api-key` and exports compatibility names for Hermes.
+- Run `hermes gateway run --force --accept-hooks` when using the Hermes platform plugin. WhatsApp Manager exposes neutral platform adapter APIs; the bundled Hermes adapter is one compatible implementation. See `docs/whatsapp-manager-postbacks.md` for the native platform adapter flow and generic HTTP webhook postbacks. The container creates a persistent internal key at `/opt/data/whatsapp-manager/internal-api-key` and exports compatibility names for Hermes.
 - `zerotier-one` is installed, but actual ZeroTier networking inside the container requires `/dev/net/tun` plus extra capabilities; Docker Desktop on this Mac does not provide that.
 - Keep secrets in a local `.env` file, not committed to git.
 

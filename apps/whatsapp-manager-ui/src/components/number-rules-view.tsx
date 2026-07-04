@@ -36,6 +36,17 @@ export function RulesView({
   ruleLabel: string;
   rules: NumberRule[];
 }) {
+  const conflictingAllRule = matchType === "all"
+    ? rules.find((rule) => rule.enabled && rule.matchType === "all" && rule.action !== ruleAction)
+    : undefined;
+  const isCreateDisabled = isBusy
+    || !activeAccountId
+    || (matchType !== "all" && !pattern.trim())
+    || Boolean(conflictingAllRule);
+  const createTitle = conflictingAllRule
+    ? `Disable or delete the ${conflictingAllRule.action} all rule before adding this one.`
+    : "Add rule";
+
   return (
     <>
       <form className="rule-form" onSubmit={onCreate}>
@@ -71,7 +82,8 @@ export function RulesView({
           icon="mdi:plus"
           label="Add rule"
           type="submit"
-          disabled={isBusy || !activeAccountId || (matchType !== "all" && !pattern.trim())}
+          disabled={isCreateDisabled}
+          title={createTitle}
         />
       </form>
 
@@ -82,28 +94,61 @@ export function RulesView({
           <EmptyState title="No number rules" description="Add allow or deny rules for this account." />
         ) : (
           rules.map((rule) => (
-            <article key={rule.id} className="rule-row">
-              <div className="rule-row-main">
-                <span className={`badge badge-rule-${rule.action}`}>{rule.action}</span>
-                <span>
-                  <strong>{rule.label || getRuleDisplayValue(rule)}</strong>
-                  <small>{rule.label ? getRuleDisplayValue(rule) : formatTimestamp(rule.updatedAt)}</small>
-                </span>
-              </div>
-              <label className="check-field">
-                <input
-                  type="checkbox"
-                  checked={rule.enabled}
-                  onChange={(event) => onEnabledChange(rule, event.target.checked)}
-                  disabled={isBusy}
-                />
-                <span>Enabled</span>
-              </label>
-              <IconButton icon="mdi:trash-can-outline" label="Delete rule" variant="danger" onClick={() => onDelete(rule.id)} disabled={isBusy} />
-            </article>
+            <RuleRow
+              key={rule.id}
+              isBusy={isBusy}
+              onDelete={onDelete}
+              onEnabledChange={onEnabledChange}
+              rule={rule}
+              rules={rules}
+            />
           ))
         )}
       </div>
     </>
+  );
+}
+
+function RuleRow({
+  isBusy,
+  onDelete,
+  onEnabledChange,
+  rule,
+  rules,
+}: {
+  isBusy: boolean;
+  onDelete: (ruleId: string) => void;
+  onEnabledChange: (rule: NumberRule, enabled: boolean) => void;
+  rule: NumberRule;
+  rules: NumberRule[];
+}) {
+  const conflictingAllRule = !rule.enabled && rule.matchType === "all"
+    ? rules.find((candidate) => candidate.enabled && candidate.matchType === "all" && candidate.action !== rule.action)
+    : undefined;
+  const isEnableDisabled = isBusy || Boolean(conflictingAllRule);
+  const enableTitle = conflictingAllRule
+    ? `Disable or delete the ${conflictingAllRule.action} all rule before enabling this one.`
+    : undefined;
+
+  return (
+    <article className="rule-row">
+      <div className="rule-row-main">
+        <span className={`badge badge-rule-${rule.action}`}>{rule.action}</span>
+        <span>
+          <strong>{rule.label || getRuleDisplayValue(rule)}</strong>
+          <small>{rule.label ? getRuleDisplayValue(rule) : formatTimestamp(rule.updatedAt)}</small>
+        </span>
+      </div>
+      <label className="check-field" title={enableTitle}>
+        <input
+          type="checkbox"
+          checked={rule.enabled}
+          onChange={(event) => onEnabledChange(rule, event.target.checked)}
+          disabled={isEnableDisabled}
+        />
+        <span>Enabled</span>
+      </label>
+      <IconButton icon="mdi:trash-can-outline" label="Delete rule" variant="danger" onClick={() => onDelete(rule.id)} disabled={isBusy} />
+    </article>
   );
 }

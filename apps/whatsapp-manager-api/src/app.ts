@@ -11,6 +11,7 @@ import {
 import type {
   AuditLogInput,
   NumberRuleInput,
+  NumberRuleRecord,
   PostbackActionInput,
   PostbackActionRecord,
   WhatsAppMessageEvent,
@@ -419,6 +420,7 @@ export function createApp({ config, services = buildServices(config) }: CreateAp
     }
 
     const input = parseNumberRuleInput(request.body);
+    validateNumberRuleAllConflict(services.numberRuleStore.listNumberRules(input.accountId), input);
     const rule = services.numberRuleStore.createNumberRule(input);
     services.eventBus.publish("rules", { rules: [rule] });
     audit({
@@ -447,6 +449,7 @@ export function createApp({ config, services = buildServices(config) }: CreateAp
     }
 
     const input = parseNumberRuleInput(request.body, existing);
+    validateNumberRuleAllConflict(services.numberRuleStore.listNumberRules(input.accountId), input, existing.id);
     const rule = services.numberRuleStore.updateNumberRule(existing.id, input);
     services.eventBus.publish("rules", { rules: rule ? [rule] : [] });
     audit({
@@ -492,10 +495,9 @@ export function createApp({ config, services = buildServices(config) }: CreateAp
     return reply.code(204).send();
   });
 
-  app.get<{ Querystring: { accountId?: string; chatJid?: string } }>("/postback-actions", async (request) => ({
+  app.get<{ Querystring: { accountId?: string } }>("/postback-actions", async (request) => ({
     items: services.postbackActionStore?.listPostbackActions({
       ...(request.query.accountId ? { accountId: request.query.accountId } : {}),
-      ...(request.query.chatJid ? { chatJid: request.query.chatJid } : {}),
     }) ?? [],
   }));
 
@@ -514,7 +516,6 @@ export function createApp({ config, services = buildServices(config) }: CreateAp
       details: {
         actionType: action.actionType,
         accountId: action.accountId ?? null,
-        chatJid: action.chatJid ?? null,
       },
     });
     return action;
@@ -565,7 +566,6 @@ export function createApp({ config, services = buildServices(config) }: CreateAp
       details: {
         actionType: existing.actionType,
         accountId: existing.accountId ?? null,
-        chatJid: existing.chatJid ?? null,
       },
     });
     return reply.code(204).send();
@@ -929,9 +929,18 @@ export function createApp({ config, services = buildServices(config) }: CreateAp
       return { ignored: true, reason: "number-rule" };
     }
 
+    const queued = services.agentPlatformEventStore?.appendAgentPlatformEvent(event);
+    if (queued) {
+      services.eventBus.publish("activity", {
+        accountId: event.accountId,
+        chatJid: event.chatJid,
+        source: "agent-platform",
+      });
+    }
+
     const configuredActions = services.postbackActionStore
-      ?.listPostbackActions({ accountId: event.accountId, chatJid: event.chatJid })
-      .filter((action) => action.enabled && action.trigger === "inbound_message") ?? [];
+      ?.listPostbackActions({ accountId: event.accountId })
+      .filter((action) => action.enabled && action.trigger === "inbound_message" && action.actionType === "http") ?? [];
     if (configuredActions.length > 0 && services.postbackDispatcher) {
       const runs = await services.postbackDispatcher.dispatchInboundMessage(event);
       services.eventBus.publish("activity", {
@@ -947,11 +956,30 @@ export function createApp({ config, services = buildServices(config) }: CreateAp
         details: {
           accountId: event.accountId,
           chatJid: event.chatJid,
+          agentPlatformEventSequence: queued?.sequence ?? null,
           postbackActions: runs.length,
           failedPostbackActions: runs.filter((run) => run.status === "failed").length,
         },
       });
-      return { duplicate: false, postbackRuns: runs };
+      return {
+        duplicate: false,
+        ...(queued ? { agentPlatformEvent: { sequence: queued.sequence } } : {}),
+        postbackRuns: runs,
+      };
+    }
+
+    if (queued) {
+      audit({
+        action: "message.inbound",
+        resourceType: "whatsapp-message",
+        resourceId: event.messageId,
+        details: {
+          accountId: event.accountId,
+          chatJid: event.chatJid,
+          agentPlatformEventSequence: queued.sequence,
+        },
+      });
+      return { duplicate: false, agentPlatformEvent: { sequence: queued.sequence }, postbackRuns: [] };
     }
 
     const result = await services.router.handleInboundMessage(event);
@@ -1034,6 +1062,25 @@ function parseNumberRuleInput(body: unknown, existing?: NumberRuleInput): Number
   };
 }
 
+function validateNumberRuleAllConflict(rules: NumberRuleRecord[], input: NumberRuleInput, existingRuleId?: string) {
+  if (input.matchType !== "all" || input.enabled === false) {
+    return;
+  }
+
+  const conflictingRule = rules.find((rule) => (
+    rule.id !== existingRuleId
+    && rule.enabled
+    && rule.matchType === "all"
+    && rule.action !== input.action
+  ));
+
+  if (conflictingRule) {
+    throw badRequest(
+      `Cannot add ${input.action}-all rule while an enabled ${conflictingRule.action}-all rule exists for this account`,
+    );
+  }
+}
+
 function parsePostbackActionInput(body: unknown, existing?: PostbackActionInput | { configJson?: string }): PostbackActionInput {
   if (!body || typeof body !== "object") {
     throw badRequest("Postback action payload must be an object");
@@ -1054,7 +1101,6 @@ function parsePostbackActionInput(body: unknown, existing?: PostbackActionInput 
       ? (existing as PostbackActionInput).enabled
       : undefined;
   const accountId = readString(value.accountId, "accountId" in (existing ?? {}) ? (existing as PostbackActionInput).accountId ?? "" : "").trim();
-  const chatJid = readString(value.chatJid, "chatJid" in (existing ?? {}) ? (existing as PostbackActionInput).chatJid ?? "" : "").trim();
   const config = value.config && typeof value.config === "object" && !Array.isArray(value.config)
     ? value.config as Record<string, unknown>
     : fallbackConfig ?? {};
@@ -1062,8 +1108,8 @@ function parsePostbackActionInput(body: unknown, existing?: PostbackActionInput 
   if (!name) {
     throw badRequest("name is required");
   }
-  if (actionType !== "agent" && actionType !== "http") {
-    throw badRequest("actionType must be agent or http");
+  if (actionType !== "http") {
+    throw badRequest("actionType must be http");
   }
   if (trigger !== "inbound_message") {
     throw badRequest("trigger must be inbound_message");
@@ -1071,7 +1117,6 @@ function parsePostbackActionInput(body: unknown, existing?: PostbackActionInput 
   if (actionType === "http" && !readString(config.url, "").trim()) {
     throw badRequest("HTTP postback actions require config.url");
   }
-  const normalizedConfig = actionType === "agent" ? normalizeAgentPostbackConfig(config) : config;
 
   return {
     name,
@@ -1079,18 +1124,8 @@ function parsePostbackActionInput(body: unknown, existing?: PostbackActionInput 
     trigger,
     ...(enabled !== undefined ? { enabled } : {}),
     ...(accountId ? { accountId } : {}),
-    ...(chatJid ? { chatJid } : {}),
-    config: normalizedConfig,
+    config,
   };
-}
-
-function normalizeAgentPostbackConfig(config: Record<string, unknown>) {
-  const normalized: Record<string, unknown> = {
-    ...config,
-    deliveryMode: "platform",
-  };
-  delete normalized.replyToWhatsApp;
-  return normalized;
 }
 
 function normalizePostbackActionType(value: string): PostbackActionInput["actionType"] | "" {
@@ -1128,7 +1163,7 @@ function parsePostbackTestEventInput(body: unknown, action: PostbackActionRecord
     ? value.event as Record<string, unknown>
     : value;
   const accountId = readString(eventValue.accountId, action.accountId ?? "test-account").trim();
-  const chatJid = readString(eventValue.chatJid, action.chatJid ?? "15551234567@s.whatsapp.net").trim();
+  const chatJid = readString(eventValue.chatJid, "15551234567@s.whatsapp.net").trim();
   const chatType = readString(eventValue.chatType, getWhatsAppChatType(chatJid));
   const participantJid = readString(eventValue.participantJid, "").trim();
   const text = readString(eventValue.text, "Postback test message").trim();

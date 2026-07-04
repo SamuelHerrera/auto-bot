@@ -4,11 +4,10 @@ import type {
   PostbackActionRunRecord,
   WhatsAppMessageEvent,
 } from "../domain/types.js";
-import type { AgentPlatformEventStore, PostbackActionStore } from "./chat-session-router.js";
+import type { PostbackActionStore } from "./chat-session-router.js";
 
 export interface PostbackActionDispatcherOptions {
   store?: PostbackActionStore;
-  agentPlatformEventStore?: AgentPlatformEventStore;
 }
 
 export class PostbackActionDispatcher {
@@ -16,8 +15,8 @@ export class PostbackActionDispatcher {
 
   async dispatchInboundMessage(event: WhatsAppMessageEvent): Promise<PostbackActionRunRecord[]> {
     const actions = this.options.store
-      ?.listPostbackActions({ accountId: event.accountId, chatJid: event.chatJid })
-      .filter((action) => action.enabled && action.trigger === "inbound_message" && matchesAction(action, event)) ?? [];
+      ?.listPostbackActions({ accountId: event.accountId })
+      .filter((action) => action.enabled && action.trigger === "inbound_message" && action.actionType === "http" && matchesAction(action, event)) ?? [];
 
     if (actions.length === 0) {
       return [];
@@ -49,9 +48,7 @@ export class PostbackActionDispatcher {
     this.options.store?.savePostbackActionRun(run);
 
     try {
-      const result = action.actionType === "agent"
-        ? await this.executeAgentAction(action, event)
-        : await this.executeHttpAction(action, event);
+      const result = await this.executeHttpAction(action, event);
       const completed: PostbackActionRunRecord = {
         ...run,
         status: "success",
@@ -72,21 +69,6 @@ export class PostbackActionDispatcher {
       this.options.store?.savePostbackActionRun(failed);
       return failed;
     }
-  }
-
-  private async executeAgentAction(action: PostbackActionRecord, event: WhatsAppMessageEvent) {
-    const config = parseConfig(action);
-    const queued = this.options.agentPlatformEventStore?.appendAgentPlatformEvent(event);
-    if (!queued) {
-      throw new Error("Agent platform event storage is not configured.");
-    }
-    return {
-      requestJson: JSON.stringify({ event, config }),
-      responseBody: JSON.stringify({
-        deliveryMode: "platform",
-        sequence: queued.sequence,
-      }),
-    };
   }
 
   private async executeHttpAction(action: PostbackActionRecord, event: WhatsAppMessageEvent) {
@@ -122,8 +104,7 @@ export class PostbackActionDispatcher {
 }
 
 function matchesAction(action: PostbackActionRecord, event: WhatsAppMessageEvent) {
-  return (!action.accountId || action.accountId === event.accountId) &&
-    (!action.chatJid || action.chatJid === event.chatJid);
+  return !action.accountId || action.accountId === event.accountId;
 }
 
 function parseConfig(action: PostbackActionRecord): Record<string, unknown> {

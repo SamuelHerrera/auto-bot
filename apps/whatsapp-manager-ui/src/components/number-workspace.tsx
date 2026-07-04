@@ -198,7 +198,6 @@ export function NumberWorkspace({
             accountId={account.accountId}
             actions={postbackActions}
             isBusy={isBusy}
-            numberRules={rules}
             onCreate={onCreatePostbackAction}
             onDelete={onDeletePostbackAction}
             onSave={onSavePostbackAction}

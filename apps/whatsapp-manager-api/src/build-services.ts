@@ -62,7 +62,6 @@ export function buildServices(config: AppConfig): AppServices {
   const deliveryStore = bridgeStore instanceof SqliteBridgeStateStore ? bridgeStore : undefined;
   const postbackDispatcher = new PostbackActionDispatcher({
     ...(postbackActionStore ? { store: postbackActionStore } : {}),
-    ...(agentPlatformEventStore ? { agentPlatformEventStore } : {}),
   });
 
   function recordAuditLog(input: AuditLogInput) {
@@ -129,9 +128,18 @@ export function buildServices(config: AppConfig): AppServices {
       return;
     }
 
+    const queued = agentPlatformEventStore?.appendAgentPlatformEvent(event);
+    if (queued) {
+      eventBus.publish("activity", {
+        accountId: event.accountId,
+        chatJid: event.chatJid,
+        source: "agent-platform",
+      });
+    }
+
     const configuredActions = postbackActionStore
-      ?.listPostbackActions({ accountId: event.accountId, chatJid: event.chatJid })
-      .filter((action) => action.enabled && action.trigger === "inbound_message") ?? [];
+      ?.listPostbackActions({ accountId: event.accountId })
+      .filter((action) => action.enabled && action.trigger === "inbound_message" && action.actionType === "http") ?? [];
     if (configuredActions.length > 0) {
       const runs = await postbackDispatcher.dispatchInboundMessage(event);
       eventBus.publish("activity", {
@@ -147,8 +155,23 @@ export function buildServices(config: AppConfig): AppServices {
         details: {
           accountId: event.accountId,
           chatJid: event.chatJid,
+          agentPlatformEventSequence: queued?.sequence ?? null,
           postbackActions: runs.length,
           failedPostbackActions: runs.filter((run) => run.status === "failed").length,
+        },
+      });
+      return;
+    }
+
+    if (queued) {
+      recordAuditLog({
+        action: "message.inbound",
+        resourceType: "whatsapp-message",
+        resourceId: event.messageId,
+        details: {
+          accountId: event.accountId,
+          chatJid: event.chatJid,
+          agentPlatformEventSequence: queued.sequence,
         },
       });
       return;

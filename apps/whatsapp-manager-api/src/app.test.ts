@@ -1,5 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { mkdtempSync, rmSync } from "node:fs";
+import { createServer } from "node:http";
+import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
@@ -267,8 +269,20 @@ describe("whatsapp-manager-api", () => {
     }
   });
 
-  it("creates postback actions and records agent action runs", async () => {
+  it("creates HTTP postback actions and records HTTP action runs", async () => {
     const dir = mkdtempSync(path.join(tmpdir(), "auto-bot-postbacks-"));
+    const webhookPayloads: unknown[] = [];
+    const webhookServer = createServer((request, response) => {
+      const chunks: Buffer[] = [];
+      request.on("data", (chunk: Buffer) => chunks.push(chunk));
+      request.on("end", () => {
+        webhookPayloads.push(JSON.parse(Buffer.concat(chunks).toString("utf8")));
+        response.writeHead(200, { "content-type": "application/json" });
+        response.end(JSON.stringify({ ok: true }));
+      });
+    });
+    await new Promise<void>((resolve) => webhookServer.listen(0, "127.0.0.1", resolve));
+    const webhookUrl = `http://127.0.0.1:${(webhookServer.address() as AddressInfo).port}/webhook`;
     const postbackConfig = loadConfig({
       ...process.env,
       API_TOKEN: "test-token",
@@ -291,26 +305,22 @@ describe("whatsapp-manager-api", () => {
           authorization: "Bearer test-token",
         },
         payload: {
-          name: "Agent inbound",
-          actionType: "agent",
+          name: "Notify CRM",
+          actionType: "http",
           trigger: "inbound_message",
           accountId: "ops-main",
           config: {
-            deliveryMode: "api",
-            replyToWhatsApp: true,
+            url: webhookUrl,
           },
         },
       });
 
       expect(createResponse.statusCode).toBe(200);
       expect(createResponse.json()).toEqual(expect.objectContaining({
-        name: "Agent inbound",
-        actionType: "agent",
+        name: "Notify CRM",
+        actionType: "http",
         accountId: "ops-main",
       }));
-      expect(JSON.parse(createResponse.json().configJson)).toEqual({
-        deliveryMode: "platform",
-      });
       const actionId = createResponse.json().id;
 
       const testResponse = await postbackApp.inject({
@@ -331,13 +341,10 @@ describe("whatsapp-manager-api", () => {
 
       expect(testResponse.statusCode).toBe(200);
       expect(testResponse.json()).toEqual(expect.objectContaining({
-        actionName: "Agent inbound",
-        actionType: "agent",
+        actionName: "Notify CRM",
+        actionType: "http",
         status: "success",
-      }));
-      expect(JSON.parse(testResponse.json().responseBody)).toEqual(expect.objectContaining({
-        deliveryMode: "platform",
-        sequence: expect.any(Number),
+        responseStatus: 200,
       }));
 
       const inboundResponse = await postbackApp.inject({
@@ -355,13 +362,28 @@ describe("whatsapp-manager-api", () => {
       });
 
       expect(inboundResponse.statusCode).toBe(200);
+      expect(inboundResponse.json().agentPlatformEvent).toEqual({ sequence: 1 });
       expect(inboundResponse.json().postbackRuns).toEqual([
         expect.objectContaining({
-          actionName: "Agent inbound",
-          actionType: "agent",
+          actionName: "Notify CRM",
+          actionType: "http",
           status: "success",
         }),
       ]);
+      expect(webhookPayloads).toEqual(expect.arrayContaining([
+        expect.objectContaining({
+          accountId: "ops-main",
+          chatJid: "12345@s.whatsapp.net",
+          messageId: "wamid.postback.test",
+          text: "test postback",
+        }),
+        expect.objectContaining({
+          accountId: "ops-main",
+          chatJid: "12345@s.whatsapp.net",
+          messageId: "wamid.postback.1",
+          text: "trigger postback",
+        }),
+      ]));
 
       const runsResponse = await postbackApp.inject({
         method: "GET",
@@ -374,17 +396,18 @@ describe("whatsapp-manager-api", () => {
       expect(runsResponse.statusCode).toBe(200);
       expect(runsResponse.json().items).toEqual(expect.arrayContaining([
         expect.objectContaining({
-          actionName: "Agent inbound",
+          actionName: "Notify CRM",
           inboundMessageId: "wamid.postback.1",
           status: "success",
         }),
         expect.objectContaining({
-          actionName: "Agent inbound",
+          actionName: "Notify CRM",
           inboundMessageId: "wamid.postback.test",
           status: "success",
         }),
       ]));
     } finally {
+      await new Promise<void>((resolve) => webhookServer.close(() => resolve()));
       await postbackApp.close();
       rmSync(dir, { recursive: true, force: true });
     }
@@ -408,22 +431,6 @@ describe("whatsapp-manager-api", () => {
     });
 
     try {
-      await platformApp.inject({
-        method: "POST",
-        url: "/postback-actions",
-        headers: {
-          authorization: "Bearer test-token",
-        },
-        payload: {
-          name: "Native agent",
-          actionType: "agent",
-          trigger: "inbound_message",
-          config: {
-            deliveryMode: "platform",
-          },
-        },
-      });
-
       const inboundResponse = await platformApp.inject({
         method: "POST",
         url: "/messages/inbound",
@@ -439,12 +446,8 @@ describe("whatsapp-manager-api", () => {
       });
 
       expect(inboundResponse.statusCode).toBe(200);
-      expect(inboundResponse.json().postbackRuns).toEqual([
-        expect.objectContaining({
-          actionName: "Native agent",
-          status: "success",
-        }),
-      ]);
+      expect(inboundResponse.json().agentPlatformEvent).toEqual({ sequence: 1 });
+      expect(inboundResponse.json().postbackRuns).toEqual([]);
 
       const eventsResponse = await platformApp.inject({
         method: "GET",
@@ -527,22 +530,6 @@ describe("whatsapp-manager-api", () => {
           matchType: "exact",
           pattern: "12345@s.whatsapp.net",
           label: "test allow",
-        },
-      });
-
-      await nativeApp.inject({
-        method: "POST",
-        url: "/postback-actions",
-        headers: { authorization: "Bearer test-token" },
-        payload: {
-          name: "Native fake adapter",
-          actionType: "agent",
-          trigger: "inbound_message",
-          accountId: "ops-main",
-          chatJid: "12345@s.whatsapp.net",
-          config: {
-            deliveryMode: "platform",
-          },
         },
       });
 
@@ -1487,9 +1474,7 @@ describe("whatsapp-manager-api", () => {
           failureStage: "agent",
         }),
       ]);
-      expect(migratedStore.getPostbackAction("legacy-action")).toEqual(expect.objectContaining({
-        actionType: "agent",
-      }));
+      expect(migratedStore.getPostbackAction("legacy-action")).toBeNull();
       expect(migratedStore.getPostbackActionRun("legacy-run")).toEqual(expect.objectContaining({
         actionType: "agent",
       }));
@@ -1637,6 +1622,117 @@ describe("whatsapp-manager-api", () => {
       });
       expect(deleted.statusCode).toBe(204);
       expect(services.numberRuleStore?.listNumberRules("ops-main")).toEqual([]);
+    } finally {
+      rmSync(dir, { force: true, recursive: true });
+    }
+  });
+
+  it("rejects opposite enabled all number rules while allowing exact and regex exceptions", async () => {
+    const dir = mkdtempSync(path.join(tmpdir(), "auto-bot-number-rules-all-conflict-"));
+    const rulesConfig = loadConfig({
+      ...process.env,
+      API_TOKEN: "test-token",
+      BRIDGE_DATABASE_FILE: path.join(dir, "bridge-state.sqlite"),
+      BRIDGE_STATE_FILE: "",
+      DATABASE_URL: "postgres://postgres:postgres@127.0.0.1:5432/auto_bot",
+      NODE_ENV: "test",
+      PORT: "3000",
+    });
+
+    try {
+      const services = createTestServices(rulesConfig);
+      app = createApp({ config: rulesConfig, services });
+
+      const denyAll = await app.inject({
+        method: "POST",
+        url: "/number-rules",
+        headers: {
+          authorization: "Bearer test-token",
+        },
+        payload: {
+          accountId: "ops-main",
+          action: "deny",
+          matchType: "all",
+        },
+      });
+      expect(denyAll.statusCode).toBe(200);
+
+      const allowExact = await app.inject({
+        method: "POST",
+        url: "/number-rules",
+        headers: {
+          authorization: "Bearer test-token",
+        },
+        payload: {
+          accountId: "ops-main",
+          action: "allow",
+          matchType: "exact",
+          pattern: "15551234567",
+        },
+      });
+      expect(allowExact.statusCode).toBe(200);
+
+      const allowRegex = await app.inject({
+        method: "POST",
+        url: "/number-rules",
+        headers: {
+          authorization: "Bearer test-token",
+        },
+        payload: {
+          accountId: "ops-main",
+          action: "allow",
+          matchType: "regex",
+          pattern: "^1555",
+        },
+      });
+      expect(allowRegex.statusCode).toBe(200);
+
+      const allowAll = await app.inject({
+        method: "POST",
+        url: "/number-rules",
+        headers: {
+          authorization: "Bearer test-token",
+        },
+        payload: {
+          accountId: "ops-main",
+          action: "allow",
+          matchType: "all",
+        },
+      });
+      expect(allowAll.statusCode).toBe(400);
+      expect(allowAll.json()).toEqual({
+        error: "Cannot add allow-all rule while an enabled deny-all rule exists for this account",
+      });
+
+      const disabledAllowAll = await app.inject({
+        method: "POST",
+        url: "/number-rules",
+        headers: {
+          authorization: "Bearer test-token",
+        },
+        payload: {
+          accountId: "ops-main",
+          action: "allow",
+          matchType: "all",
+          enabled: false,
+        },
+      });
+      expect(disabledAllowAll.statusCode).toBe(200);
+
+      const enabledAllowAll = await app.inject({
+        method: "PUT",
+        url: `/number-rules/${encodeURIComponent(disabledAllowAll.json().id)}`,
+        headers: {
+          authorization: "Bearer test-token",
+        },
+        payload: {
+          enabled: true,
+        },
+      });
+      expect(enabledAllowAll.statusCode).toBe(400);
+      expect(enabledAllowAll.json()).toEqual({
+        error: "Cannot add allow-all rule while an enabled deny-all rule exists for this account",
+      });
     } finally {
       rmSync(dir, { force: true, recursive: true });
     }
@@ -2824,7 +2920,6 @@ function createTestServices(config: AppConfig): AppServices {
   const agentPlatformEventStore = bridgeStore instanceof SqliteBridgeStateStore ? bridgeStore : undefined;
   const postbackDispatcher = new PostbackActionDispatcher({
     ...(postbackActionStore ? { store: postbackActionStore } : {}),
-    ...(agentPlatformEventStore ? { agentPlatformEventStore } : {}),
   });
 
   function recordAuditLog(input: AuditLogInput) {
@@ -2871,9 +2966,18 @@ function createTestServices(config: AppConfig): AppServices {
       return;
     }
 
+    const queued = agentPlatformEventStore?.appendAgentPlatformEvent(event);
+    if (queued) {
+      eventBus.publish("activity", {
+        accountId: event.accountId,
+        chatJid: event.chatJid,
+        source: "agent-platform",
+      });
+    }
+
     const configuredActions = postbackActionStore
-      ?.listPostbackActions({ accountId: event.accountId, chatJid: event.chatJid })
-      .filter((action) => action.enabled && action.trigger === "inbound_message") ?? [];
+      ?.listPostbackActions({ accountId: event.accountId })
+      .filter((action) => action.enabled && action.trigger === "inbound_message" && action.actionType === "http") ?? [];
     if (configuredActions.length > 0) {
       const runs = await postbackDispatcher.dispatchInboundMessage(event);
       eventBus.publish("activity", {
@@ -2889,8 +2993,23 @@ function createTestServices(config: AppConfig): AppServices {
         details: {
           accountId: event.accountId,
           chatJid: event.chatJid,
+          agentPlatformEventSequence: queued?.sequence ?? null,
           postbackActions: runs.length,
           failedPostbackActions: runs.filter((run) => run.status === "failed").length,
+        },
+      });
+      return;
+    }
+
+    if (queued) {
+      recordAuditLog({
+        action: "message.inbound",
+        resourceType: "whatsapp-message",
+        resourceId: event.messageId,
+        details: {
+          accountId: event.accountId,
+          chatJid: event.chatJid,
+          agentPlatformEventSequence: queued.sequence,
         },
       });
       return;

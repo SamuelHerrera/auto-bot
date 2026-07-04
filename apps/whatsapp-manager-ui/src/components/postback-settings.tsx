@@ -1,14 +1,12 @@
 import { useState } from "react";
 import type { FormEvent } from "react";
 
-import type { NumberRule, PostbackAction, PostbackActionType } from "../domain/models";
+import type { PostbackAction } from "../domain/models";
 import { IconButton } from "./shared";
 
 export interface PostbackActionDraft {
   name: string;
-  actionType: PostbackActionType;
   accountId: string;
-  chatJid: string;
   url: string;
 }
 
@@ -16,7 +14,6 @@ export function PostbackSettings({
   actions,
   accountId: scopedAccountId,
   isBusy,
-  numberRules,
   onCreate,
   onDelete,
   onSave,
@@ -26,7 +23,6 @@ export function PostbackSettings({
   actions: PostbackAction[];
   accountId?: string;
   isBusy: boolean;
-  numberRules: NumberRule[];
   onCreate: (input: PostbackActionDraft) => void;
   onDelete: (actionId: string) => void;
   onSave: (action: PostbackAction, input: PostbackActionDraft) => void;
@@ -35,24 +31,16 @@ export function PostbackSettings({
 }) {
   const [editingActionId, setEditingActionId] = useState("");
   const [name, setName] = useState("");
-  const [actionType, setActionType] = useState<PostbackActionType>("http");
   const [accountId, setAccountId] = useState(scopedAccountId ?? "");
-  const [chatJid, setChatJid] = useState("");
   const [url, setUrl] = useState("");
   const [isFormOpen, setIsFormOpen] = useState(false);
   const editingAction = actions.find((action) => action.id === editingActionId) ?? null;
-  const nativeActions = actions.filter((action) => action.actionType === "agent" && parseActionConfig(action).deliveryMode === "platform");
-  const nativeWarnings = nativeActions
-    .map((action) => getNativeActionRuleWarning(action, numberRules))
-    .filter(Boolean);
 
   function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const draft = {
       name,
-      actionType,
       accountId: scopedAccountId ?? accountId,
-      chatJid,
       url,
     };
     if (editingAction) {
@@ -74,9 +62,7 @@ export function PostbackSettings({
     const config = parseActionConfig(action);
     setEditingActionId(action.id);
     setName(action.name);
-    setActionType(action.actionType);
     setAccountId(scopedAccountId ?? action.accountId ?? "");
-    setChatJid(action.chatJid ?? "");
     setUrl(typeof config.url === "string" ? config.url : "");
     setIsFormOpen(true);
   }
@@ -84,9 +70,7 @@ export function PostbackSettings({
   function clearForm() {
     setEditingActionId("");
     setName("");
-    setActionType("http");
     setAccountId(scopedAccountId ?? "");
-    setChatJid("");
     setUrl("");
   }
 
@@ -111,12 +95,6 @@ export function PostbackSettings({
           Create
         </IconButton>
       </div>
-
-      {nativeWarnings.length > 0 ? (
-        <div className="postback-warning-list">
-          {nativeWarnings.map((warning) => <p key={warning}>{warning}</p>)}
-        </div>
-      ) : null}
 
       <div className="postback-master-detail">
         <div className="postback-list" aria-label="Postback actions">
@@ -155,33 +133,16 @@ export function PostbackSettings({
                   <span>Name</span>
                   <input autoFocus value={name} onChange={(event) => setName(event.target.value)} placeholder="Notify CRM" />
                 </label>
-                <label className="field">
-                  <span>Action</span>
-                  <select value={actionType} onChange={(event) => setActionType(event.target.value as PostbackActionType)}>
-                    <option value="http">HTTP webhook</option>
-                    <option value="agent">Agent callback</option>
-                  </select>
-                </label>
                 {scopedAccountId ? null : (
                   <label className="field">
                     <span>Account scope</span>
                     <input value={accountId} onChange={(event) => setAccountId(event.target.value)} placeholder="All accounts" />
                   </label>
                 )}
-                <label className="field">
-                  <span>Chat scope</span>
-                  <input value={chatJid} onChange={(event) => setChatJid(event.target.value)} placeholder="All chats in this account" />
+                <label className="field postback-url-field">
+                  <span>Webhook URL</span>
+                  <input value={url} onChange={(event) => setUrl(event.target.value)} placeholder="https://example.com/webhook" />
                 </label>
-                {actionType === "http" ? (
-                  <label className="field postback-url-field">
-                    <span>Webhook URL</span>
-                    <input value={url} onChange={(event) => setUrl(event.target.value)} placeholder="https://example.com/webhook" />
-                  </label>
-                ) : (
-                  <div className="postback-mode-note">
-                    Platform queue - adapter replies later
-                  </div>
-                )}
               </div>
               <div className="postback-detail-actions">
                 <IconButton icon="mdi:close" label="Cancel" type="button" variant="secondary" onClick={closeForm} disabled={isBusy}>
@@ -220,34 +181,5 @@ function parseActionConfig(action: PostbackAction): Record<string, unknown> {
 }
 
 function getActionSummary(action: PostbackAction) {
-  const mode = action.actionType === "agent"
-    ? "Platform queue"
-    : "HTTP";
-  return `${mode} | ${action.accountId || "all accounts"} | ${action.chatJid || "all chats"}`;
-}
-
-function getNativeActionRuleWarning(action: PostbackAction, rules: NumberRule[]) {
-  if (!action.accountId || !action.chatJid) {
-    return "";
-  }
-  const chatJid = action.chatJid;
-  const accountRules = rules.filter((rule) => rule.enabled && rule.accountId === action.accountId);
-  const hasDenyAll = accountRules.some((rule) => rule.action === "deny" && rule.matchType === "all");
-  if (!hasDenyAll) {
-    return "";
-  }
-  const hasExactAllow = accountRules.some((rule) => rule.action === "allow" && rule.matchType === "exact" && rule.pattern === chatJid);
-  const hasRegexAllow = accountRules.some((rule) => {
-    if (rule.action !== "allow" || rule.matchType !== "regex") {
-      return false;
-    }
-    try {
-      return new RegExp(rule.pattern).test(chatJid);
-    } catch {
-      return false;
-    }
-  });
-  return hasExactAllow || hasRegexAllow
-    ? ""
-    : `${action.name} is scoped to ${chatJid}, but ${action.accountId} has deny-all rules and no matching allow rule.`;
+  return `HTTP | ${action.accountId || "all accounts"} | all chats`;
 }

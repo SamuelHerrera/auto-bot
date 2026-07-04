@@ -1052,11 +1052,10 @@ export function App() {
         method: "POST",
         body: JSON.stringify({
           name: draft.name,
-          actionType: draft.actionType,
+          actionType: "http",
           trigger: "inbound_message",
           enabled: true,
           accountId: draft.accountId || undefined,
-          chatJid: draft.chatJid || undefined,
           config: buildPostbackConfig(draft),
         }),
       });
@@ -1071,11 +1070,10 @@ export function App() {
         method: "PUT",
         body: JSON.stringify({
           name: draft.name,
-          actionType: draft.actionType,
+          actionType: "http",
           trigger: "inbound_message",
           enabled: action.enabled,
           accountId: draft.accountId || undefined,
-          chatJid: draft.chatJid || undefined,
           config: buildPostbackConfig(draft),
         }),
       });
@@ -1091,7 +1089,7 @@ export function App() {
         body: JSON.stringify({
           event: {
             accountId: action.accountId || activeAccountId || accounts[0]?.accountId || "test-account",
-            chatJid: action.chatJid || activeChatJid || "15551234567@s.whatsapp.net",
+            chatJid: activeChatJid || "15551234567@s.whatsapp.net",
             text: "Postback test message",
           },
         }),
@@ -1102,21 +1100,17 @@ export function App() {
   }
 
   function buildPostbackConfig(draft: PostbackActionDraft) {
-    return draft.actionType === "http"
-      ? {
-          url: draft.url,
-          method: "POST",
-          payloadTemplate: {
-            accountId: "{{event.accountId}}",
-            chatJid: "{{event.chatJid}}",
-            messageId: "{{event.messageId}}",
-            text: "{{event.text}}",
-            timestamp: "{{event.timestamp}}",
-          },
-        }
-      : {
-          deliveryMode: "platform",
-        };
+    return {
+      url: draft.url,
+      method: "POST",
+      payloadTemplate: {
+        accountId: "{{event.accountId}}",
+        chatJid: "{{event.chatJid}}",
+        messageId: "{{event.messageId}}",
+        text: "{{event.text}}",
+        timestamp: "{{event.timestamp}}",
+      },
+    };
   }
 
   async function togglePostbackAction(action: PostbackAction, enabled: boolean) {
@@ -1125,11 +1119,10 @@ export function App() {
         method: "PUT",
         body: JSON.stringify({
           name: action.name,
-          actionType: action.actionType,
+          actionType: "http",
           trigger: action.trigger,
           enabled,
           accountId: action.accountId,
-          chatJid: action.chatJid,
           config: parsePostbackConfig(action.configJson),
         }),
       });
@@ -1261,7 +1254,7 @@ export function App() {
     null;
   const failedDeliveries = deliveries.filter((delivery) => delivery.status === "failed");
   const activeAccountFailedDeliveries = failedDeliveries.filter((delivery) => delivery.accountId === activeAccountId);
-  const activeAccountPostbackActions = postbackActions.filter((action) => action.accountId === activeAccountId);
+  const activeAccountPostbackActions = postbackActions.filter((action) => action.accountId === activeAccountId && action.actionType === "http");
   const auditLogsWithPostbackRuns = useMemo(
     () => sortAuditLogs([
       ...auditLogs,

@@ -343,7 +343,7 @@ export interface AuditLogStore {
 }
 
 export interface PostbackActionStore {
-  listPostbackActions(input?: { accountId?: string; chatJid?: string }): PostbackActionRecord[];
+  listPostbackActions(input?: { accountId?: string }): PostbackActionRecord[];
   getPostbackAction(id: string): PostbackActionRecord | null;
   createPostbackAction(input: PostbackActionInput): PostbackActionRecord;
   updatePostbackAction(id: string, input: Partial<PostbackActionInput>): PostbackActionRecord | null;

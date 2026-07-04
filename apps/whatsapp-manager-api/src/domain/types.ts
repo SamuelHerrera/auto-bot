@@ -214,7 +214,6 @@ export interface PostbackActionInput {
   trigger?: PostbackTrigger;
   actionType: PostbackActionType;
   accountId?: string;
-  chatJid?: WhatsAppChatId;
   config?: Record<string, unknown>;
 }
 
