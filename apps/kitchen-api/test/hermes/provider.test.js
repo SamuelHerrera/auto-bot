@@ -48,6 +48,20 @@ describe("Hermes providers", () => {
     });
   });
 
+  it("does not turn unrelated chat into a draft order", () => {
+    const provider = new HermesRulesProvider();
+
+    expect(() =>
+      provider.decideAction({
+        message: {
+          text: "hola",
+          phone: "+529991112233",
+          kitchenId: "2"
+        }
+      })
+    ).toThrowError("unable_to_decide_action");
+  });
+
   it("raises a clear error when http provider mode is selected without required configuration", () => {
     const provider = new HermesMisconfiguredProvider("http", {
       reason: "missing_provider_url",

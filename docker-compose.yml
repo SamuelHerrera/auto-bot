@@ -1,7 +1,26 @@
 services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-auto_bot}
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+    ports:
+      - "${POSTGRES_PORT:-5433}:5432"
+    volumes:
+      - ${AUTO_BOT_POSTGRES_DATA_DIR:-./data/postgres}:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
   auto-bot:
     build:
       context: .
+    depends_on:
+      postgres:
+        condition: service_healthy
     environment:
       HERMES_HOME: ${HERMES_HOME:-/opt/data}
       CODEX_HOME: ${CODEX_HOME:-/opt/data/.codex}
@@ -16,6 +35,15 @@ services:
       ZEROTIER_AUTOSTART: ${ZEROTIER_AUTOSTART:-0}
       ZEROTIER_NETWORK_ID: ${ZEROTIER_NETWORK_ID:-}
       PORT: 3000
+      DATABASE_URL: ${DATABASE_URL:-postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB:-auto_bot}}
+      KITCHEN_API_PORT: ${KITCHEN_API_PORT:-3001}
+      KITCHEN_API_BASE_URL: ${KITCHEN_API_BASE_URL:-http://127.0.0.1:3001}
+      KITCHEN_DEFAULT_ID: ${KITCHEN_DEFAULT_ID:-1}
+      HERMES_KITCHENIA_API_KEY: ${HERMES_KITCHENIA_API_KEY:-local-kitchenia-internal-key}
+      HERMES_KITCHENIA_AUTH_HEADER: ${HERMES_KITCHENIA_AUTH_HEADER:-Authorization}
+      HERMES_KITCHENIA_AUTH_SCHEME: ${HERMES_KITCHENIA_AUTH_SCHEME:-Bearer}
+      HERMES_PROVIDER_MODE: ${HERMES_PROVIDER_MODE:-rules}
+      HERMES_RUNTIME_ROUTE_ENABLED: ${HERMES_RUNTIME_ROUTE_ENABLED:-true}
       API_TOKEN: ${WHATSAPP_MANAGER_API_TOKEN:-local-dev-token}
       CORS_ORIGIN: ${WHATSAPP_MANAGER_UI_CORS_ORIGIN:-*}
       BAILEYS_STATE_DIR: ${BAILEYS_STATE_DIR:-/opt/data/whatsapp-manager/baileys}
@@ -45,6 +73,7 @@ services:
     ports:
       - "${SSH_PORT:-2222}:${SSH_PORT:-2222}"
       - "${WHATSAPP_MANAGER_API_PORT:-3000}:3000"
+      - "${KITCHEN_API_PORT:-3001}:3001"
       - "${WHATSAPP_MANAGER_UI_PORT:-4173}:4173"
     volumes:
       - ${AUTO_BOT_DATA_DIR:-./data}:/opt/data

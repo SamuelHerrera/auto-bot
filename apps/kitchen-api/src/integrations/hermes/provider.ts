@@ -24,7 +24,7 @@ export type HermesHttpProviderOptions = {
 export class HermesRulesProvider implements HermesRuntimeBridgeProvider {
   decideAction(input: HermesRuntimeBridgeInput): HermesOrchestratorRequest {
     return decideHermesActionByRules(input, {
-      fallbackToDraft: true
+      fallbackToDraft: false
     });
   }
 }

@@ -9,3 +9,6 @@ playwright-report/
 *.log
 .env
 .env.*
+apps/printer-android/.gradle/
+apps/printer-android/build/
+apps/printer-android/app/build/

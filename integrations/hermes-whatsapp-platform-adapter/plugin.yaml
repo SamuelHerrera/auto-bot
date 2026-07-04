@@ -41,3 +41,15 @@ optional_env:
     description: "Optional default chat in accountId:chatJid form for cron and startup notices"
     prompt: "Home channel"
     password: false
+  - name: KITCHEN_API_BASE_URL
+    description: "Optional KitchenIA API base URL used to execute kitchen messages before generic Hermes fallback"
+    prompt: "KitchenIA API URL"
+    password: false
+  - name: KITCHEN_DEFAULT_ID
+    description: "Default KitchenIA kitchen id for WhatsApp messages that do not name one"
+    prompt: "KitchenIA default kitchen id"
+    password: false
+  - name: HERMES_KITCHENIA_API_KEY
+    description: "KitchenIA internal API key for /hermes/messages"
+    prompt: "KitchenIA API key"
+    password: true

@@ -372,5 +372,9 @@ function buildAgentAdapter(config: AppConfig): AgentAdapter {
     apiKey: config.internalApiKey,
     baseUrl: config.AGENT_API_BASE_URL,
     model: config.AGENT_API_MODEL,
+    kitchenApiBaseUrl: config.KITCHEN_API_BASE_URL,
+    kitcheniaApiKey: config.HERMES_KITCHENIA_API_KEY,
+    kitcheniaAuthHeader: config.HERMES_KITCHENIA_AUTH_HEADER,
+    kitcheniaAuthScheme: config.HERMES_KITCHENIA_AUTH_SCHEME,
   });
 }

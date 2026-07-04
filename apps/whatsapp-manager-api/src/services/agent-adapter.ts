@@ -11,6 +11,10 @@ export interface HermesAgentAdapterOptions {
   baseUrl: string;
   apiKey: string;
   model: string;
+  kitchenApiBaseUrl?: string;
+  kitcheniaApiKey?: string;
+  kitcheniaAuthHeader?: string;
+  kitcheniaAuthScheme?: string;
 }
 
 export class HermesAgentAdapter implements AgentAdapter {
@@ -29,8 +33,7 @@ export class HermesAgentAdapter implements AgentAdapter {
         id: sessionId,
         model: this.options.model,
         title: sessionKey,
-        system_prompt:
-          "You are replying to a WhatsApp conversation routed through an external bridge. Return only the message text to send back.",
+        system_prompt: this.getSystemPrompt(),
       }),
     });
 
@@ -145,6 +148,29 @@ export class HermesAgentAdapter implements AgentAdapter {
       "content-type": "application/json",
       ...(sessionKey ? { "x-hermes-session-key": sessionKey } : {}),
     };
+  }
+
+  private getSystemPrompt() {
+    const kitchenUrl = this.options.kitchenApiBaseUrl?.replace(/\/+$/, "");
+    const authHeader = this.options.kitcheniaAuthHeader || "Authorization";
+    const authScheme = this.options.kitcheniaAuthScheme || "Bearer";
+    const authValue = this.options.kitcheniaApiKey
+      ? `${authScheme} ${this.options.kitcheniaApiKey}`.trim()
+      : "";
+
+    return [
+      "You are replying to a WhatsApp conversation routed through an external bridge.",
+      "Return only the message text to send back to WhatsApp.",
+      kitchenUrl
+        ? [
+          "When the user wants to interact with the kitchen backend, call the KitchenIA backend instead of inventing state.",
+          `KitchenIA Hermes transport endpoint: POST ${kitchenUrl}/hermes/messages`,
+          "Send JSON with message.text, message.phone when available, message.kitchenId when known, and context from the WhatsApp metadata.",
+          "For local manual testing, the seeded kitchen has kitchenId 1 and includes a Taco menu item.",
+          authValue ? `Use header ${authHeader}: ${authValue}` : `Use header ${authHeader} if a KitchenIA token is provided.`,
+        ].join("\n")
+        : "",
+    ].filter(Boolean).join("\n\n");
   }
 }
 

@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!--
+        Compose supplies the real Material3 theme at runtime; this XML theme
+        only needs to be a valid, action-bar-less parent for the Activity.
+        Using a platform parent avoids pulling in the Material Components XML lib.
+    -->
+    <style name="Theme.PrinterAndroid" parent="android:Theme.Material.Light.NoActionBar" />
+</resources>
