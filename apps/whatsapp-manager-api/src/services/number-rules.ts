@@ -94,6 +94,7 @@ function getNumberCandidates(event: WhatsAppMessageEvent) {
     event.participantJid,
     event.chatJid,
     event.chatId,
+    ...(event.alternateJids ?? []),
   ].flatMap((value) => normalizeCandidates(value)).filter(unique);
 }
 

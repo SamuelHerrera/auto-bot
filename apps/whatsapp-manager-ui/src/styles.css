@@ -2049,6 +2049,28 @@ button {
   min-height: 0;
 }
 
+.postback-master-detail-single {
+  grid-template-columns: minmax(320px, 680px);
+}
+
+.postback-empty-inline {
+  align-items: start;
+  color: #66746c;
+  display: grid;
+  gap: 4px;
+  max-width: 520px;
+  padding: 10px 0 0;
+}
+
+.postback-empty-inline strong {
+  color: #344139;
+  font-size: 0.95rem;
+}
+
+.postback-empty-inline span {
+  font-size: 0.88rem;
+}
+
 .postback-row {
   align-items: center;
   background: #ffffff;

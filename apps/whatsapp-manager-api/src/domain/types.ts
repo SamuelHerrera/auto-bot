@@ -48,6 +48,7 @@ export interface WhatsAppMessageEvent {
   chatJid: WhatsAppChatId;
   chatType: WhatsAppChatType;
   senderJid: string;
+  alternateJids?: string[];
   sessionKey: string;
   messageId: string;
   participantJid?: string;

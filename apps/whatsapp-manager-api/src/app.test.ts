@@ -1108,18 +1108,13 @@ describe("whatsapp-manager-api", () => {
 
       const secondServices = createTestServices(persistedConfig);
 
-      expect(await secondServices.router.getMappings()).toEqual([
+      expect(await secondServices.router.getMappings()).toEqual([]);
+      expect(secondServices.deliveryStore?.listDeliveries()).toEqual([]);
+      expect(secondServices.agentPlatformEventStore?.listAgentPlatformEvents()).toEqual([
         expect.objectContaining({
           accountId: "ops-main",
           sessionKey: "whatsapp:ops-main:direct:12345@s.whatsapp.net",
-        }),
-      ]);
-      expect(secondServices.deliveryStore?.listDeliveries()).toEqual([
-        expect.objectContaining({
-          accountId: "ops-main",
-          inboundMessageId: "wamid.sqlite",
-          status: "sent",
-          attempts: 1,
+          messageId: "wamid.sqlite",
         }),
       ]);
     } finally {
@@ -1180,15 +1175,21 @@ describe("whatsapp-manager-api", () => {
       const gateway = services.whatsappGateway as TestWhatsAppGateway;
       app = createApp({ config: retryConfig, services });
 
-      await gateway.injectInboundMessage({
+      const event = await gateway.normalizeInboundEvent({
         accountId: "ops-main",
         chatId: "12345@s.whatsapp.net",
         messageId: "wamid.retry",
         senderId: "12345@s.whatsapp.net",
         text: "retry me",
       });
+      const sentDelivery = await sendReplyWithDeliveryRecord({
+        ...(services.deliveryStore ? { deliveryStore: services.deliveryStore } : {}),
+        event,
+        text: "retry me response",
+        whatsappGateway: gateway,
+      });
 
-      const delivery = services.deliveryStore?.listDeliveries()[0];
+      const delivery = sentDelivery;
       expect(delivery).toEqual(expect.objectContaining({ status: "sent" }));
 
       services.deliveryStore?.saveDelivery({
@@ -1501,21 +1502,34 @@ describe("whatsapp-manager-api", () => {
       app = createApp({ config: retryConfig, services });
 
       vi.spyOn(services.agentAdapter, "sendMessage")
-        .mockRejectedValueOnce(new Error("forced agent failure"))
         .mockResolvedValueOnce({
           sessionId: "retry-session",
           outputText: "Agent retry reply",
         });
 
-      await expect(
-        gateway.injectInboundMessage({
-          accountId: "ops-main",
-          chatId: "12345@s.whatsapp.net",
-          messageId: "wamid.agent.retry",
-          senderId: "12345@s.whatsapp.net",
-          text: "retry agent",
-        }),
-      ).resolves.toBeUndefined();
+      const event = await gateway.normalizeInboundEvent({
+        accountId: "ops-main",
+        chatId: "12345@s.whatsapp.net",
+        messageId: "wamid.agent.retry",
+        senderId: "12345@s.whatsapp.net",
+        text: "retry agent",
+      });
+      services.deliveryStore?.saveDelivery({
+        id: `${event.accountId}:${event.chatJid}:${event.messageId}`,
+        accountId: event.accountId,
+        chatJid: event.chatJid,
+        chatType: event.chatType,
+        sessionKey: event.sessionKey,
+        inboundMessageId: event.messageId,
+        inboundText: event.text,
+        outboundText: "",
+        status: "failed",
+        attempts: 0,
+        failureStage: "agent",
+        error: "forced agent failure",
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      });
 
       const delivery = services.deliveryStore?.listDeliveries()[0];
       expect(delivery).toEqual(
@@ -2016,15 +2030,11 @@ describe("whatsapp-manager-api", () => {
         text: "allowed by allow list",
       });
 
-      expect(await services.router.getMappings()).toEqual([
+      expect(await services.router.getMappings()).toEqual([]);
+      expect(services.agentPlatformEventStore?.listAgentPlatformEvents()).toEqual([
         expect.objectContaining({
           chatJid: "12345@s.whatsapp.net",
-        }),
-      ]);
-      expect(gateway.getSentMessages()).toEqual([
-        expect.objectContaining({
-          chatJid: "12345@s.whatsapp.net",
-          text: "test-agent-response: allowed by allow list",
+          messageId: "wamid.allowed",
         }),
       ]);
       expect(services.deliveryStore?.listDeliveries()).toEqual(
@@ -2032,10 +2042,6 @@ describe("whatsapp-manager-api", () => {
           expect.objectContaining({
             inboundMessageId: "wamid.not-allowed",
             status: "ignored",
-          }),
-          expect.objectContaining({
-            inboundMessageId: "wamid.allowed",
-            status: "sent",
           }),
         ]),
       );
@@ -2089,15 +2095,11 @@ describe("whatsapp-manager-api", () => {
         text: "allowed by first allow",
       });
 
-      expect(await services.router.getMappings()).toEqual([
+      expect(await services.router.getMappings()).toEqual([]);
+      expect(services.agentPlatformEventStore?.listAgentPlatformEvents()).toEqual([
         expect.objectContaining({
           chatJid: "12345@s.whatsapp.net",
-        }),
-      ]);
-      expect(gateway.getSentMessages()).toEqual([
-        expect.objectContaining({
-          chatJid: "12345@s.whatsapp.net",
-          text: "test-agent-response: allowed by first allow",
+          messageId: "wamid.default-deny-allowed",
         }),
       ]);
       expect(services.deliveryStore?.listDeliveries()).toEqual(
@@ -2106,12 +2108,69 @@ describe("whatsapp-manager-api", () => {
             inboundMessageId: "wamid.default-deny-not-allowed",
             status: "ignored",
           }),
-          expect.objectContaining({
-            inboundMessageId: "wamid.default-deny-allowed",
-            status: "sent",
-          }),
         ]),
       );
+    } finally {
+      rmSync(dir, { force: true, recursive: true });
+    }
+  });
+
+  it("matches phone-number allow rules against Baileys LID alternate JIDs", async () => {
+    const dir = mkdtempSync(path.join(tmpdir(), "auto-bot-number-rules-lid-alt-"));
+    const rulesConfig = loadConfig({
+      ...process.env,
+      API_TOKEN: "test-token",
+      BRIDGE_DATABASE_FILE: path.join(dir, "bridge-state.sqlite"),
+      BRIDGE_STATE_FILE: "",
+      DATABASE_URL: "postgres://postgres:postgres@127.0.0.1:5432/auto_bot",
+      NODE_ENV: "test",
+      PORT: "3000",
+    });
+
+    try {
+      const services = createTestServices(rulesConfig);
+      app = createApp({ config: rulesConfig, services });
+      services.numberRuleStore?.createNumberRule({
+        accountId: "manual",
+        action: "allow",
+        matchType: "exact",
+        pattern: "5219994709930",
+        label: "samuelherrerafuente",
+      });
+      services.numberRuleStore?.createNumberRule({
+        accountId: "manual",
+        action: "deny",
+        matchType: "all",
+        label: "Default deny all",
+      });
+
+      const response = await app.inject({
+        method: "POST",
+        url: "/messages/inbound",
+        headers: {
+          authorization: "Bearer test-token",
+        },
+        payload: {
+          accountId: "manual",
+          chatJid: "83038931275996@lid",
+          messageId: "wamid.lid.alt.allowed",
+          alternateJids: ["5219994709930@s.whatsapp.net"],
+          text: "allowed through remoteJidAlt",
+        },
+      });
+
+      expect(response.statusCode).toBe(200);
+      expect(response.json()).toEqual(expect.objectContaining({
+        agentPlatformEvent: { sequence: 1 },
+      }));
+      expect(services.deliveryStore?.listDeliveries()).toEqual([]);
+      expect(services.agentPlatformEventStore?.listAgentPlatformEvents()).toEqual([
+        expect.objectContaining({
+          chatJid: "83038931275996@lid",
+          messageId: "wamid.lid.alt.allowed",
+          text: "allowed through remoteJidAlt",
+        }),
+      ]);
     } finally {
       rmSync(dir, { force: true, recursive: true });
     }
@@ -2509,24 +2568,13 @@ describe("whatsapp-manager-api", () => {
             unreadCount: 2,
           }),
         ]);
-        expect(sessions.json().items).toEqual([
-          expect.objectContaining({
-            accountId: "ops-main",
-            chatJid: "83038931275996@lid",
-          }),
-        ]);
-        expect(deliveries.json().items).toEqual([
-          expect.objectContaining({
-            accountId: "ops-main",
-            chatJid: "83038931275996@lid",
-            inboundMessageId: "wamid.live.1",
-          }),
-        ]);
-        expect(services.deliveryStore?.listDeliveries()).toEqual([
+        expect(sessions.json().items).toEqual([]);
+        expect(deliveries.json().items).toEqual([]);
+        expect(services.deliveryStore?.listDeliveries()).toEqual([]);
+        expect(services.agentPlatformEventStore?.listAgentPlatformEvents()).toEqual([
           expect.objectContaining({
             chatJid: "83038931275996@lid",
-            inboundMessageId: "wamid.live.1",
-            status: "sent",
+            messageId: "wamid.live.1",
           }),
         ]);
       } finally {
@@ -3197,6 +3245,9 @@ class TestWhatsAppGateway implements WhatsAppGateway {
         : getWhatsAppChatType(chatJid);
     const participantJid =
       typeof candidate.participantJid === "string" ? candidate.participantJid : undefined;
+    const alternateJids = Array.isArray(candidate.alternateJids)
+      ? candidate.alternateJids.filter((value): value is string => typeof value === "string" && Boolean(value.trim()))
+      : [];
 
     if (!chatJid || !text) {
       throw new Error("Inbound payload must contain chatJid/chatId and text.");
@@ -3219,6 +3270,7 @@ class TestWhatsAppGateway implements WhatsAppGateway {
       chatType,
       senderJid: typeof candidate.senderJid === "string" ? candidate.senderJid : chatJid,
       ...(participantJid ? { participantJid } : {}),
+      ...(alternateJids.length > 0 ? { alternateJids } : {}),
       sessionKey,
       chatId: chatJid,
       text,

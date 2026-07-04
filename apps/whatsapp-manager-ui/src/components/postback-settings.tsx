@@ -96,77 +96,85 @@ export function PostbackSettings({
         </IconButton>
       </div>
 
-      <div className="postback-master-detail">
-        <div className="postback-list" aria-label="Postback actions">
-          {actions.map((action) => (
-            <article className={`postback-row${action.id === editingActionId ? " postback-row-active" : ""}`} key={action.id}>
-              <button className="postback-row-main" type="button" onClick={() => editAction(action)} aria-pressed={action.id === editingActionId}>
-                <strong>{action.name}</strong>
-                <span>{getActionSummary(action)}</span>
-              </button>
-              <label className="switch-label">
-                <input type="checkbox" checked={action.enabled} onChange={(event) => onToggle(action, event.target.checked)} />
-                <span>{action.enabled ? "Enabled" : "Disabled"}</span>
-              </label>
-              <div className="postback-row-actions">
-                <IconButton icon="mdi:trash-can-outline" label={`Delete ${action.name}`} variant="danger" onClick={() => deleteAction(action)} disabled={isBusy} />
-              </div>
-            </article>
-          ))}
-          {actions.length === 0 ? <p className="muted-copy">No postback actions configured for this account.</p> : null}
+      {actions.length === 0 && !isFormOpen ? (
+        <div className="postback-empty-inline">
+          <strong>No postbacks</strong>
+          <span>External HTTP webhooks will appear here.</span>
         </div>
-
-        <section className="postback-detail-panel" aria-labelledby="postback-detail-title">
-          {isFormOpen ? (
-            <form onSubmit={submit}>
-              <div className="postback-detail-header">
-                <div>
-                  <span className="panel-kicker">Postback</span>
-                  <h3 id="postback-detail-title">{editingAction ? "Edit postback" : "Create postback"}</h3>
-                  <p className="dialog-subtitle">{scopedAccountId ?? "All accounts"}</p>
-                </div>
-                <IconButton icon="mdi:close" label="Close postback form" variant="text" onClick={closeForm} type="button" />
-              </div>
-
-              <div className="postback-form">
-                <label className="field">
-                  <span>Name</span>
-                  <input autoFocus value={name} onChange={(event) => setName(event.target.value)} placeholder="Notify CRM" />
-                </label>
-                {scopedAccountId ? null : (
-                  <label className="field">
-                    <span>Account scope</span>
-                    <input value={accountId} onChange={(event) => setAccountId(event.target.value)} placeholder="All accounts" />
+      ) : (
+        <div className={`postback-master-detail${actions.length === 0 ? " postback-master-detail-single" : ""}`}>
+          {actions.length > 0 ? (
+            <div className="postback-list" aria-label="Postback actions">
+              {actions.map((action) => (
+                <article className={`postback-row${action.id === editingActionId ? " postback-row-active" : ""}`} key={action.id}>
+                  <button className="postback-row-main" type="button" onClick={() => editAction(action)} aria-pressed={action.id === editingActionId}>
+                    <strong>{action.name}</strong>
+                    <span>{getActionSummary(action)}</span>
+                  </button>
+                  <label className="switch-label">
+                    <input type="checkbox" checked={action.enabled} onChange={(event) => onToggle(action, event.target.checked)} />
+                    <span>{action.enabled ? "Enabled" : "Disabled"}</span>
                   </label>
-                )}
-                <label className="field postback-url-field">
-                  <span>Webhook URL</span>
-                  <input value={url} onChange={(event) => setUrl(event.target.value)} placeholder="https://example.com/webhook" />
-                </label>
-              </div>
-              <div className="postback-detail-actions">
-                <IconButton icon="mdi:close" label="Cancel" type="button" variant="secondary" onClick={closeForm} disabled={isBusy}>
-                  Cancel
-                </IconButton>
-                {editingAction ? (
-                  <IconButton icon="mdi:play-outline" label={`Test ${editingAction.name}`} type="button" variant="secondary" onClick={() => onTest(editingAction)} disabled={isBusy}>
-                    Test
-                  </IconButton>
-                ) : null}
-                <IconButton icon={editingAction ? "mdi:content-save-outline" : "mdi:plus"} label={editingAction ? "Save postback" : "Create postback"} type="submit" disabled={isBusy || !name.trim()}>
-                  {editingAction ? "Save" : "Create"}
-                </IconButton>
-              </div>
-            </form>
-          ) : (
-            <div className="postback-detail-empty">
-              <span className="panel-kicker">Postback</span>
-              <h3 id="postback-detail-title">Select a postback</h3>
-              <p>Choose an action from the list or create a new one.</p>
+                  <div className="postback-row-actions">
+                    <IconButton icon="mdi:trash-can-outline" label={`Delete ${action.name}`} variant="danger" onClick={() => deleteAction(action)} disabled={isBusy} />
+                  </div>
+                </article>
+              ))}
             </div>
-          )}
-        </section>
-      </div>
+          ) : null}
+
+          <section className="postback-detail-panel" aria-labelledby="postback-detail-title">
+            {isFormOpen ? (
+              <form onSubmit={submit}>
+                <div className="postback-detail-header">
+                  <div>
+                    <span className="panel-kicker">Postback</span>
+                    <h3 id="postback-detail-title">{editingAction ? "Edit postback" : "Create postback"}</h3>
+                    <p className="dialog-subtitle">{scopedAccountId ?? "All accounts"}</p>
+                  </div>
+                  <IconButton icon="mdi:close" label="Close postback form" variant="text" onClick={closeForm} type="button" />
+                </div>
+
+                <div className="postback-form">
+                  <label className="field">
+                    <span>Name</span>
+                    <input autoFocus value={name} onChange={(event) => setName(event.target.value)} placeholder="Notify CRM" />
+                  </label>
+                  {scopedAccountId ? null : (
+                    <label className="field">
+                      <span>Account scope</span>
+                      <input value={accountId} onChange={(event) => setAccountId(event.target.value)} placeholder="All accounts" />
+                    </label>
+                  )}
+                  <label className="field postback-url-field">
+                    <span>Webhook URL</span>
+                    <input value={url} onChange={(event) => setUrl(event.target.value)} placeholder="https://example.com/webhook" />
+                  </label>
+                </div>
+                <div className="postback-detail-actions">
+                  <IconButton icon="mdi:close" label="Cancel" type="button" variant="secondary" onClick={closeForm} disabled={isBusy}>
+                    Cancel
+                  </IconButton>
+                  {editingAction ? (
+                    <IconButton icon="mdi:play-outline" label={`Test ${editingAction.name}`} type="button" variant="secondary" onClick={() => onTest(editingAction)} disabled={isBusy}>
+                      Test
+                    </IconButton>
+                  ) : null}
+                  <IconButton icon={editingAction ? "mdi:content-save-outline" : "mdi:plus"} label={editingAction ? "Save postback" : "Create postback"} type="submit" disabled={isBusy || !name.trim()}>
+                    {editingAction ? "Save" : "Create"}
+                  </IconButton>
+                </div>
+              </form>
+            ) : (
+              <div className="postback-detail-empty">
+                <span className="panel-kicker">Postback</span>
+                <h3 id="postback-detail-title">Select a postback</h3>
+                <p>Choose an action from the list or create a new one.</p>
+              </div>
+            )}
+          </section>
+        </div>
+      )}
     </section>
   );
 }

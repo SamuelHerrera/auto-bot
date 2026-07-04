@@ -279,6 +279,9 @@ export class BaileysWhatsAppGateway implements WhatsAppGateway {
         : getWhatsAppChatType(chatJid);
     const participantJid =
       typeof candidate.participantJid === "string" ? candidate.participantJid : undefined;
+    const alternateJids = Array.isArray(candidate.alternateJids)
+      ? candidate.alternateJids.filter((value): value is string => typeof value === "string" && Boolean(value.trim()))
+      : [];
 
     if (!chatJid || (!text && media.length === 0)) {
       throw new Error("Inbound payload must contain chatJid/chatId and text or media.");
@@ -301,6 +304,7 @@ export class BaileysWhatsAppGateway implements WhatsAppGateway {
       chatType,
       senderJid: typeof candidate.senderJid === "string" ? candidate.senderJid : chatJid,
       ...(participantJid ? { participantJid } : {}),
+      ...(alternateJids.length > 0 ? { alternateJids } : {}),
       sessionKey,
       chatId: chatJid,
       text,
@@ -660,6 +664,8 @@ async function readLinkedAccountIdFromCreds(accountPath: string) {
 
 function normalizeBaileysMessage(accountId: string, message: WAMessage): WhatsAppMessageEvent | null {
   const chatJid = message.key.remoteJid;
+  const remoteJidAlt = readMessageKeyString(message.key, "remoteJidAlt");
+  const participantAlt = readMessageKeyString(message.key, "participantAlt");
   const text = extractText(message.message ?? undefined);
   const media = extractMedia(message.message ?? undefined);
   const reaction = extractReaction(message.message ?? undefined);
@@ -670,6 +676,7 @@ function normalizeBaileysMessage(accountId: string, message: WAMessage): WhatsAp
 
   const chatType = getWhatsAppChatType(chatJid);
   const participantJid = message.key.participant ?? undefined;
+  const alternateJids = [remoteJidAlt, participantAlt].filter((value): value is string => Boolean(value));
   const sessionKey = getWhatsAppSessionKey({
     accountId,
     chatJid,
@@ -681,6 +688,7 @@ function normalizeBaileysMessage(accountId: string, message: WAMessage): WhatsAp
     chatJid,
     chatType,
     senderJid: participantJid ?? chatJid,
+    ...(alternateJids.length > 0 ? { alternateJids } : {}),
     ...(participantJid ? { participantJid } : {}),
     sessionKey,
     chatId: chatJid,
@@ -691,6 +699,11 @@ function normalizeBaileysMessage(accountId: string, message: WAMessage): WhatsAp
     ...(reaction ? { reaction } : {}),
     timestamp: normalizeTimestamp(message.messageTimestamp),
   };
+}
+
+function readMessageKeyString(key: WAMessage["key"], property: string) {
+  const value = (key as unknown as Record<string, unknown>)[property];
+  return typeof value === "string" && value.trim() ? value.trim() : undefined;
 }
 
 function extractText(message: WAMessageContent | null | undefined): string {
